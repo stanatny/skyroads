@@ -9,3 +9,7 @@
 
 # Logs
 *.log
+
+# 覆盖全局 ~/.gitignore 中的 docs/ 规则：本项目需要跟踪设计文档
+!docs/
+!docs/**
