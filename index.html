@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太空跳跳车 SkyRoads</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { display: flex; align-items: center; justify-content: center; font-family: 'Courier New', monospace; }
+  #game { display: block; background: #000018; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+'use strict';
+
+// ===== 1. 常量配置 CONFIG =====
+const CONFIG = {
+  // 渲染
+  RENDER_DISTANCE: 200,        // 渲染多少个 segment（前方）
+  SEGMENT_LENGTH: 50,          // 单个 segment 的 z 长度（世界单位）
+  ROAD_WIDTH: 2200,            // 跑道总宽度（世界单位，3 车道合计）
+  LANES: 3,                    // 车道数
+  CAMERA_HEIGHT: 1200,         // 相机离跑道高度
+  CAMERA_DEPTH: 0.84,          // 相机焦距倒数相关，影响视野
+  // 物理
+  INITIAL_SPEED: 0,            // 初始速度（segment/秒）
+  MAX_SPEED: 24,               // 最大速度（segment/秒）
+  ACCEL: 1.8,                  // 自动加速度（segment/秒²）
+  LANE_SWITCH_TIME: 0.18,      // 变道耗时（秒）
+  JUMP_VELOCITY: 9000,         // 跳跃初速度（世界单位/秒）
+  GRAVITY: 24000,              // 重力（世界单位/秒²）
+  // 燃料
+  FUEL_MAX: 100,
+  FUEL_DRAIN_RATE: 4.5,        // 每秒消耗
+  FUEL_PICKUP: 30,             // 每个胶囊补充
+  // 赛道生成
+  TRACK_INITIAL_SEGMENTS: 600,
+};
+
+// ===== 2. 游戏状态 STATE =====
+const STATE = {
+  mode: 'MENU',                // 'MENU' | 'PLAYING' | 'GAMEOVER'
+  canvas: null,
+  ctx: null,
+  width: 0,
+  height: 0,
+  // 玩家
+  position: 0,                 // 世界 z 位置（沿跑道前进方向，递增）
+  speed: 0,                    // 当前速度（segment/秒）
+  lane: 1,                     // 当前车道索引（0=左,1=中,2=右）
+  laneFrom: 1,                 // 变道起始车道
+  laneTo: 1,                   // 变道目标车道
+  laneT: 1,                    // 变道插值进度 0..1（1=完成）
+  playerY: 0,                  // 玩家离跑道高度（跳跃用）
+  playerVY: 0,                 // 玩家垂直速度
+  // 燃料/计分
+  fuel: CONFIG.FUEL_MAX,
+  distance: 0,                 // 累计前进距离（米）
+  elapsed: 0,                  // 本局用时（秒）
+  best: 0,                     // 最佳距离（localStorage）
+  deathReason: null,
+  // 赛道
+  track: [],                   // segment 数组
+  // 时间
+  lastTime: 0,
+  fps: 0,
+  fpsAccum: 0,
+  fpsFrames: 0,
+};
+
+// ===== 10. 主循环 =====
+function loop(now) {
+  if (!STATE.lastTime) STATE.lastTime = now;
+  const dt = Math.min((now - STATE.lastTime) / 1000, 0.05); // 限制单帧最大 50ms
+  STATE.lastTime = now;
+
+  // FPS 统计
+  STATE.fpsAccum += dt;
+  STATE.fpsFrames++;
+  if (STATE.fpsAccum >= 0.5) {
+    STATE.fps = Math.round(STATE.fpsFrames / STATE.fpsAccum);
+    STATE.fpsAccum = 0;
+    STATE.fpsFrames = 0;
+  }
+
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+// 占位：update/render 后续任务实现
+function update(dt) {}
+function render() {
+  const ctx = STATE.ctx;
+  ctx.fillStyle = '#000018';
+  ctx.fillRect(0, 0, STATE.width, STATE.height);
+  // 临时 FPS 显示
+  ctx.fillStyle = '#0f0';
+  ctx.font = '16px monospace';
+  ctx.fillText('FPS: ' + STATE.fps + '  mode=' + STATE.mode, 12, 22);
+}
+
+// ===== 11. 启动 =====
+function init() {
+  STATE.canvas = document.getElementById('game');
+  STATE.ctx = STATE.canvas.getContext('2d');
+  function resize() {
+    STATE.width = STATE.canvas.width = window.innerWidth;
+    STATE.height = STATE.canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  STATE.best = parseFloat(localStorage.getItem('skyroads_best') || '0') || 0;
+  requestAnimationFrame(loop);
+}
+init();
+</script>
+</body>
+</html>
