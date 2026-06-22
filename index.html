@@ -38,6 +38,8 @@ const CONFIG = {
   FUEL_PICKUP: 30,             // 每个胶囊补充
   // 赛道生成
   TRACK_INITIAL_SEGMENTS: 600,
+  // 碰撞
+  GAP_SAFE_HEIGHT: 200,        // 跳跃高度高于此值可通过 GAP
 };
 
 // ===== 2. 游戏状态 STATE =====
@@ -48,22 +50,22 @@ const STATE = {
   width: 0,
   height: 0,
   // 玩家
-  position: 0,                 // 世界 z 位置（沿跑道前进方向，递增）
-  speed: 0,                    // 当前速度（segment/秒）
-  lane: 1,                     // 当前车道索引（0=左,1=中,2=右）
-  laneFrom: 1,                 // 变道起始车道
-  laneTo: 1,                   // 变道目标车道
-  laneT: 1,                    // 变道插值进度 0..1（1=完成）
-  playerY: 0,                  // 玩家离跑道高度（跳跃用）
-  playerVY: 0,                 // 玩家垂直速度
+  position: 0,
+  speed: 0,
+  lane: 1,
+  laneFrom: 1,
+  laneTo: 1,
+  laneT: 1,
+  playerY: 0,
+  playerVY: 0,
   // 燃料/计分
   fuel: CONFIG.FUEL_MAX,
-  distance: 0,                 // 累计前进距离（米）
-  elapsed: 0,                  // 本局用时（秒）
-  best: 0,                     // 最佳距离（localStorage）
+  distance: 0,
+  elapsed: 0,
+  best: 0,
   deathReason: null,
   // 赛道
-  track: [],                   // segment 数组
+  track: [],
   // 时间
   lastTime: 0,
   fps: 0,
@@ -71,13 +73,524 @@ const STATE = {
   fpsFrames: 0,
 };
 
+// ===== 3. 输入处理 Input =====
+const KEYS = {};
+window.addEventListener('keydown', (e) => {
+  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+  if (KEYS[e.key]) return;   // 抑制按键重复
+  KEYS[e.key] = true;
+
+  // 菜单屏：开始游戏
+  if (STATE.mode === 'MENU') {
+    if (e.key === ' ' || e.key === 'Enter') startGame();
+    return;
+  }
+  // 结束屏：重开 / 回菜单
+  if (STATE.mode === 'GAMEOVER') {
+    if (e.key === ' ' || e.key === 'Enter') startGame();
+    else if (e.key === 'Escape') gotoMenu();
+    return;
+  }
+  // 游戏中
+  if (STATE.mode !== 'PLAYING') return;
+  switch (e.key) {
+    case 'ArrowLeft':
+    case 'a': case 'A':
+      trySwitchLane(-1); break;
+    case 'ArrowRight':
+    case 'd': case 'D':
+      trySwitchLane(1); break;
+    case ' ':
+    case 'ArrowUp':
+    case 'w': case 'W':
+      tryJump(); break;
+  }
+});
+window.addEventListener('keyup', (e) => { KEYS[e.key] = false; });
+
+function trySwitchLane(dir) {
+  if (STATE.laneT < 1) return;            // 当前变道未完成
+  const target = STATE.lane + dir;
+  if (target < 0 || target >= CONFIG.LANES) return;
+  STATE.laneFrom = STATE.lane;
+  STATE.laneTo = target;
+  STATE.lane = target;
+  STATE.laneT = 0;
+}
+
+function tryJump() {
+  if (STATE.playerY <= 0 && STATE.playerVY <= 0) {
+    STATE.playerVY = CONFIG.JUMP_VELOCITY;
+    STATE.playerY = 0.01;
+  }
+}
+
+// ===== 4. 赛道生成 Track =====
+const LANE_TYPE = { ROAD: 'ROAD', GAP: 'GAP', WALL: 'WALL', FUEL: 'FUEL' };
+
+// 生成单个 segment：依据前一段 + 难度，保证可解性
+function generateSegment(index, prev) {
+  const lanes = [LANE_TYPE.ROAD, LANE_TYPE.ROAD, LANE_TYPE.ROAD];
+  // 起跑前 20 段全 ROAD，给玩家热身（偶有燃料）
+  if (index < 20) {
+    if (index > 5 && Math.random() < 0.15) {
+      lanes[Math.floor(Math.random() * 3)] = LANE_TYPE.FUEL;
+    }
+    return { index, lanes };
+  }
+
+  const difficulty = Math.min(1, (index - 20) / 600);
+
+  // 上一段若有 WALL，本段强制全 ROAD（反应间隔，避免连续封锁）
+  if (prev && prev.lanes.some(t => t === LANE_TYPE.WALL)) {
+    if (Math.random() < 0.2) {
+      lanes[Math.floor(Math.random() * 3)] = LANE_TYPE.FUEL;
+    }
+    return { index, lanes };
+  }
+
+  const r = Math.random();
+  if (r < 0.18) {
+    // 障碍段：1-2 条车道 WALL，至少留 1 条非墙
+    const wallCount = (difficulty > 0.5 && Math.random() < 0.3) ? 2 : 1;
+    const idxs = [0, 1, 2].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < wallCount; i++) lanes[idxs[i]] = LANE_TYPE.WALL;
+  } else if (r < 0.32) {
+    // 缺口段：1-2 条车道 GAP，至少留 1 条 ROAD/FUEL
+    const gapCount = (difficulty > 0.6 && Math.random() < 0.4) ? 2 : 1;
+    const idxs = [0, 1, 2].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < gapCount; i++) lanes[idxs[i]] = LANE_TYPE.GAP;
+  } else if (r < 0.45) {
+    // 燃料段：1 条车道 FUEL
+    lanes[Math.floor(Math.random() * 3)] = LANE_TYPE.FUEL;
+  }
+  return { index, lanes };
+}
+
+function buildTrack() {
+  const track = [];
+  for (let i = 0; i < CONFIG.TRACK_INITIAL_SEGMENTS; i++) {
+    track.push(generateSegment(i, track[i - 1]));
+  }
+  return track;
+}
+
+// 动态扩展赛道：玩家接近尾部时追加（无限）
+function extendTrack() {
+  while (STATE.track.length < STATE.position + CONFIG.RENDER_DISTANCE + 50) {
+    const i = STATE.track.length;
+    STATE.track.push(generateSegment(i, STATE.track[i - 1]));
+  }
+}
+
+// ===== 5. 伪 3D 渲染 Render =====
+
+// 投影：世界坐标 -> 屏幕坐标
+function project(worldX, worldY, zRel) {
+  if (zRel <= 1) return { x: 0, y: 0, scale: 0, visible: false };
+  const scale = CONFIG.CAMERA_DEPTH / zRel;
+  const w = STATE.width, h = STATE.height;
+  const screenX = w / 2 + scale * worldX * w / 2;
+  const screenY = h / 2 - scale * (worldY - CONFIG.CAMERA_HEIGHT) * h / 2;
+  return { x: screenX, y: screenY, scale: scale, visible: true };
+}
+
+// 车道中心 worldX
+function laneCenterX(lane) {
+  const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
+  return (lane - (CONFIG.LANES - 1) / 2) * laneWidth;
+}
+
+// 玩家当前 worldX（含变道插值）
+function playerWorldX() {
+  const from = laneCenterX(STATE.laneFrom);
+  const to = laneCenterX(STATE.laneTo);
+  return from + (to - from) * STATE.laneT;
+}
+
+// 颜色明暗调整
+function shade(color, factor) {
+  const r = Math.min(255, Math.round(parseInt(color.slice(1, 3), 16) * factor));
+  const g = Math.min(255, Math.round(parseInt(color.slice(3, 5), 16) * factor));
+  const b = Math.min(255, Math.round(parseInt(color.slice(5, 7), 16) * factor));
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+
+function colorForType(type, index) {
+  const baseDark = (Math.floor(index / 3) % 2 === 0) ? '#3a3a55' : '#34344e';
+  switch (type) {
+    case LANE_TYPE.ROAD: return baseDark;
+    case LANE_TYPE.FUEL: return baseDark;
+    case LANE_TYPE.GAP:  return '#05050d';
+    case LANE_TYPE.WALL: return baseDark;
+    default: return baseDark;
+  }
+}
+
+// 渲染跑道：从远到近画每个 segment 的 3 条车道梯形
+function renderTrack(ctx) {
+  const track = STATE.track;
+  const basePos = STATE.position;
+  const segLen = CONFIG.SEGMENT_LENGTH;
+  const halfRoad = CONFIG.ROAD_WIDTH / 2;
+  const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
+
+  const startIdx = Math.floor(basePos) + CONFIG.RENDER_DISTANCE;
+  const endIdx = Math.floor(basePos);
+
+  for (let i = startIdx; i >= endIdx; i--) {
+    if (i < 0 || i >= track.length) continue;
+    const seg = track[i];
+    const zNear = (i - basePos) * segLen;
+    const zFar = (i + 1 - basePos) * segLen;
+    if (zNear <= 1) continue;
+
+    const nearLeft = project(-halfRoad, 0, zNear);
+    const nearRight = project(halfRoad, 0, zNear);
+
+    // 3 条车道分别上色
+    for (let lane = 0; lane < CONFIG.LANES; lane++) {
+      const type = seg.lanes[lane];
+      const color = colorForType(type, i);
+      const xL_near = -halfRoad + lane * laneWidth;
+      const xR_near = -halfRoad + (lane + 1) * laneWidth;
+      const p1 = project(xL_near, 0, zNear);
+      const p2 = project(xR_near, 0, zNear);
+      const p3 = project(xR_near, 0, zFar);
+      const p4 = project(xL_near, 0, zFar);
+      if (!p1.visible || !p3.visible) continue;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.lineTo(p4.x, p4.y);
+      ctx.closePath();
+      ctx.fill();
+      // 车道分隔线
+      if (lane > 0) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p4.x, p4.y);
+        ctx.stroke();
+      }
+    }
+
+    // 横向跑道边线（增强纵深感）
+    if (i % 4 === 0) {
+      ctx.strokeStyle = 'rgba(120,200,255,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(nearLeft.x, nearLeft.y);
+      ctx.lineTo(nearRight.x, nearRight.y);
+      ctx.stroke();
+    }
+  }
+
+  // 第二遍：WALL/FUEL 立体块（从远到近）
+  for (let i = startIdx; i >= endIdx; i--) {
+    if (i < 0 || i >= track.length) continue;
+    const seg = track[i];
+    const zNear = (i - basePos) * segLen;
+    const zFar = (i + 1 - basePos) * segLen;
+    if (zNear <= 1) continue;
+    for (let lane = 0; lane < CONFIG.LANES; lane++) {
+      const type = seg.lanes[lane];
+      if (type === LANE_TYPE.WALL) {
+        renderBlock(ctx, lane, zNear, zFar, '#aa2233', 700);
+      } else if (type === LANE_TYPE.FUEL) {
+        renderBlock(ctx, lane, zNear, zFar, '#22ddaa', 500);
+      }
+    }
+  }
+}
+
+// 立方块（WALL 或 FUEL）
+function renderBlock(ctx, lane, zNear, zFar, color, height) {
+  const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
+  const halfRoad = CONFIG.ROAD_WIDTH / 2;
+  const xL = -halfRoad + lane * laneWidth + laneWidth * 0.1;
+  const xR = -halfRoad + (lane + 1) * laneWidth - laneWidth * 0.1;
+  const b1 = project(xL, 0, zNear);
+  const b2 = project(xR, 0, zNear);
+  const b3 = project(xR, 0, zFar);
+  const b4 = project(xL, 0, zFar);
+  const t1 = project(xL, height, zNear);
+  const t2 = project(xR, height, zNear);
+  const t3 = project(xR, height, zFar);
+  const t4 = project(xL, height, zFar);
+  if (!b1.visible || !t1.visible) return;
+  // 正面
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(b1.x, b1.y); ctx.lineTo(b2.x, b2.y);
+  ctx.lineTo(t2.x, t2.y); ctx.lineTo(t1.x, t1.y);
+  ctx.closePath(); ctx.fill();
+  // 顶面
+  ctx.fillStyle = shade(color, 1.3);
+  ctx.beginPath();
+  ctx.moveTo(t1.x, t1.y); ctx.lineTo(t2.x, t2.y);
+  ctx.lineTo(t3.x, t3.y); ctx.lineTo(t4.x, t4.y);
+  ctx.closePath(); ctx.fill();
+}
+
+// ===== 5b. 玩家飞船渲染 =====
+function renderPlayer(ctx) {
+  const fromLaneX = (STATE.laneFrom - 1);
+  const toLaneX = (STATE.laneTo - 1);
+  const laneX = fromLaneX + (toLaneX - fromLaneX) * STATE.laneT;
+  const cx = STATE.width / 2 + laneX * STATE.width * 0.12;
+  const cy = STATE.height * 0.78 - STATE.playerY * 0.02;
+
+  // 阴影
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(cx, STATE.height * 0.82, 40, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 飞船主体
+  ctx.fillStyle = '#e8e8f0';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 30);
+  ctx.lineTo(cx - 38, cy + 18);
+  ctx.lineTo(cx - 14, cy + 10);
+  ctx.lineTo(cx - 14, cy + 22);
+  ctx.lineTo(cx + 14, cy + 22);
+  ctx.lineTo(cx + 14, cy + 10);
+  ctx.lineTo(cx + 38, cy + 18);
+  ctx.closePath();
+  ctx.fill();
+  // 驾驶舱
+  ctx.fillStyle = '#3aa0ff';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 18);
+  ctx.lineTo(cx - 12, cy + 2);
+  ctx.lineTo(cx + 12, cy + 2);
+  ctx.closePath();
+  ctx.fill();
+  // 引擎尾焰
+  ctx.fillStyle = '#ff8833';
+  ctx.beginPath();
+  ctx.moveTo(cx - 10, cy + 22);
+  ctx.lineTo(cx, cy + 22 + 16 + Math.random() * 8);
+  ctx.lineTo(cx + 10, cy + 22);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// ===== 6. 背景星空 Background =====
+const STARS = (function () {
+  const arr = [];
+  let seed = 12345;
+  function rand() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+  for (let i = 0; i < 220; i++) {
+    arr.push({ x: rand(), y: rand() * 0.7, r: rand() * 1.4 + 0.3, b: rand() * 0.6 + 0.4 });
+  }
+  return arr;
+})();
+
+function renderBackground(ctx) {
+  const w = STATE.width, h = STATE.height;
+  const horizon = h * 0.42;
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#0a0a2e');
+  grad.addColorStop(0.42, '#1a1a4e');
+  grad.addColorStop(0.42, '#10081a');
+  grad.addColorStop(1, '#000005');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  for (const s of STARS) {
+    ctx.globalAlpha = s.b;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(s.x * w, s.y * horizon, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ===== 7. 物理与碰撞 Physics =====
+function updatePhysics(dt) {
+  // 前进
+  STATE.speed = Math.min(CONFIG.MAX_SPEED, STATE.speed + CONFIG.ACCEL * dt);
+  STATE.position += STATE.speed * dt;
+  STATE.distance += STATE.speed * dt * 10;
+
+  // 变道插值
+  if (STATE.laneT < 1) {
+    STATE.laneT = Math.min(1, STATE.laneT + dt / CONFIG.LANE_SWITCH_TIME);
+  }
+
+  // 跳跃物理
+  if (STATE.playerY > 0 || STATE.playerVY > 0) {
+    STATE.playerVY -= CONFIG.GRAVITY * dt;
+    STATE.playerY += STATE.playerVY * dt;
+    if (STATE.playerY <= 0) {
+      STATE.playerY = 0;
+      STATE.playerVY = 0;
+    }
+  }
+
+  // 燃料消耗
+  STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_DRAIN_RATE * dt);
+  STATE.elapsed += dt;
+
+  extendTrack();
+  checkCollisions();
+}
+
+// 玩家当前实际车道索引（0..2）
+function currentLaneIndex() {
+  const laneF = STATE.laneFrom + (STATE.laneTo - STATE.laneFrom) * STATE.laneT;
+  return Math.max(0, Math.min(CONFIG.LANES - 1, Math.round(laneF)));
+}
+
+function pickupFuel(seg, laneIdx) {
+  seg.lanes[laneIdx] = LANE_TYPE.ROAD;
+  STATE.fuel = Math.min(CONFIG.FUEL_MAX, STATE.fuel + CONFIG.FUEL_PICKUP);
+}
+
+// 每帧碰撞检测
+function checkCollisions() {
+  if (STATE.fuel <= 0) { die('fuel'); return; }
+  const segIdx = Math.floor(STATE.position);
+  const seg = STATE.track[segIdx];
+  if (!seg) return;
+  const laneIdx = currentLaneIndex();
+  const type = seg.lanes[laneIdx];
+
+  if (type === LANE_TYPE.WALL) { die('wall'); return; }
+  if (type === LANE_TYPE.FUEL) { pickupFuel(seg, laneIdx); return; }
+  if (type === LANE_TYPE.GAP) {
+    if (STATE.playerY < CONFIG.GAP_SAFE_HEIGHT) { die('gap'); return; }
+  }
+}
+
+// ===== 8. 状态机 GameState =====
+function resetGame() {
+  STATE.position = 0;
+  STATE.speed = 0;
+  STATE.lane = 1;
+  STATE.laneFrom = 1;
+  STATE.laneTo = 1;
+  STATE.laneT = 1;
+  STATE.playerY = 0;
+  STATE.playerVY = 0;
+  STATE.fuel = CONFIG.FUEL_MAX;
+  STATE.distance = 0;
+  STATE.elapsed = 0;
+  STATE.deathReason = null;
+  STATE.track = buildTrack();
+}
+
+function startGame() {
+  resetGame();
+  STATE.mode = 'PLAYING';
+}
+
+function gotoMenu() {
+  STATE.mode = 'MENU';
+}
+
+function gotoGameOver() {
+  STATE.mode = 'GAMEOVER';
+}
+
+function die(reason) {
+  if (STATE.mode !== 'PLAYING') return;
+  gotoGameOver();
+  STATE.deathReason = reason;
+  if (STATE.distance > STATE.best) {
+    STATE.best = STATE.distance;
+    localStorage.setItem('skyroads_best', String(STATE.best));
+  }
+}
+
+// ===== 9. UI (HUD / Menu / GameOver) =====
+function renderHUD(ctx) {
+  // 燃料条
+  const fx = 20, fy = 20, fw = 200, fh = 20;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(fx, fy, fw, fh);
+  const ratio = STATE.fuel / CONFIG.FUEL_MAX;
+  ctx.fillStyle = ratio > 0.3 ? '#33cc66' : (ratio > 0.15 ? '#ffcc33' : '#cc3333');
+  ctx.fillRect(fx, fy, fw * ratio, fh);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(fx, fy, fw, fh);
+  ctx.fillStyle = '#fff';
+  ctx.font = '12px monospace';
+  ctx.fillText('FUEL', fx + 4, fy + 14);
+
+  // 距离/速度/时间/最佳
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#9fe';
+  ctx.font = '16px monospace';
+  ctx.fillText('距离 ' + Math.floor(STATE.distance) + ' m', STATE.width - 16, 24);
+  ctx.fillText('速度 ' + STATE.speed.toFixed(1), STATE.width - 16, 44);
+  ctx.fillText('用时 ' + STATE.elapsed.toFixed(1) + ' s', STATE.width - 16, 64);
+  ctx.fillText('最佳 ' + Math.floor(STATE.best) + ' m', STATE.width - 16, 84);
+  ctx.textAlign = 'left';
+}
+
+function renderMenu(ctx) {
+  ctx.fillStyle = 'rgba(5,5,20,0.55)';
+  ctx.fillRect(0, 0, STATE.width, STATE.height);
+  const cx = STATE.width / 2, cy = STATE.height / 2;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#7fdfff';
+  ctx.font = 'bold 64px monospace';
+  ctx.fillText('太空跳跳车', cx, cy - 60);
+  ctx.font = '24px monospace';
+  ctx.fillStyle = '#aef';
+  ctx.fillText('SKYROADS', cx, cy - 20);
+  ctx.fillStyle = '#fff';
+  ctx.font = '20px monospace';
+  ctx.fillText('按 空格 开始', cx, cy + 40);
+  ctx.fillStyle = '#89a';
+  ctx.font = '14px monospace';
+  ctx.fillText('← → 变道    空格 跳跃', cx, cy + 80);
+  if (STATE.best > 0) {
+    ctx.fillText('最佳记录: ' + Math.floor(STATE.best) + ' m', cx, cy + 110);
+  }
+  ctx.textAlign = 'left';
+}
+
+function renderGameOver(ctx) {
+  ctx.fillStyle = 'rgba(40,0,0,0.55)';
+  ctx.fillRect(0, 0, STATE.width, STATE.height);
+  const cx = STATE.width / 2, cy = STATE.height / 2;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff6677';
+  ctx.font = 'bold 56px monospace';
+  ctx.fillText('GAME OVER', cx, cy - 70);
+
+  const reasons = { wall: '撞上障碍物', gap: '坠入虚空', fuel: '燃料耗尽' };
+  ctx.fillStyle = '#fcc';
+  ctx.font = '22px monospace';
+  ctx.fillText(reasons[STATE.deathReason] || '坠毁', cx, cy - 30);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = '22px monospace';
+  ctx.fillText('距离 ' + Math.floor(STATE.distance) + ' m', cx, cy + 10);
+  ctx.fillText('用时 ' + STATE.elapsed.toFixed(1) + ' s', cx, cy + 40);
+  ctx.fillStyle = STATE.distance >= STATE.best ? '#ffcc33' : '#9fe';
+  ctx.fillText('最佳 ' + Math.floor(STATE.best) + ' m' + (STATE.distance >= STATE.best ? '  ★ 新纪录!' : ''), cx, cy + 70);
+
+  ctx.fillStyle = '#aef';
+  ctx.font = '18px monospace';
+  ctx.fillText('按 空格 重新开始    按 Esc 回主菜单', cx, cy + 120);
+  ctx.textAlign = 'left';
+}
+
 // ===== 10. 主循环 =====
 function loop(now) {
   if (!STATE.lastTime) STATE.lastTime = now;
-  const dt = Math.min((now - STATE.lastTime) / 1000, 0.05); // 限制单帧最大 50ms
+  const dt = Math.min((now - STATE.lastTime) / 1000, 0.05);
   STATE.lastTime = now;
 
-  // FPS 统计
   STATE.fpsAccum += dt;
   STATE.fpsFrames++;
   if (STATE.fpsAccum >= 0.5) {
@@ -91,16 +604,18 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-// 占位：update/render 后续任务实现
-function update(dt) {}
+function update(dt) {
+  if (STATE.mode === 'PLAYING') updatePhysics(dt);
+}
+
 function render() {
   const ctx = STATE.ctx;
-  ctx.fillStyle = '#000018';
-  ctx.fillRect(0, 0, STATE.width, STATE.height);
-  // 临时 FPS 显示
-  ctx.fillStyle = '#0f0';
-  ctx.font = '16px monospace';
-  ctx.fillText('FPS: ' + STATE.fps + '  mode=' + STATE.mode, 12, 22);
+  renderBackground(ctx);
+  renderTrack(ctx);
+  renderPlayer(ctx);
+  if (STATE.mode === 'PLAYING') renderHUD(ctx);
+  if (STATE.mode === 'MENU') renderMenu(ctx);
+  if (STATE.mode === 'GAMEOVER') renderGameOver(ctx);
 }
 
 // ===== 11. 启动 =====
@@ -114,6 +629,7 @@ function init() {
   window.addEventListener('resize', resize);
   resize();
   STATE.best = parseFloat(localStorage.getItem('skyroads_best') || '0') || 0;
+  STATE.track = buildTrack();
   requestAnimationFrame(loop);
 }
 init();
