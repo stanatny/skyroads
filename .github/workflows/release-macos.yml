@@ -1,0 +1,55 @@
+name: Build macOS release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Validate web game
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const vm = require("vm");
+          const html = fs.readFileSync("index.html", "utf8");
+          const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
+          if (scripts.length === 0) throw new Error("No script blocks found");
+          scripts.forEach((match, index) => {
+            new vm.Script(match[1], { filename: `index.html#script-${index + 1}` });
+          });
+          console.log(`Validated ${scripts.length} script block(s)`);
+          NODE
+
+      - name: Build and verify universal app
+        run: |
+          bash tests/app-universal-smoke.sh
+          bash tests/app-signature-smoke.sh
+          plutil -lint "太空跳跳车.app/Contents/Info.plist"
+
+      - name: Package app
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          archive="SkyRoads-macOS-${RELEASE_TAG}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "太空跳跳车.app" "$archive"
+          shasum -a 256 "$archive"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$RELEASE_TAG" "SkyRoads-macOS-${RELEASE_TAG}.zip" --clobber

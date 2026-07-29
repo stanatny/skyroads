@@ -1,5 +1,7 @@
 # macOS
 .DS_Store
+*.app/
+app/AppIcon.iconset/
 
 # Editor
 .vscode/
