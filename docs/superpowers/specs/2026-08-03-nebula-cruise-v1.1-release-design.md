@@ -1,7 +1,7 @@
 # Nebula Cruise V1.1 Release — Design Specification
 
 **Date:** 2026-08-03
-**Status:** Awaiting written-spec confirmation
+**Status:** Approved for implementation
 **Branch:** `feat/stellar-command-polish`
 **Base release:** `v1.0.0`
 **Target release:** `v1.1.0`

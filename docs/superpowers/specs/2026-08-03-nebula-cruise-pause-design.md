@@ -1,7 +1,7 @@
 # Nebula Cruise Pause Feature — Design Specification
 
 **Date:** 2026-08-03
-**Status:** Awaiting written-spec confirmation
+**Status:** Approved for implementation
 **Branch:** `feat/stellar-command-polish`
 **Base:** `12829e2`
 
