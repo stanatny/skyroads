@@ -1,0 +1,8 @@
+{
+  "name": "nebula-cruise",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "for file in src/*.js; do node --check \"$file\"; done"
+  }
+}

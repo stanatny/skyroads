@@ -21,17 +21,8 @@ jobs:
 
       - name: Validate web game
         run: |
-          node - <<'NODE'
-          const fs = require("fs");
-          const vm = require("vm");
-          const html = fs.readFileSync("index.html", "utf8");
-          const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
-          if (scripts.length === 0) throw new Error("No script blocks found");
-          scripts.forEach((match, index) => {
-            new vm.Script(match[1], { filename: `index.html#script-${index + 1}` });
-          });
-          console.log(`Validated ${scripts.length} script block(s)`);
-          NODE
+          npm test
+          npm run check
 
       - name: Build and verify universal app
         run: |

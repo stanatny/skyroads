@@ -28,6 +28,8 @@ lipo -create \
 
 echo "==> 拷贝游戏本体与元数据"
 cp "$ROOT/index.html" "$BUNDLE_RES/index.html"
+cp -R "$ROOT/src" "$BUNDLE_RES/src"
+cp -R "$ROOT/styles" "$BUNDLE_RES/styles"
 cp "$ROOT/app/Info.plist" "$APP/Contents/Info.plist"
 
 # 图标（可选）：有 AppIcon.png 则生成 icns
