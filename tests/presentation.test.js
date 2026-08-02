@@ -345,11 +345,12 @@ test('nested dialogs isolate Canvas and restore its prior accessibility and focu
   controller.destroy();
 });
 
-test('language and audio utilities restore gameplay focus before the next movement key', () => {
+test('language music and SFX utilities restore gameplay focus before the next movement key', () => {
   const documentObject = makeFakeDocument();
   const canvas = documentObject.createElement('canvas');
   const languageButton = documentObject.createElement('button');
-  const audioButton = documentObject.createElement('button');
+  const musicButton = documentObject.createElement('button');
+  const sfxButton = documentObject.createElement('button');
   const dialog = documentObject.createElement('section');
   const dialogButton = documentObject.createElement('button');
   dialog.hidden = true;
@@ -358,11 +359,12 @@ test('language and audio utilities restore gameplay focus before the next moveme
   const calls = [];
   const controller = bindOverlayActions({
     documentObject,
-    elements: { canvas, languageButton, audioButton },
+    elements: { canvas, languageButton, musicButton, sfxButton },
     actions: {
       getMode: () => mode,
       language() { calls.push('language'); },
-      audio() { calls.push('audio'); },
+      music() { calls.push('music'); },
+      sfx() { calls.push('sfx'); },
     },
   });
 
@@ -382,16 +384,20 @@ test('language and audio utilities restore gameplay focus before the next moveme
   assert.equal(documentObject.activeElement, canvas);
   assert.equal(pressMovementKey('ArrowRight'), 4);
 
-  audioButton.focus();
-  audioButton.dispatch('click');
+  musicButton.focus();
+  musicButton.dispatch('click');
   assert.equal(documentObject.activeElement, canvas);
   assert.equal(pressMovementKey('ArrowLeft'), 2);
+
+  sfxButton.focus();
+  sfxButton.dispatch('click');
+  assert.equal(documentObject.activeElement, canvas);
 
   controller.openDialog(dialog, canvas);
   languageButton.dispatch('click');
   assert.equal(documentObject.activeElement, dialogButton);
   assert.equal(pressMovementKey('ArrowRight'), 3);
-  assert.deepEqual(calls, ['language', 'audio', 'language']);
+  assert.deepEqual(calls, ['language', 'music', 'sfx', 'language']);
   mode = 'MENU';
   controller.closeDialog(dialog);
   controller.destroy();
@@ -439,6 +445,7 @@ test('command center builds one semantic control tree and renders translated sta
     ariaStatus: documentObject.createElement('p'),
   };
   const ui = createCommandCenter({ documentObject, elements });
+  assert.deepEqual(elements.utilityControls.children, [ui.languageButton, ui.musicButton, ui.sfxButton]);
   assert.equal(elements.leaderboardDialog.children[0], ui.leaderboardPanel);
   assert.equal(elements.renameDialog.children[0], ui.renamePanel);
   const translator = {
@@ -484,12 +491,15 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(ui.legacyBest.hidden, false);
   assert.equal(elements.persistenceWarning.hidden, false);
   assert.equal(ui.leaderboardEmpty.hidden, false);
-  assert.equal(ui.audioButton.getAttribute('data-muted'), 'false');
-  assert.equal(ui.audioButton.getAttribute('data-music-muted'), 'false');
-  assert.equal(ui.audioButton.getAttribute('data-sfx-muted'), 'true');
-  assert.equal(ui.audioButton.getAttribute('data-audio-status'), 'ready');
-  assert.equal(ui.audioButton.getAttribute('data-audio-format'), 'ogg');
-  assert.equal(ui.audioButton.getAttribute('data-audio-decoded'), 'true');
+  assert.equal(ui.musicButton.textContent, 'settings.musicOn');
+  assert.equal(ui.musicButton.getAttribute('aria-pressed'), 'true');
+  assert.equal(ui.musicButton.getAttribute('data-muted'), 'false');
+  assert.equal(ui.sfxButton.textContent, 'settings.sfxOff');
+  assert.equal(ui.sfxButton.getAttribute('aria-pressed'), 'false');
+  assert.equal(ui.sfxButton.getAttribute('data-muted'), 'true');
+  assert.equal(elements.utilityControls.getAttribute('data-audio-status'), 'ready');
+  assert.equal(elements.utilityControls.getAttribute('data-audio-format'), 'ogg');
+  assert.equal(elements.utilityControls.getAttribute('data-audio-decoded'), 'true');
 });
 
 test('overlay buttons invoke game actions and rename submits the optional value', () => {
@@ -500,7 +510,7 @@ test('overlay buttons invoke game actions and rename submits the optional value'
     titleLeaderboardButton: button(), gameOverLeaderboardButton: button(),
     leaderboardCloseButton: button(), leaderboardRenameButton: button(),
     gameOverRenameButton: button(), renameCancelButton: button(),
-    languageButton: button(), audioButton: button(),
+    languageButton: button(), musicButton: button(), sfxButton: button(),
     renameForm: documentObject.createElement('form'),
     renameInput: documentObject.createElement('input'),
     leaderboardDialog: documentObject.createElement('section'),
@@ -519,14 +529,16 @@ test('overlay buttons invoke game actions and rename submits the optional value'
       menu() { calls.push('menu'); },
       rename(value) { calls.push(`rename:${value}`); },
       language() { calls.push('language'); },
-      audio() { calls.push('audio'); },
+      music() { calls.push('music'); },
+      sfx() { calls.push('sfx'); },
     },
   });
 
   elements.startButton.dispatch('click');
   elements.menuButton.dispatch('click');
   elements.languageButton.dispatch('click');
-  elements.audioButton.dispatch('click');
+  elements.musicButton.dispatch('click');
+  elements.sfxButton.dispatch('click');
   elements.titleLeaderboardButton.dispatch('click');
   assert.equal(elements.leaderboardDialog.hidden, false);
   elements.leaderboardRenameButton.dispatch('click');
@@ -536,7 +548,7 @@ test('overlay buttons invoke game actions and rename submits the optional value'
   elements.renameForm.dispatch('submit', { preventDefault() { submitPrevented = true; } });
 
   assert.equal(submitPrevented, true);
-  assert.deepEqual(calls, ['start', 'menu', 'language', 'audio', 'rename:  Lyra  ']);
+  assert.deepEqual(calls, ['start', 'menu', 'language', 'music', 'sfx', 'rename:  Lyra  ']);
   assert.equal(elements.renameDialog.hidden, true);
   controller.destroy();
 });

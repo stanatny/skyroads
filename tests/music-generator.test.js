@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const score = require('../assets/audio/source/nebula-cruise-score.json');
-const { exactFrameCount, renderScore, writeStereoWav } = require('../tools/generate-music.js');
+const { exactFrameCount, renderScore, writeStereoWav, defaultOutputDirectory } = require('../tools/generate-music.js');
 
 test('Nebula Cruise score keeps the approved global composition values', () => {
   assert.deepEqual(score, {
@@ -57,4 +57,10 @@ test('WAV output is stereo 16-bit PCM at 44.1 kHz with the exact frame payload',
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('default rendering uses the OS temporary directory instead of the tracked asset tree', () => {
+  const output = defaultOutputDirectory('/workspace/skyroads', '/private/tmp');
+  assert.equal(output, '/private/tmp/nebula-cruise-wav-render');
+  assert.equal(output.startsWith('/workspace/skyroads/assets/'), false);
 });

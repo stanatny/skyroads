@@ -90,3 +90,69 @@ test('startup exposes a locked adaptive-audio diagnostic without creating AudioC
   assert.equal(diagnostic.audio.status, 'locked');
   assert.equal(diagnostic.audio.decoded, false);
 });
+
+function makeAudioDiagnosticSandbox({ fetchFails = false } = {}) {
+  class FakeAudioContext {
+    constructor() { this.currentTime = 4; this.state = 'suspended'; this.destination = {}; }
+    resume() { this.state = 'running'; return Promise.resolve(); }
+    close() { this.state = 'closed'; return Promise.resolve(); }
+    createGain() {
+      return {
+        gain: { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} },
+        connect() {}, disconnect() {},
+      };
+    }
+    createBiquadFilter() {
+      return {
+        type: '', frequency: { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} },
+        connect() {}, disconnect() {},
+      };
+    }
+    createBufferSource() {
+      return { connect() {}, disconnect() {}, start() {}, stop() {}, loop: false, buffer: null };
+    }
+    decodeAudioData() { return Promise.resolve({ duration: 68.571 }); }
+  }
+  const canvas = { getContext() { return {}; }, setAttribute() {} };
+  return {
+    console,
+    navigator: { languages: ['en-US'], language: 'en-US' },
+    window: { innerWidth: 320, innerHeight: 480, addEventListener() {}, AudioContext: FakeAudioContext },
+    document: {
+      documentElement: {},
+      createElement(tag) { return tag === 'audio' ? { canPlayType() { return 'probably'; } } : {}; },
+      getElementById(id) { return id === 'game' ? canvas : null; },
+      querySelector() { return { setAttribute() {} }; },
+      addEventListener() {},
+    },
+    requestAnimationFrame() {},
+    setInterval() { return 1; },
+    fetch: async () => {
+      if (fetchFails) throw new Error('local file blocked');
+      return { ok: true, arrayBuffer: async () => ({}) };
+    },
+  };
+}
+
+async function runPostGestureDiagnostics(options) {
+  const sandbox = makeAudioDiagnosticSandbox(options);
+  vm.createContext(sandbox);
+  for (const file of ['i18n.js', 'input.js', 'audio.js', 'game.js']) {
+    vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
+  }
+  return vm.runInContext('startGame(); Skyroads.diagnostics.ready', sandbox);
+}
+
+test('diagnostics.ready waits for post-gesture adaptive decoding', async () => {
+  const diagnostic = await runPostGestureDiagnostics();
+  assert.equal(diagnostic.audio.status, 'ready');
+  assert.equal(diagnostic.audio.format, 'ogg');
+  assert.equal(diagnostic.audio.decoded, true);
+});
+
+test('diagnostics.ready resolves the terminal procedural fallback after audio failure', async () => {
+  const diagnostic = await runPostGestureDiagnostics({ fetchFails: true });
+  assert.equal(diagnostic.audio.status, 'fallback');
+  assert.equal(diagnostic.audio.format, 'procedural');
+  assert.equal(diagnostic.audio.decoded, false);
+});

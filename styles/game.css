@@ -218,7 +218,8 @@ h2 { font-size: clamp(1.5rem, 4vw, 2.4rem); }
 .secondary-action { color: var(--cyan-soft); }
 
 #language-toggle::before,
-#audio-toggle::before,
+#music-toggle::before,
+#sfx-toggle::before,
 #open-leaderboard::before,
 #game-over-leaderboard::before,
 #leaderboard-rename::before,
@@ -243,11 +244,13 @@ h2 { font-size: clamp(1.5rem, 4vw, 2.4rem); }
   -webkit-mask-image: url("../assets/icons/translate.svg");
   mask-image: url("../assets/icons/translate.svg");
 }
-#audio-toggle::before {
+#music-toggle::before,
+#sfx-toggle::before {
   -webkit-mask-image: url("../assets/icons/speaker-high.svg");
   mask-image: url("../assets/icons/speaker-high.svg");
 }
-#audio-toggle[data-muted="true"]::before {
+#music-toggle[data-muted="true"]::before,
+#sfx-toggle[data-muted="true"]::before {
   -webkit-mask-image: url("../assets/icons/speaker-slash.svg");
   mask-image: url("../assets/icons/speaker-slash.svg");
 }

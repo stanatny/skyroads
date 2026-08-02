@@ -23,6 +23,13 @@ test('translation interpolates and counts Unicode characters', () => {
   assert.equal(translator.countCharacters('Nova🚀'), 5);
 });
 
+test('music and sound-effect toggles have independent bilingual labels', () => {
+  assert.equal(createTranslator('en').t('settings.musicOn'), 'MUSIC ON');
+  assert.equal(createTranslator('en').t('settings.sfxOff'), 'SFX OFF');
+  assert.equal(createTranslator('zh-CN').t('settings.musicOff'), '音乐关闭');
+  assert.equal(createTranslator('zh-CN').t('settings.sfxOn'), '音效开启');
+});
+
 test('both production catalogs have the same non-empty IDs', () => {
   assert.deepEqual(Object.keys(MESSAGES.en).sort(), Object.keys(MESSAGES['zh-CN']).sort());
   for (const catalog of Object.values(MESSAGES)) {

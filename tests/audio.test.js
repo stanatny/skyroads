@@ -8,6 +8,7 @@ const {
   chooseStemFormat,
   validateStemDurations,
   mixForGameState,
+  keepProceduralTimelineCurrent,
   createAudioController,
 } = require('../src/audio.js');
 
@@ -66,8 +67,14 @@ test('stem changes use a 300 millisecond transition', () => {
   assert.equal(STEM_TRANSITION_SECONDS, 0.3);
 });
 
-function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null } = {}) {
-  const calls = { fetched: [], starts: [], ramps: [], resumes: 0 };
+test('muted procedural music advances its clock instead of accumulating past notes', () => {
+  assert.equal(keepProceduralTimelineCurrent({ muted: true, currentTime: 60, nextNoteTime: 0.1 }), 60.1);
+  assert.equal(keepProceduralTimelineCurrent({ muted: false, currentTime: 60, nextNoteTime: 60.08 }), 60.08);
+});
+
+function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null, startFailureAt = 0 } = {}) {
+  const calls = { fetched: [], starts: [], ramps: [], filterRamps: [], filters: [], resumes: 0, stops: 0, disconnects: 0, closes: 0 };
+  let startAttempts = 0;
   class FakeAudioContext {
     constructor() {
       this.currentTime = 10;
@@ -75,6 +82,7 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
       this.destination = {};
     }
     resume() { calls.resumes++; this.state = 'running'; return Promise.resolve(); }
+    close() { calls.closes++; this.state = 'closed'; return Promise.resolve(); }
     createGain() {
       return {
         gain: {
@@ -83,14 +91,33 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
           setValueAtTime(value, time) { calls.ramps.push(['set', value, time]); },
           linearRampToValueAtTime(value, time) { calls.ramps.push(['ramp', value, time]); },
         },
-        connect() {},
+        connect() {}, disconnect() { calls.disconnects++; },
       };
+    }
+    createBiquadFilter() {
+      const filter = {
+        type: '',
+        frequency: {
+          value: 0,
+          cancelScheduledValues() {},
+          setValueAtTime() {},
+          linearRampToValueAtTime(value, time) { calls.filterRamps.push([value, time]); },
+        },
+        connect() {}, disconnect() { calls.disconnects++; },
+      };
+      calls.filters.push(filter);
+      return filter;
     }
     createBufferSource() {
       return {
         loop: false,
-        connect() {},
-        start(time) { calls.starts.push(time); },
+        connect() {}, disconnect() { calls.disconnects++; },
+        start(time) {
+          startAttempts++;
+          if (startFailureAt === startAttempts) throw new Error('start failed');
+          calls.starts.push(time);
+        },
+        stop() { calls.stops++; },
       };
     }
     decodeAudioData(arrayBuffer) {
@@ -162,6 +189,27 @@ test('decode or duration failure falls back without rejecting game startup', asy
   assert.equal(controller.getState().decoded, false);
 });
 
+test('partial source startup failure stops and disconnects adaptive nodes before one fallback', async () => {
+  const harness = makeAudioHarness({ startFailureAt: 2 });
+  let fallbacks = 0;
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    proceduralFallback() { fallbacks++; },
+  });
+
+  await controller.unlock();
+
+  assert.equal(fallbacks, 1);
+  assert.equal(harness.calls.starts.length, 1);
+  assert.ok(harness.calls.stops >= 1, 'the already-started source must be stopped');
+  assert.ok(harness.calls.disconnects >= 4, 'created sources, gains, and bus must be disconnected');
+  assert.equal(harness.calls.closes, 1, 'the failed adaptive context must be closed');
+  assert.equal(controller.getState().status, 'fallback');
+});
+
 test('game state updates ramp every stem to its mix over exactly 300 milliseconds', async () => {
   const harness = makeAudioHarness();
   const controller = createAudioController({
@@ -177,6 +225,29 @@ test('game state updates ramp every stem to its mix over exactly 300 millisecond
 
   assert.deepEqual(harness.calls.ramps.filter(([kind]) => kind === 'ramp').map(([, value, time]) => [value, time]), [
     [1, 10.3], [0.72, 10.3], [0.82, 10.3],
+  ]);
+});
+
+test('master low-pass brightens for speed danger and boost over the same 300 milliseconds', async () => {
+  const harness = makeAudioHarness();
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+  await controller.unlock();
+  harness.calls.filterRamps.length = 0;
+
+  controller.setGameState({ mode: 'PLAYING', speedRatio: 0.75, danger: false, boost: false });
+  controller.setGameState({ mode: 'PLAYING', speedRatio: 0.2, danger: false, boost: false });
+  controller.setGameState({ mode: 'PLAYING', speedRatio: 0.2, danger: true, boost: false });
+  controller.setGameState({ mode: 'PLAYING', speedRatio: 0.2, danger: false, boost: true });
+
+  assert.equal(harness.calls.filters.length, 1);
+  assert.equal(harness.calls.filters[0].type, 'lowpass');
+  assert.deepEqual(harness.calls.filterRamps, [
+    [14000, 10.3], [4200, 10.3], [14000, 10.3], [14000, 10.3],
   ]);
 });
 

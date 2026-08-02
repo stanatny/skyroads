@@ -406,7 +406,8 @@
       }
     }
     listen(elements.languageButton, 'click', () => runUtilityAction(actions.language));
-    listen(elements.audioButton, 'click', () => runUtilityAction(actions.audio));
+    listen(elements.musicButton, 'click', () => runUtilityAction(actions.music));
+    listen(elements.sfxButton, 'click', () => runUtilityAction(actions.sfx));
 
     function showLeaderboard(event) {
       if (actions.beforeLeaderboard) actions.beforeLeaderboard();
@@ -500,8 +501,9 @@
   function createCommandCenter({ documentObject = root.document, elements } = {}) {
     if (!documentObject || !elements) throw new TypeError('A document and fixed command-center elements are required');
     const languageButton = makeButton(documentObject, 'language-toggle', 'utility-button');
-    const audioButton = makeButton(documentObject, 'audio-toggle', 'utility-button');
-    elements.utilityControls.replaceChildren(languageButton, audioButton);
+    const musicButton = makeButton(documentObject, 'music-toggle', 'utility-button audio-utility-button');
+    const sfxButton = makeButton(documentObject, 'sfx-toggle', 'utility-button audio-utility-button');
+    elements.utilityControls.replaceChildren(languageButton, musicButton, sfxButton);
 
     const titleKicker = makeElement(documentObject, 'p', { className: 'panel-kicker' });
     const titleHeading = makeElement(documentObject, 'h1');
@@ -590,7 +592,7 @@
 
     return Object.freeze({
       ...elements,
-      languageButton, audioButton,
+      languageButton, musicButton, sfxButton,
       titleKicker, titleHeading, profileName, legacyBest, startButton, titleLeaderboardButton, controlItems,
       gameOverHeading, deathReason, resultScore, resultDistance, resultElapsed, resultRank, resultNewBest,
       restartButton, menuButton, gameOverLeaderboardButton, gameOverRenameButton,
@@ -628,15 +630,17 @@
     ui.languageButton.setAttribute('aria-label', `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`);
     const resolvedMusicMuted = musicMuted == null ? Boolean(audioMuted) : Boolean(musicMuted);
     const resolvedSfxMuted = sfxMuted == null ? Boolean(audioMuted) : Boolean(sfxMuted);
-    const totalMuted = resolvedMusicMuted && resolvedSfxMuted;
-    ui.audioButton.textContent = translator.t(totalMuted ? 'hud.musicOff' : 'hud.musicOn');
-    ui.audioButton.setAttribute('aria-label', ui.audioButton.textContent);
-    ui.audioButton.setAttribute('data-muted', String(totalMuted));
-    ui.audioButton.setAttribute('data-music-muted', String(resolvedMusicMuted));
-    ui.audioButton.setAttribute('data-sfx-muted', String(resolvedSfxMuted));
-    ui.audioButton.setAttribute('data-audio-status', String(audioStatus));
-    ui.audioButton.setAttribute('data-audio-format', audioFormat == null ? '' : String(audioFormat));
-    ui.audioButton.setAttribute('data-audio-decoded', String(Boolean(audioDecoded)));
+    ui.musicButton.textContent = translator.t(resolvedMusicMuted ? 'settings.musicOff' : 'settings.musicOn');
+    ui.musicButton.setAttribute('aria-label', ui.musicButton.textContent);
+    ui.musicButton.setAttribute('aria-pressed', String(!resolvedMusicMuted));
+    ui.musicButton.setAttribute('data-muted', String(resolvedMusicMuted));
+    ui.sfxButton.textContent = translator.t(resolvedSfxMuted ? 'settings.sfxOff' : 'settings.sfxOn');
+    ui.sfxButton.setAttribute('aria-label', ui.sfxButton.textContent);
+    ui.sfxButton.setAttribute('aria-pressed', String(!resolvedSfxMuted));
+    ui.sfxButton.setAttribute('data-muted', String(resolvedSfxMuted));
+    ui.utilityControls.setAttribute('data-audio-status', String(audioStatus));
+    ui.utilityControls.setAttribute('data-audio-format', audioFormat == null ? '' : String(audioFormat));
+    ui.utilityControls.setAttribute('data-audio-decoded', String(Boolean(audioDecoded)));
     ui.titleKicker.textContent = translator.t('menu.subtitle');
     ui.titleHeading.textContent = translator.t('menu.title');
     ui.profileName.textContent = `${translator.t('rename.label')}: ${snapshot.profile.name}`;

@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const CHORDS = Object.freeze({
@@ -231,10 +232,14 @@ function writeStereoWav(filePath, stem, sampleRate) {
   fs.writeFileSync(filePath, buffer);
 }
 
+function defaultOutputDirectory(_root, tempRoot = os.tmpdir()) {
+  return path.join(tempRoot, 'nebula-cruise-wav-render');
+}
+
 function main() {
   const root = path.resolve(__dirname, '..');
   const scorePath = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, 'assets/audio/source/nebula-cruise-score.json');
-  const outputDirectory = process.argv[3] ? path.resolve(process.argv[3]) : path.join(root, 'assets/audio/.wav-render');
+  const outputDirectory = process.argv[3] ? path.resolve(process.argv[3]) : defaultOutputDirectory(root);
   const score = JSON.parse(fs.readFileSync(scorePath, 'utf8'));
   const stems = renderScore(score);
   for (const [name, stem] of Object.entries(stems)) {
@@ -243,5 +248,5 @@ function main() {
   process.stdout.write(`${JSON.stringify({ title: score.title, frames: exactFrameCount(score), sampleRate: score.sampleRate, outputDirectory })}\n`);
 }
 
-module.exports = { exactFrameCount, renderScore, writeStereoWav };
+module.exports = { exactFrameCount, renderScore, writeStereoWav, defaultOutputDirectory };
 if (require.main === module) main();

@@ -3497,7 +3497,19 @@ function bgmPlayPerc(time, kind, vol) {
 
 function bgmScheduler() {
   try {
-    if (!AUDIO.ctx || audioIsMusicMuted()) return;
+    if (!AUDIO.ctx) return;
+    const muted = audioIsMusicMuted();
+    const audioApi = globalThis.Skyroads.audio;
+    if (audioApi && typeof audioApi.keepProceduralTimelineCurrent === 'function') {
+      AUDIO.nextNoteTime = audioApi.keepProceduralTimelineCurrent({
+        muted,
+        currentTime: AUDIO.ctx.currentTime,
+        nextNoteTime: AUDIO.nextNoteTime,
+      });
+    } else if (muted) {
+      AUDIO.nextNoteTime = AUDIO.ctx.currentTime + 0.1;
+    }
+    if (muted) return;
     const stepDur = 60 / BGM_BPM / 2;               // 8 分音符时长
     while (AUDIO.nextNoteTime < AUDIO.ctx.currentTime + 0.15) {
       const step = AUDIO.bgmStep % 32;
@@ -3759,9 +3771,12 @@ function installDiagnostics() {
       audio: Object.freeze({ ...adaptiveAudioState() }),
     });
   };
+  const audioReady = STATE.audioController && STATE.audioController.ready
+    ? STATE.audioController.ready
+    : Promise.resolve(null);
   const diagnostics = Object.freeze({
     snapshot: safeSnapshot,
-    ready: Promise.resolve(STATE.visualAssetsReady).then(safeSnapshot),
+    ready: Promise.all([Promise.resolve(STATE.visualAssetsReady), audioReady]).then(safeSnapshot),
   });
   try {
     Object.defineProperty(globalThis.Skyroads, 'diagnostics', {
@@ -3861,7 +3876,18 @@ function init() {
           i18n.writeLocalePreference(localeStorage, locale);
           applyLocale(locale);
         },
-        audio: toggleMute,
+        music() {
+          if (!STATE.audioController) return;
+          const current = STATE.audioController.getState();
+          STATE.audioController.setMusicMuted(!current.musicMuted);
+          refreshPresentation();
+        },
+        sfx() {
+          if (!STATE.audioController) return;
+          const current = STATE.audioController.getState();
+          STATE.audioController.setSfxMuted(!current.sfxMuted);
+          refreshPresentation();
+        },
       },
     });
     refreshPresentation();

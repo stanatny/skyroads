@@ -53,6 +53,12 @@
     return { atmosphere: 1, drive: 0.72, overdrive: intense ? 0.82 : 0 };
   }
 
+  function keepProceduralTimelineCurrent({ muted = false, currentTime = 0, nextNoteTime = 0 } = {}) {
+    const now = Number.isFinite(Number(currentTime)) ? Number(currentTime) : 0;
+    const next = Number.isFinite(Number(nextNoteTime)) ? Number(nextNoteTime) : now + 0.1;
+    return muted ? now + 0.1 : next;
+  }
+
   function readPreference(storage, key) {
     if (!storage || typeof storage.getItem !== 'function') return { value: false, available: false };
     try { return { value: storage.getItem(key) === 'true', available: true }; } catch (_) {
@@ -91,6 +97,10 @@
     };
     let context = null;
     let gains = null;
+    let masterFilter = null;
+    let adaptiveNodes = [];
+    let adaptiveSources = [];
+    let fallbackActivated = false;
     let gameState = { mode: 'MENU', speedRatio: 0, danger: false, boost: false };
     let unlockPromise = null;
     let resolveReady;
@@ -113,13 +123,53 @@
           try { parameter.value = target; } catch (_) {}
         }
       }
+      if (masterFilter && masterFilter.frequency) {
+        const speedRatio = Number(gameState.speedRatio) || 0;
+        const bright = gameState.mode === 'PLAYING'
+          && (speedRatio >= 0.75 || Boolean(gameState.danger) || Boolean(gameState.boost));
+        const cutoff = bright ? 14000 : 4200;
+        const parameter = masterFilter.frequency;
+        try {
+          parameter.cancelScheduledValues(now);
+          parameter.setValueAtTime(Number(parameter.value) || 4200, now);
+          parameter.linearRampToValueAtTime(cutoff, now + STEM_TRANSITION_SECONDS);
+        } catch (_) {
+          try { parameter.value = cutoff; } catch (_) {}
+        }
+      }
     }
 
-    function activateFallback(error) {
+    async function cleanupAdaptiveGraph() {
+      for (const source of adaptiveSources) {
+        try { source.stop(); } catch (_) {}
+      }
+      for (const node of adaptiveNodes) {
+        try { if (node && typeof node.disconnect === 'function') node.disconnect(); } catch (_) {}
+      }
+      adaptiveSources = [];
+      adaptiveNodes = [];
+      gains = null;
+      masterFilter = null;
+      if (context) {
+        const failedContext = context;
+        context = null;
+        try {
+          if (typeof failedContext.close === 'function') await failedContext.close();
+          else if (typeof failedContext.suspend === 'function') await failedContext.suspend();
+        } catch (_) {
+          try { if (typeof failedContext.suspend === 'function') await failedContext.suspend(); } catch (_) {}
+        }
+      }
+    }
+
+    async function activateFallback(error) {
+      await cleanupAdaptiveGraph();
       state.status = 'fallback';
       state.format = 'procedural';
       state.decoded = false;
       state.error = error ? String(error.message || error) : null;
+      if (fallbackActivated) return;
+      fallbackActivated = true;
       try { if (typeof proceduralFallback === 'function') proceduralFallback(); } catch (_) {}
     }
 
@@ -141,7 +191,7 @@
         state.status = 'loading';
         try {
           if (typeof AudioContextClass !== 'function' || typeof fetchImpl !== 'function') {
-            activateFallback(new Error('Web Audio unavailable'));
+            await activateFallback(new Error('Web Audio unavailable'));
             return snapshot();
           }
           context = new AudioContextClass();
@@ -162,14 +212,22 @@
             } catch (error) { lastError = error; }
           }
           if (!buffers) {
-            activateFallback(lastError || new Error('No complete playable stem set'));
+            await activateFallback(lastError || new Error('No complete playable stem set'));
             return snapshot();
           }
 
           gains = {};
+          masterFilter = context.createBiquadFilter();
+          masterFilter.type = 'lowpass';
+          const initialSpeedRatio = Number(gameState.speedRatio) || 0;
+          masterFilter.frequency.value = gameState.mode === 'PLAYING'
+            && (initialSpeedRatio >= 0.75 || Boolean(gameState.danger) || Boolean(gameState.boost))
+            ? 14000 : 4200;
+          masterFilter.connect(context.destination);
           const musicBus = context.createGain();
           musicBus.gain.value = 0.72;
-          musicBus.connect(context.destination);
+          musicBus.connect(masterFilter);
+          adaptiveNodes.push(musicBus, masterFilter);
           const startTime = context.currentTime + 0.05;
           const initialMix = mixForGameState(gameState);
           buffers.forEach((buffer, index) => {
@@ -181,15 +239,17 @@
             source.buffer = buffer;
             source.loop = true;
             source.connect(gain);
-            source.start(startTime);
             gains[stem] = gain;
+            adaptiveSources.push(source);
+            adaptiveNodes.push(source, gain);
           });
+          adaptiveSources.forEach((source) => source.start(startTime));
           state.status = 'ready';
           state.decoded = true;
           state.error = null;
           return snapshot();
         } catch (error) {
-          activateFallback(error);
+          await activateFallback(error);
           return snapshot();
         }
       })();
@@ -224,6 +284,7 @@
     chooseStemFormat,
     validateStemDurations,
     mixForGameState,
+    keepProceduralTimelineCurrent,
     createAudioController,
   });
 }));
