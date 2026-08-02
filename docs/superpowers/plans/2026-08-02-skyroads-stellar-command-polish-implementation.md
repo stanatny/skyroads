@@ -85,7 +85,7 @@ docs/assets/ship-render.md         selected model hash and deterministic render 
 - Consumes: current inline `index.html` behavior and existing macOS smoke scripts.
 - Produces: `npm test`, `styles/game.css`, `src/game.js`, `globalThis.Skyroads`, and a static resource graph usable over HTTP and `file://`.
 
-- [ ] **Step 1: Write the failing static-resource test**
+- [x] **Step 1: Write the failing static-resource test**
 
 Create `tests/static-app.test.js` with a real resource-graph check. The production change that makes it pass is externalizing the live app while keeping every referenced resource loadable.
 
@@ -119,13 +119,13 @@ test('the browser namespace exists before feature modules attach', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run: `node --test tests/static-app.test.js`
 
 Expected: FAIL because `styles/game.css` and `src/game.js` do not yet exist and `index.html` contains inline CSS/script.
 
-- [ ] **Step 3: Add the test command and externalize without changing behavior**
+- [x] **Step 3: Add the test command and externalize without changing behavior**
 
 Create the exact `package.json`:
 
@@ -172,7 +172,7 @@ Replace the workflow’s inline-script extraction with:
     npm run check
 ```
 
-- [ ] **Step 4: Verify GREEN and preserve the current app**
+- [x] **Step 4: Verify GREEN and preserve the current app**
 
 Run:
 
@@ -185,7 +185,7 @@ bash tests/app-signature-smoke.sh
 
 Expected: all tests pass; the universal app still builds and signs.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json index.html src/game.js styles/game.css tests/static-app.test.js app/build.sh .github/workflows/release-macos.yml
@@ -206,7 +206,7 @@ git commit -m "refactor: establish testable static app boundary"
 - Consumes: `globalThis.Skyroads` from Task 1 and optional browser `localStorage`/`navigator`.
 - Produces: `Skyroads.i18n.resolveLocale`, `readLocalePreference`, `writeLocalePreference`, and `createTranslator`.
 
-- [ ] **Step 1: Write focused failing locale tests**
+- [x] **Step 1: Write focused failing locale tests**
 
 ```js
 const test = require('node:test');
@@ -248,13 +248,13 @@ test('storage helpers survive browser security errors', () => {
 });
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `node --test tests/i18n.test.js`
 
 Expected: FAIL with `Cannot find module '../src/i18n.js'`.
 
-- [ ] **Step 3: Implement the exact public API and catalogs**
+- [x] **Step 3: Implement the exact public API and catalogs**
 
 Use a browser/CommonJS wrapper and export:
 
@@ -342,17 +342,17 @@ The catalogs must contain these exact IDs and meanings:
 
 `t()` falls back to English, then `[message.id]`; `formatNumber` and `formatDate` use the active locale; character counting uses `Array.from`.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `npm test`
 
 Expected: all localization and static-app tests pass.
 
-- [ ] **Step 5: Load the module and apply locale metadata**
+- [x] **Step 5: Load the module and apply locale metadata**
 
 Load `./src/i18n.js` before `./src/game.js`. In `init()`, resolve the saved/system locale, create one translator, and update `html.lang`, `<title>`, meta description, Canvas label, and the visible `中文 / EN` button through one `applyLocale(locale)` function. Do not yet translate every Canvas screen; Task 6 migrates those screens to overlays.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 npm test
@@ -374,7 +374,7 @@ git commit -m "feat: add bilingual localization core"
 - Consumes: `globalThis.Skyroads`.
 - Produces: `createMovementState`, `resetMovement`, `pressDirection`, `releaseDirection`, `requestDiscreteLaneChange`, `advanceMovement`, `clearHeldDirections`, `movementSnapshot`, `directionForCode`, and continuous collision helpers.
 
-- [ ] **Step 1: Write the failing movement timing tests**
+- [x] **Step 1: Write the failing movement timing tests**
 
 Use these exact tuning and hitbox literals:
 
@@ -443,13 +443,13 @@ Also add separate tests with these literal outcomes:
 - `touch requests one lane and never repeat`: +145 ms reaches adjacent lane, +500 ms stays; a swipe during an active segment returns `started:false`.
 - `directionForCode maps only ArrowLeft/KeyA/ArrowRight/KeyD` to `-1/-1/1/1`.
 
-- [ ] **Step 2: Run timing tests and verify RED**
+- [x] **Step 2: Run timing tests and verify RED**
 
 Run: `node --test tests/input.test.js`
 
 Expected: FAIL because `src/input.js` is absent.
 
-- [ ] **Step 3: Implement the minimal frame-independent controller**
+- [x] **Step 3: Implement the minimal frame-independent controller**
 
 The movement state must include:
 
@@ -475,13 +475,13 @@ requestDiscreteLaneChange(state, dir) // => { started }
 advanceMovement(state, deltaMs) // => { previousLanePosition, lanePosition, segmentsStarted }
 ```
 
-- [ ] **Step 4: Verify timing GREEN**
+- [x] **Step 4: Verify timing GREEN**
 
 Run: `node --test tests/input.test.js`
 
 Expected: all timing/input tests pass.
 
-- [ ] **Step 5: Write failing continuous-hitbox tests**
+- [x] **Step 5: Write failing continuous-hitbox tests**
 
 ```js
 test('wall sweep catches crossing overlap but permits visible clearance', () => {
@@ -507,11 +507,11 @@ test('projectile at a floating position returns an integer wall lane', () => {
 
 Add enemy-width assertions at exact boundaries: player `0.14` + drone `0.22` hits at distance `0.36`; player + turret `0.26` hits at `0.40`.
 
-- [ ] **Step 6: Run hitbox tests and verify RED**
+- [x] **Step 6: Run hitbox tests and verify RED**
 
 Expected: FAIL on missing hitbox helpers.
 
-- [ ] **Step 7: Implement hitbox helpers and verify GREEN**
+- [x] **Step 7: Implement hitbox helpers and verify GREEN**
 
 Export:
 
@@ -528,7 +528,7 @@ Run: `npm test`
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Load the module and commit**
+- [x] **Step 8: Load the module and commit**
 
 Load `./src/input.js` after i18n and before game.
 
@@ -549,7 +549,7 @@ git commit -m "feat: add responsive lane movement core"
 - Consumes: all Task 3 input APIs and the current seven-lane game state.
 - Produces: one authoritative `STATE.movement` snapshot shared by rendering, physics, pickups, magnet, enemies, gaps, and projectiles.
 
-- [ ] **Step 1: Add a failing gameplay-input-boundary test**
+- [x] **Step 1: Add a failing gameplay-input-boundary test**
 
 Add this new public adapter predicate to the desired API before it exists:
 
@@ -566,7 +566,7 @@ The production change that makes it pass is `shouldHandleGameInput(descriptor)`,
 
 Run: `node --test tests/input.test.js` and observe the new assertion fail before changing `src/game.js`.
 
-- [ ] **Step 2: Replace direction input with the controller**
+- [x] **Step 2: Replace direction input with the controller**
 
 Make these exact changes:
 
@@ -578,7 +578,7 @@ Make these exact changes:
 - Route each existing horizontal swipe through `requestDiscreteLaneChange`; keep tap-to-jump thresholds unchanged.
 - Ignore gameplay shortcuts whenever the event target is inside `#app-ui`.
 
-- [ ] **Step 3: Drive rendering and physics from continuous position**
+- [x] **Step 3: Drive rendering and physics from continuous position**
 
 - `playerWorldX()` becomes `laneCenterX(STATE.movement.lanePosition)`.
 - Projectiles store the float `lanePosition` at fire time.
@@ -586,7 +586,7 @@ Make these exact changes:
 - Derive player bank from segment direction/eased progress; do not feed it back into collision.
 - Reset with `resetMovement(STATE.movement, midLane())`.
 
-- [ ] **Step 4: Convert each rounded-lane consumer explicitly**
+- [x] **Step 4: Convert each rounded-lane consumer explicitly**
 
 Apply these exact contracts:
 
@@ -599,7 +599,7 @@ Apply these exact contracts:
 - Projectile/wall: call `findIntersectedWallLane`, then use the returned integer for every array mutation and burst location.
 - Remove `currentLaneIndex()` and every general `Math.round(lanePosition)` collision path.
 
-- [ ] **Step 5: Verify automated and manual GREEN**
+- [x] **Step 5: Verify automated and manual GREEN**
 
 Run:
 
@@ -621,7 +621,7 @@ Manual browser checks:
 - J/K/M behavior is unchanged;
 - visible wall/enemy overlap kills, visible clearance survives.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/game.js tests/input.test.js
@@ -641,7 +641,7 @@ git commit -m "feat: integrate responsive continuous movement"
 - Consumes: browser-like storage, injected clock/random/crypto, and `globalThis.Skyroads`.
 - Produces: pure scoring/validation functions and `createLeaderboard(...).initialize/finalizeRun/renamePlayer/acknowledgeLegacyBest`.
 
-- [ ] **Step 1: Write failing score, name and ordering tests**
+- [x] **Step 1: Write failing score, name and ordering tests**
 
 ```js
 test('score keeps distance separate and floors only source counters', () => {
@@ -674,7 +674,7 @@ const STORAGE_KEYS = {
 };
 ```
 
-- [ ] **Step 2: Verify RED, then implement pure functions**
+- [x] **Step 2: Verify RED, then implement pure functions**
 
 Run: `node --test tests/leaderboard.test.js`
 
@@ -695,13 +695,13 @@ renameProfile(document, rawName)
 
 Validation requires version `1`, finite nonnegative numerics, valid profile IDs/names, valid ISO dates, sanitized entries, and a hard cap of 15.
 
-- [ ] **Step 3: Verify pure GREEN**
+- [x] **Step 3: Verify pure GREEN**
 
 Run: `node --test tests/leaderboard.test.js`
 
 Expected: the score/name/sort/validation tests pass.
 
-- [ ] **Step 4: Add failing real-storage-sequence tests**
+- [x] **Step 4: Add failing real-storage-sequence tests**
 
 Build a `FakeStorage` in the test file that stores real strings and can throw or corrupt the next read. Assert these behaviors separately:
 
@@ -719,7 +719,7 @@ Build a `FakeStorage` in the test file that stores real strings and can throw or
 
 The mutation each test catches must be named in its test title; do not assert on FakeStorage call counts unless order is part of the write-recovery contract.
 
-- [ ] **Step 5: Verify RED, then implement the stateful facade**
+- [x] **Step 5: Verify RED, then implement the stateful facade**
 
 ```js
 createLeaderboard({
@@ -744,13 +744,13 @@ acknowledgeLegacyBest() // => MutationResult
 
 Writes use active/backup/verify/restore order. Cache finalized run IDs inside the facade. Use `crypto.randomUUID()` with a timestamp/random fallback only for local identifiers.
 
-- [ ] **Step 6: Verify GREEN and load the module**
+- [x] **Step 6: Verify GREEN and load the module**
 
 Run: `npm test`
 
 Load `./src/leaderboard.js` after i18n and before game.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add index.html src/leaderboard.js tests/leaderboard.test.js
@@ -772,7 +772,7 @@ git commit -m "feat: add resilient local leaderboard core"
 - Consumes: translator, leaderboard facade, game modes, Canvas, and module namespace.
 - Produces: semantic overlays, `computeShipDrawRect`, `overlayForMode`, `setOverlayMode`, `bindOverlayActions`, and `Skyroads.diagnostics`.
 
-- [ ] **Step 1: Write failing pure presentation tests**
+- [x] **Step 1: Write failing pure presentation tests**
 
 ```js
 test('ship stays within seven to nine percent at target viewports', () => {
@@ -794,13 +794,13 @@ test('device pixel ratio is capped at two without changing logical size', () => 
 });
 ```
 
-- [ ] **Step 2: Verify RED, implement pure layout/state helpers, verify GREEN**
+- [x] **Step 2: Verify RED, implement pure layout/state helpers, verify GREEN**
 
 Run: `node --test tests/presentation.test.js`.
 
 Implement the exact ship width rule as `Math.min(viewportWidth * 0.08, viewportHeight * 0.14)`, while satisfying the four literal assertions. `canvasMetrics` caps DPR at 2. `overlayForMode` is exhaustive for MENU/PLAYING/GAMEOVER.
 
-- [ ] **Step 3: Add fixed semantic overlay markup**
+- [x] **Step 3: Add fixed semantic overlay markup**
 
 Add these nodes after `#game`:
 
@@ -819,7 +819,7 @@ Add these nodes after `#game`:
 
 Do not rely on native `<dialog>`. Build elements once, update text with `textContent`, create ranking cells with DOM methods, restore focus on close, trap Tab inside an open dialog, close on Escape, and make hidden overlays `pointer-events:none`.
 
-- [ ] **Step 4: Integrate localization and leaderboard lifecycle**
+- [x] **Step 4: Integrate localization and leaderboard lifecycle**
 
 In `init()`:
 
@@ -833,7 +833,7 @@ The game-over overlay shows score, true distance, elapsed time, qualifying rank/
 
 Replace every remaining player-facing Canvas literal with the Task 2 message ID and use translator number/time formatting. Canvas menu/game-over functions become background dimming only; HTML owns actionable content.
 
-- [ ] **Step 5: Implement command-center CSS fallback**
+- [x] **Step 5: Implement command-center CSS fallback**
 
 Use these visual tokens in `:root`:
 
@@ -851,7 +851,7 @@ Use these visual tokens in `:root`:
 
 Menus use crisp 1px cyan borders, clipped/notched corners, a restrained scan line, gold primary actions, visible `:focus-visible`, and no central gameplay obstruction. Under `prefers-reduced-motion`, disable panel scans/parallax/pulses but keep gameplay motion.
 
-- [ ] **Step 6: Verify GREEN manually and automatically**
+- [x] **Step 6: Verify GREEN manually and automatically**
 
 ```bash
 npm test
@@ -860,7 +860,7 @@ npm run check
 
 Check Chinese and English title/game-over/ranking/rename states, keyboard focus, empty-name behavior, reload persistence, one-time legacy reference, storage-disabled warning, and that closed overlays do not block swipes/taps.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add index.html styles/game.css src/game.js src/presentation.js tests/presentation.test.js
@@ -896,7 +896,7 @@ git commit -m "feat: add bilingual command center and local Top 15"
 - Consumes: the Task 6 presentation shell, `computeShipDrawRect`, and the existing procedural ship fallback.
 - Produces: repository-local licensed assets, `preloadVisualAssets({ timeoutMs })`, and deterministic visual-load diagnostics.
 
-- [ ] **Step 1: Write failing binary asset tests**
+- [x] **Step 1: Write failing binary asset tests**
 
 `tests/assets.test.js` must read real files and assert:
 
@@ -909,7 +909,7 @@ git commit -m "feat: add bilingual command center and local Top 15"
 
 Run `node --test tests/assets.test.js` and verify RED because assets are absent.
 
-- [ ] **Step 2: Fetch only the approved upstream inputs**
+- [x] **Step 2: Fetch only the approved upstream inputs**
 
 Use the official sources and record download date `2026-08-02` plus original SHA-256 values:
 
@@ -920,7 +920,7 @@ Use the official sources and record download date `2026-08-02` plus original SHA
 
 Copy only final derived/runtime files into `assets/`; do not commit the complete source packs.
 
-- [ ] **Step 3: Implement and run the deterministic SceneKit renderer**
+- [x] **Step 3: Implement and run the deterministic SceneKit renderer**
 
 `tools/render-ship.swift` accepts:
 
@@ -933,11 +933,11 @@ Copy only final derived/runtime files into `assets/`; do not commit the complete
 
 Use `SCNScene`, `SCNRenderer`, a transparent 512 × 384 output, orthographic camera at the same rear-high angle as gameplay, a cool key light from upper-left, cyan rim light, low ambient fill, deep-navy body tint, and small gold accent. Neutral/thrust share camera/crop; thrust adds cyan exhaust emissive geometry only. Record exact camera transform, orthographic scale, colors, lights, source hashes, and command in `docs/assets/ship-render.md`.
 
-- [ ] **Step 4: Prepare UI/font/icon assets and notices**
+- [x] **Step 4: Prepare UI/font/icon assets and notices**
 
 Rename the selected yellow button, blue meter, and neutral glass panel semantically without changing alpha dimensions, copy upstream license texts, and write `THIRD_PARTY_NOTICES.md` with modifications and the project-license carve-out.
 
-- [ ] **Step 5: Verify asset GREEN**
+- [x] **Step 5: Verify asset GREEN**
 
 Run:
 
@@ -946,13 +946,13 @@ node --test tests/assets.test.js
 npm test
 ```
 
-- [ ] **Step 6: Preload and render with fallback**
+- [x] **Step 6: Preload and render with fallback**
 
 `preloadVisualAssets({ timeoutMs: 5000 })` returns status for ship frames, UI files, icons, and font. `renderPlayer` uses the neutral/thrust image at `computeShipDrawRect` size, Canvas rotation/shear for bank, and existing boost/super glows around it. If either required frame fails, call the unchanged procedural ship renderer. Use Orbitron only for Latin/numeric headings; Chinese uses system sans-serif.
 
 Update `app/AppIcon.png` from the same rendered ship on the navy/cyan/gold command emblem, without text.
 
-- [ ] **Step 7: Visual matrix and commit**
+- [x] **Step 7: Visual matrix and commit**
 
 Inspect 960 × 600, 1280 × 800, 1440 × 900, and 1920 × 1080 in normal/boost/super and left/right bank. Confirm ship width 7–9%, coherent lighting, no alpha fringe, and unchanged hitbox behavior.
 
@@ -979,7 +979,7 @@ git commit -m "feat: add licensed command center visuals"
 - Consumes: browser AudioContext, game mode/speed/BOOST/danger, current procedural music fallback, mute storage.
 - Produces: `chooseStemFormat`, `validateStemDurations`, `mixForGameState`, and `createAudioController`.
 
-- [ ] **Step 1: Write failing audio-policy tests**
+- [x] **Step 1: Write failing audio-policy tests**
 
 Define the complete fixture literally:
 
@@ -1014,7 +1014,7 @@ test('game over keeps atmosphere and lowers action layers', () => {
 
 Add tests for cruise mix, overdrive at `speedRatio >= 0.75`, BOOST/danger override, a 300 ms transition constant, and mute preference surviving throwing storage.
 
-- [ ] **Step 2: Verify RED, implement pure policy, verify GREEN**
+- [x] **Step 2: Verify RED, implement pure policy, verify GREEN**
 
 Run: `node --test tests/audio.test.js` and observe missing-module failure.
 
@@ -1031,7 +1031,7 @@ ready
 
 Choose one complete format before fetching. Decode three buffers, reject the set if any load/decode/duration check fails, schedule all `AudioBufferSourceNode`s at one `context.currentTime + 0.05`, and ramp gains over exactly 0.3 seconds. If both sets fail, invoke the existing procedural music through the injected fallback.
 
-- [ ] **Step 3: Define and render the original score**
+- [x] **Step 3: Define and render the original score**
 
 Create score data with exact global values:
 
@@ -1062,7 +1062,7 @@ afconvert -f MPG3 -d .mp3 -b 192000 atmosphere.wav assets/audio/nebula-cruise-at
 
 Repeat for drive and overdrive. Remove temporary WAVs after validating the six committed files with `afinfo`; source score and renderer remain reproducible.
 
-- [ ] **Step 4: Integrate playback and diagnostics**
+- [x] **Step 4: Integrate playback and diagnostics**
 
 Load `./src/audio.js` before game. Unlock only after the first player gesture. Feed mode, `speed / CONFIG.MAX_SPEED`, BOOST and danger state into `setGameState`. Preserve M as the total shortcut while the settings UI exposes music/SFX states. On game over, atmosphere remains and action layers fade. Audio failure never blocks game start.
 
@@ -1106,7 +1106,7 @@ git commit -m "feat: add adaptive nebula cruise soundtrack"
 - Consumes: complete static resource graph and `Skyroads.diagnostics.ready`.
 - Produces: `星云巡航 Nebula Cruise.app`, hidden WebKit smoke mode, bilingual repository landing pages, and release CI.
 
-- [ ] **Step 1: Write the failing bundle resource smoke**
+- [x] **Step 1: Write the failing bundle resource smoke**
 
 `tests/app-resources-smoke.sh` builds the app and requires these exact bundle paths:
 
@@ -1131,7 +1131,7 @@ licenses/
 
 Run it and verify RED because the current build copies only index/src/styles and uses the old app name.
 
-- [ ] **Step 2: Rename visible macOS branding and copy resources**
+- [x] **Step 2: Rename visible macOS branding and copy resources**
 
 Set `CFBundleDisplayName` and `CFBundleName` to `星云巡航 Nebula Cruise`; keep bundle ID and executable unchanged. Rename the build output variable to:
 
@@ -1141,7 +1141,7 @@ APP="$ROOT/星云巡航 Nebula Cruise.app"
 
 Copy `index.html`, `src/`, `styles/`, `assets/`, `THIRD_PARTY_NOTICES.md`, and `licenses/`. Update window title and the bilingual missing-file page in `main.swift`. Update both existing smoke scripts and workflow paths.
 
-- [ ] **Step 3: Add the real WKWebView smoke mode**
+- [x] **Step 3: Add the real WKWebView smoke mode**
 
 When launched with `--smoke-test`, `main.swift` creates a hidden WKWebView, loads bundled `index.html`, waits up to 10 seconds, and uses `callAsyncJavaScript` to await `globalThis.Skyroads.diagnostics.ready`. It prints one JSON object and exits 0 only when classic scripts, CSS, both ship frames, Orbitron, and at least one complete audio format decode successfully. Normal launch behavior remains unchanged.
 
@@ -1154,13 +1154,13 @@ bash app/build.sh
 
 Run before implementation to see RED, then after implementation to see GREEN.
 
-- [ ] **Step 4: Rewrite equivalent English and Chinese READMEs**
+- [x] **Step 4: Rewrite equivalent English and Chinese READMEs**
 
 `README.md` starts with `[中文](README.zh-CN.md)` and is the English default. `README.zh-CN.md` starts with `[English](README.md)`. Both include the same online URL, product overview, held movement, full controls, local Top 15 and remembered-name behavior, automatic/manual language behavior, local run instructions, macOS build command/output, third-party notice link, AI assistance statement, and project-license carve-out.
 
 Human-facing prose receives manual parity review rather than a source-grep unit test.
 
-- [ ] **Step 5: Update release CI and verify complete GREEN**
+- [x] **Step 5: Update release CI and verify complete GREEN**
 
 The workflow runs:
 
@@ -1176,7 +1176,7 @@ plutil -lint "星云巡航 Nebula Cruise.app/Contents/Info.plist"
 
 Package `星云巡航 Nebula Cruise.app` into `Nebula-Cruise-macOS-${RELEASE_TAG}.zip`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add README.md README.zh-CN.md app tests .github/workflows/release-macos.yml
@@ -1195,7 +1195,7 @@ git commit -m "build: package bilingual Nebula Cruise release"
 - Consumes: all prior tasks.
 - Produces: a clean, verified feature branch ready for a PR against `main`.
 
-- [ ] **Step 1: Run the complete automated suite from a clean worktree**
+- [x] **Step 1: Run the complete automated suite from a clean worktree**
 
 ```bash
 npm test

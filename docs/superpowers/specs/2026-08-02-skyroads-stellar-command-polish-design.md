@@ -1,8 +1,8 @@
 # Skyroads “Stellar Command” Polish — Design Specification
 
-**Date:** 2026-08-02  
-**Status:** Ready for user review  
-**Branch:** `feat/stellar-command-polish`  
+**Date:** 2026-08-02
+**Status:** Ready for user review
+**Branch:** `feat/stellar-command-polish`
 **Product name:** 星云巡航 / Nebula Cruise
 
 ## 1. Purpose

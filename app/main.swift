@@ -61,6 +61,7 @@ final class SmokeDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate
         }
 
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
         // Smoke mode deliberately grants its synthetic start action the same
         // media permission as a user gesture. Normal launches keep WebKit's
         // default autoplay policy unchanged.
