@@ -17,6 +17,21 @@ const {
   createLeaderboard,
 } = require('../src/leaderboard.js');
 
+function loadLeaderboardWithoutSegmenter({ unicodeProperties = true } = {}) {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'leaderboard.js'), 'utf8');
+  const context = { Intl: {}, module: { exports: {} } };
+  if (!unicodeProperties) {
+    context.RegExp = function LegacyRegExp(pattern, flags) {
+      if (String(pattern).includes('\\p{')) throw new SyntaxError('Unicode properties unavailable');
+      return new RegExp(pattern, flags);
+    };
+    context.RegExp.prototype = RegExp.prototype;
+  }
+  context.globalThis = context;
+  vm.runInNewContext(source, context, { filename: 'leaderboard-without-segmenter.js' });
+  return context.module.exports;
+}
+
 test('score keeps distance separate and floors only source counters', () => {
   assert.equal(calculateScore({ distanceMeters: 8042.9, enemyKills: 3 }), 8102);
   assert.equal(calculateScore({ distanceMeters: 1.9, enemyKills: 2.9 }), 41);
@@ -43,15 +58,39 @@ test('name normalization counts combining sequences as one visible character', (
 });
 
 test('name normalization fallback preserves joined and combining sequences without Intl.Segmenter', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'leaderboard.js'), 'utf8');
-  const context = { Intl: {}, module: { exports: {} } };
-  context.globalThis = context;
-  vm.runInNewContext(source, context, { filename: 'leaderboard-without-segmenter.js' });
-  const fallbackNormalizeName = context.module.exports.normalizeName;
+  const fallbackNormalizeName = loadLeaderboardWithoutSegmenter().normalizeName;
   const family = '👨‍👩‍👧‍👦';
   const accented = 'e\u0301';
   assert.equal(fallbackNormalizeName(family.repeat(17), 'Vega'), family.repeat(16));
   assert.equal(fallbackNormalizeName(accented.repeat(17), 'Vega'), accented.repeat(16));
+});
+
+test('name normalization fallback keeps Unicode spacing marks and combining marks with their base', () => {
+  const fallbackNormalizeName = loadLeaderboardWithoutSegmenter().normalizeName;
+  assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}किB`, 'Vega'), `${'A'.repeat(15)}कि`);
+  assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}Б\u0483C`, 'Vega'), `${'A'.repeat(15)}Б\u0483`);
+});
+
+test('name normalization fallback rejects consecutive ZWJs instead of returning a dangling joiner', () => {
+  const fallbackNormalizeName = loadLeaderboardWithoutSegmenter().normalizeName;
+  assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}B\u200d\u200dC`, 'Vega'), `${'A'.repeat(15)}B`);
+});
+
+test('name normalization fallback rejects standalone grapheme fragments', () => {
+  const fallbackNormalizeName = loadLeaderboardWithoutSegmenter().normalizeName;
+  for (const fragment of ['\u0301', '\ufe0f', '\ud83c\udffb', '\u{e0020}']) {
+    assert.equal(fallbackNormalizeName(fragment, 'Vega'), 'Vega');
+  }
+});
+
+test('name normalization fallback remains safe without Unicode property escapes', () => {
+  const fallbackNormalizeName = loadLeaderboardWithoutSegmenter({ unicodeProperties: false }).normalizeName;
+  assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}किB`, 'Vega'), `${'A'.repeat(15)}कि`);
+  assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}Б\u0483C`, 'Vega'), `${'A'.repeat(15)}Б\u0483`);
+  assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}B\u200d\u200dC`, 'Vega'), `${'A'.repeat(15)}B`);
+  for (const fragment of ['\u0301', '\ufe0f', '\ud83c\udffb', '\u{e0020}']) {
+    assert.equal(fallbackNormalizeName(fragment, 'Vega'), 'Vega');
+  }
 });
 
 test('name fallback is also sanitized and never empty', () => {

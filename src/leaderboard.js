@@ -23,58 +23,85 @@
     return Math.floor(distanceMeters) + Math.floor(enemyKills) * enemyKillBonus;
   }
 
-  function isRegionalIndicator(codePoint) {
+  // Unicode 16.0 union of Grapheme_Extend, Spacing_Mark, Emoji_Modifier, and
+  // Variation_Selector, encoded as base-36 inclusive ranges. Keeping this
+  // generated table local makes the fallback deterministic and lets classic
+  // WebViews work without parsing Unicode-property regular expressions.
+  const UNICODE_16_EXTENDER_DATA = 'lc-of,w3-w9,13l-14t,14v,14x-14y,150-151,153,174-17e,18r-19b,19s,1cm-1cs,1cv-1d0,1d3-1d4,1d6-1d9,1e9,1f4-1fu,1ie-1io,1kb-1kj,1kt,1li-1ll,1ln-1lv,1lx-1lz,1m1-1m5,1nd-1nf,1p3-1pb,1qi-1r5,1r7-1s3,1tm-1to,1tq-1u7,1u9-1uf,1uq-1ur,1vl-1vn,1x8,1xa-1xg,1xj-1xk,1xn-1xp,1xz,1ya-1yb,1z2,1z5-1z7,20s,20u-20y,213-214,217-219,21d,228-229,22d,22p-22r,24c,24e-24l,24n-24p,24r-24t,25e-25f,262-267,269-26b,27w,27y-284,287-288,28b-28d,28l-28n,28y-28z,29u,2bi-2bm,2bq-2bs,2bu-2bx,2c7,2dc-2dg,2f0,2f2-2f8,2fa-2fc,2fe-2fh,2fp-2fq,2g2-2g3,2gx-2gz,2ik,2im-2is,2iu-2iw,2iy-2j1,2j9-2ja,2jm-2jn,2k3,2kg-2kj,2m3-2m4,2m6-2mc,2me-2mg,2mi-2ml,2mv,2n6-2n7,2o1-2o3,2q2,2q7-2qc,2qe,2qg-2qn,2r6-2r7,2sx,2t0-2t6,2tj-2tq,2wh,2wk-2ws,2x4-2xa,2zc-2zd,305,307,309,30e-30f,31t-32c,32e-32f,32l-32v,32x-33w,346,36z-37i,386-389,38e-38g,38i-38k,38n-38t,38x-390,39e-39p,39r,3a2-3a5,3tp-3tr,4k2-4k5,4ky-4l0,4lu-4lv,4mq-4mr,4ok-4pf,4pp,4qz-4r1,4r3,4ud-4ue,4vd,4yo-4yz,4z4-4zf,55j-55n,579-57i,57k-58c,58f,59s-5am,5c0-5c4,5dg-5dw,5ez-5f7,5fk-5fm,5gh-5gt,5ie-5ir,5k4-5kn,5ow-5oy,5p0-5pk,5pp,5pw,5pz-5q1,5vk-5xb,6bw,6hc-6i8,8vj-8vl,8zj,928-933,9ii-9in,9ll-9lm,wvj-wvm,wvo-wvx,wwu-wwv,wz4-wz5,x6q,x6u,x6z,x7n-x7r,x7w,xa8-xa9,xbo-xc5,xcw-xdd,xdr,xeu-xf1,xfr-xg3,xhc-xhf,xir-xj4,xk5,xm1-xme,xmr,xn0-xn1,xob-xod,xps,xpu-xpw,xpz-xq0,xq6-xq7,xq9,xrf-xrj,xrp-xrq,xyb-xyi,xyk-xyl,1dlq,1e68-1e6n,1e74-1e7j,1ehq-1ehr,1eyl,1f4w,1f92-1f96,1gjl-1gjn,1gjp-1gjq,1gjw-1gjz,1gl4-1gl6,1glb,1gpx-1gpy,1h5w-1h5z,1h7t-1h7x,1hgr-1hgs,1hj0-1hj3,1hl2-1hlc,1hmq-1hmt,1hq8-1hqa,1hrs-1hs6,1htc,1htf-1htg,1htr-1htu,1hv4-1hve,1hvm,1hxc-1hxe,1hyf-1hys,1hz9-1hza,1i0j,1i0w-1i0y,1i2b-1i2o,1i2x-1i30,1i32-1i33,1i5o-1i5z,1i66,1i69,1ian-1iay,1ibk-1ibn,1id7-1id8,1ida-1idg,1idj-1idk,1idn-1idp,1idz,1iea-1ieb,1iee-1iek,1ieo-1ies,1igo-1igw,1igy,1ih1,1ih3-1ih6,1ih8-1ihc,1ihe,1iht-1ihu,1ik5-1ikm,1ila,1ink-1io3,1iun-1iut,1iuw-1iv4,1ivw-1ivx,1iy8-1iyo,1j1n-1j1z,1j4t-1j57,1jcc-1jcq,1jjk-1jjp,1jjr-1jjs,1jjv-1jjy,1jk0,1jk2-1jk3,1jo1-1jo7,1joa-1jog,1jok,1jpd-1jpm,1jqr-1jqx,1jqz-1jr2,1jrb,1jrl-1jrv,1jt6-1jtl,1k4v-1k52,1k54-1k5b,1k7m-1k87,1k89-1k8m,1kc1-1kc6,1kca,1kcc-1kcd,1kcf-1kcl,1kcn,1kei-1kem,1keo-1kep,1ker-1kev,1koj-1kom,1kow-1kox,1koz,1kqc-1kqi,1kqm-1kqq,1kre,1ow0,1ow7-1owl,1xr2-1xrj,1zow-1zp0,1zqo-1zqu,20jz,20k1-20lj,20lr-20lu,20o4,20og-20oh,2ftp-2ftq,2jgg-2jhp,2jhs-2jie,2jxh-2jxl,2jxp-2jxu,2jy3-2jya,2jyd-2jyj,2jze-2jzh,2k3m-2k3o,2lmo-2lo6,2lob-2lpo,2lpx,2lqc,2lqz-2lr3,2lr5-2lrj,2mtc-2mti,2mtk-2mu0,2mu3-2mu9,2mub-2muc,2mue-2mui,2mxb,2n1s-2n1y,2nce,2ne4-2ne7,2nsc-2nsf,2nzi-2nzj,2ok0-2ok6,2on8-2one,2qrf-2qrj,jnz4-jo1r,jo5c-jobz';
+  const UNICODE_16_EXTENDER_RANGES = UNICODE_16_EXTENDER_DATA.split(',').map((encodedRange) => {
+    const parts = encodedRange.split('-');
+    const start = parseInt(parts[0], 36);
+    return [start, parts.length === 1 ? start : parseInt(parts[1], 36)];
+  });
+
+  function isStructuralExtender(character) {
+    const codePoint = character.codePointAt(0);
+    let low = 0;
+    let high = UNICODE_16_EXTENDER_RANGES.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const range = UNICODE_16_EXTENDER_RANGES[middle];
+      if (codePoint < range[0]) high = middle - 1;
+      else if (codePoint > range[1]) low = middle + 1;
+      else return true;
+    }
+    return false;
+  }
+
+  function isRegionalIndicator(character) {
+    const codePoint = character.codePointAt(0);
     return codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff;
   }
 
-  function isGraphemeExtension(codePoint) {
-    return (codePoint >= 0x0300 && codePoint <= 0x036f)
-      || (codePoint >= 0x1ab0 && codePoint <= 0x1aff)
-      || (codePoint >= 0x1dc0 && codePoint <= 0x1dff)
-      || (codePoint >= 0x20d0 && codePoint <= 0x20ff)
-      || (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
-      || (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
-      || (codePoint >= 0xe0100 && codePoint <= 0xe01ef)
-      || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff)
-      || (codePoint >= 0xe0020 && codePoint <= 0xe007f);
+  function isGraphemeBase(character) {
+    return Boolean(character) && character !== '\u200d' && !isStructuralExtender(character);
   }
 
+  // Compact UAX #29-style fallback for macOS WebViews predating Intl.Segmenter.
+  // Unicode properties supply complete mark/modifier tables without embedding a stale range list.
+  // Malformed standalone extenders and invalid ZWJ runs are discarded rather than emitted dangling.
   function fallbackSegmentGraphemes(value) {
     const codePoints = Array.from(value);
     const clusters = [];
     for (let index = 0; index < codePoints.length;) {
-      if (codePoints[index] === '\u200d') {
+      if (!isGraphemeBase(codePoints[index])) {
         index += 1;
         continue;
       }
 
       let cluster = codePoints[index];
-      const firstCodePoint = cluster.codePointAt(0);
       index += 1;
 
       if (cluster === '\r' && codePoints[index] === '\n') {
         cluster += codePoints[index];
         index += 1;
-      } else if (isRegionalIndicator(firstCodePoint)
+      } else if (isRegionalIndicator(cluster)
         && index < codePoints.length
-        && isRegionalIndicator(codePoints[index].codePointAt(0))) {
+        && isRegionalIndicator(codePoints[index])) {
         cluster += codePoints[index];
         index += 1;
       }
 
-      while (index < codePoints.length && isGraphemeExtension(codePoints[index].codePointAt(0))) {
+      while (index < codePoints.length && isStructuralExtender(codePoints[index])) {
         cluster += codePoints[index];
         index += 1;
       }
 
       while (codePoints[index] === '\u200d') {
-        if (index + 1 >= codePoints.length) {
+        let joinerEnd = index;
+        while (codePoints[joinerEnd] === '\u200d') joinerEnd += 1;
+        if (joinerEnd !== index + 1 || !isGraphemeBase(codePoints[joinerEnd])) {
+          index = joinerEnd;
+          while (index < codePoints.length && isStructuralExtender(codePoints[index])) index += 1;
+          break;
+        }
+        if (joinerEnd >= codePoints.length) {
           index += 1;
           break;
         }
-        cluster += codePoints[index] + codePoints[index + 1];
-        index += 2;
-        while (index < codePoints.length && isGraphemeExtension(codePoints[index].codePointAt(0))) {
+        cluster += codePoints[index] + codePoints[joinerEnd];
+        index = joinerEnd + 1;
+        while (index < codePoints.length && isStructuralExtender(codePoints[index])) {
           cluster += codePoints[index];
           index += 1;
         }
