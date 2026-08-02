@@ -114,6 +114,16 @@
     const oldSource = state.segmentSource;
     const oldTarget = state.segmentTarget;
     const laneDurationMs = state.segmentLaneDurationMs;
+    if (state.lanePosition === oldSource) {
+      state.segmentStart = state.lanePosition;
+      state.segmentSource = oldTarget;
+      state.segmentTarget = oldSource;
+      state.segmentElapsedMs = 0;
+      state.segmentDurationMs = 0;
+      state.segmentLaneDurationMs = laneDurationMs;
+      state.segmentActive = false;
+      return true;
+    }
     return beginSegment(state, oldTarget, oldSource, state.lanePosition, laneDurationMs);
   }
 

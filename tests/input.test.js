@@ -47,6 +47,17 @@ test('opposite press reverses without a position jump', () => {
   assert.equal(state.lanePosition, 3);
 });
 
+test('zero-progress opposite press cancels the stale segment', () => {
+  const state = createMovementState(3);
+  pressDirection(state, 1);
+  const result = pressDirection(state, -1);
+  assert.equal(result.reversed, true);
+  assert.equal(state.lanePosition, 3);
+  advanceMovement(state, 72.5);
+  assert.equal(state.lanePosition, 3);
+  assert.equal(state.activeDirection, -1);
+});
+
 test('first segment completes at 145ms, not 144ms', () => {
   const state = createMovementState(3);
   pressDirection(state, 1);
