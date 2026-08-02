@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Orbitron";
+  src: url("../assets/fonts/Orbitron-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
   --space-0: #020611;
@@ -113,7 +121,10 @@ input:focus-visible {
   transform: translate(-50%, -50%);
   padding: clamp(1.35rem, 4vw, 2.3rem);
   border: 1px solid var(--cyan);
-  background: linear-gradient(145deg, rgba(8, 29, 52, 0.96), var(--panel));
+  background-image: linear-gradient(145deg, rgba(8, 29, 52, 0.94), rgba(5, 21, 39, 0.96)), url("../assets/ui/panel-frame-cyan.png");
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 100%, 100% 100%;
   box-shadow: 0 0 0 1px rgba(143, 243, 255, 0.08), 0 22px 80px rgba(0, 0, 0, 0.68), inset 0 0 42px rgba(93, 231, 255, 0.04);
   clip-path: polygon(18px 0, calc(100% - 44px) 0, 100% 36px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 40px 100%, 0 calc(100% - 40px), 0 18px);
   pointer-events: auto;
@@ -151,13 +162,14 @@ input:focus-visible {
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
+  font-family: "Orbitron", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 h1,
 h2 {
   margin: 0.38rem 0 0.75rem;
   color: var(--text);
-  font-family: "Courier New", ui-monospace, monospace;
+  font-family: "Orbitron", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.05;
   letter-spacing: 0.08em;
   text-shadow: 0 0 18px rgba(93, 231, 255, 0.34);
@@ -175,6 +187,13 @@ h2 { font-size: clamp(1.5rem, 4vw, 2.4rem); }
 .legacy-best { margin-top: 0.45rem; color: var(--gold); }
 .death-reason { color: var(--danger); font-weight: 700; }
 .result-primary { margin-top: 1rem; color: var(--gold); font-size: 1.65rem; font-weight: 800; }
+.result-primary {
+  width: fit-content;
+  min-width: 12rem;
+  padding: 0.55rem 1.1rem;
+  background: url("../assets/ui/meter-frame-cyan.png") center / 100% 100% no-repeat;
+  font-family: "Orbitron", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 .result-rank,
 .new-best { margin-top: 0.7rem; color: var(--gold); }
 
@@ -185,9 +204,67 @@ h2 { font-size: clamp(1.5rem, 4vw, 2.4rem); }
 }
 
 .wrap-actions { flex-wrap: wrap; }
-.primary-action { border-color: var(--gold); color: #1b1200; background: var(--gold); font-weight: 800; }
-.primary-action:hover { color: #120b00; background: #ffd77e; }
+.primary-action {
+  border-color: var(--gold);
+  color: #1b1200;
+  background-color: var(--gold);
+  background-image: url("../assets/ui/button-frame-gold.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  font-weight: 800;
+}
+.primary-action:hover { color: #120b00; background-color: #ffd77e; }
 .secondary-action { color: var(--cyan-soft); }
+
+#language-toggle::before,
+#audio-toggle::before,
+#open-leaderboard::before,
+#game-over-leaderboard::before,
+#leaderboard-rename::before,
+#game-over-rename::before,
+#restart-mission::before {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.45em;
+  vertical-align: -0.14em;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+#language-toggle::before {
+  -webkit-mask-image: url("../assets/icons/translate.svg");
+  mask-image: url("../assets/icons/translate.svg");
+}
+#audio-toggle::before {
+  -webkit-mask-image: url("../assets/icons/speaker-high.svg");
+  mask-image: url("../assets/icons/speaker-high.svg");
+}
+#audio-toggle[data-muted="true"]::before {
+  -webkit-mask-image: url("../assets/icons/speaker-slash.svg");
+  mask-image: url("../assets/icons/speaker-slash.svg");
+}
+#open-leaderboard::before,
+#game-over-leaderboard::before {
+  -webkit-mask-image: url("../assets/icons/trophy.svg");
+  mask-image: url("../assets/icons/trophy.svg");
+}
+#leaderboard-rename::before,
+#game-over-rename::before {
+  -webkit-mask-image: url("../assets/icons/pencil-simple.svg");
+  mask-image: url("../assets/icons/pencil-simple.svg");
+}
+#restart-mission::before {
+  -webkit-mask-image: url("../assets/icons/arrow-counter-clockwise.svg");
+  mask-image: url("../assets/icons/arrow-counter-clockwise.svg");
+}
 
 .control-list {
   display: grid;

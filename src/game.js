@@ -238,6 +238,8 @@ const STATE = {
   leaderboardSnapshot: null,
   ui: null,
   uiController: null,
+  visualAssets: null,
+  visualAssetsReady: Promise.resolve(null),
   // 赛道
   track: [],
   gen: null,                   // 生成器内部状态（见第 4 节）
@@ -1732,6 +1734,20 @@ function renderPlayer(ctx) {
   ctx.rotate(bank - laneOff * 0.045);
   ctx.transform(1, 0, laneOff * 0.030, 1, 0, 0);          // 剪切：x 随 y 偏移
 
+  const presentation = globalThis.Skyroads.presentation;
+  const energized = STATE.boostT > 0 || STATE.tripleT > 0 || STATE.playerY > 0 || STATE.jumpBurst > 0;
+  const shipFrame = presentation.resolvePlayerShipFrame(STATE.visualAssets, energized);
+  if (shipFrame) {
+    const frameRect = presentation.computeShipDrawRect(STATE.width, STATE.height, 4 / 3);
+    ctx.drawImage(
+      shipFrame,
+      -frameRect.width / 2,
+      -frameRect.height * 0.75,
+      frameRect.width,
+      frameRect.height,
+    );
+  } else {
+
   // ---- 跃升推进器爆发（二段跳触发：醒目的橙红大焰团 + 白芯，短寿命）----
   if (STATE.jumpBurst > 0) {
     const br = STATE.jumpBurst / 0.28;                 // 1 → 0 衰减
@@ -2157,6 +2173,7 @@ function renderPlayer(ctx) {
       ctx.beginPath(); ctx.arc(cxE, cyE, cr * 1.15, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
     }
+  }
   }
 
   ctx.restore();
@@ -3677,11 +3694,18 @@ function installDiagnostics() {
         entryCount: Array.isArray(leaderboardSnapshot.entries) ? leaderboardSnapshot.entries.length : 0,
         persistenceAvailable: !leaderboardSnapshot.persistenceWarning,
       }),
+      visualAssets: STATE.visualAssets ? Object.freeze({
+        shipFramesReady: STATE.visualAssets.shipFramesReady,
+        fallbackRequired: STATE.visualAssets.fallbackRequired,
+        timedOut: STATE.visualAssets.timedOut,
+        loadedCount: STATE.visualAssets.loadedCount,
+        failedCount: STATE.visualAssets.failedCount,
+      }) : null,
     });
   };
   const diagnostics = Object.freeze({
     snapshot: safeSnapshot,
-    ready: Promise.resolve(safeSnapshot()),
+    ready: Promise.resolve(STATE.visualAssetsReady).then(safeSnapshot),
   });
   try {
     Object.defineProperty(globalThis.Skyroads, 'diagnostics', {
@@ -3712,6 +3736,12 @@ function init() {
   resetRunResult();
 
   const presentation = globalThis.Skyroads.presentation;
+  if (presentation && typeof presentation.preloadVisualAssets === 'function') {
+    STATE.visualAssetsReady = presentation.preloadVisualAssets({ timeoutMs: 5000 }).then((result) => {
+      STATE.visualAssets = result;
+      return result;
+    });
+  }
   const appUi = document.getElementById('app-ui');
   if (presentation && STATE.leaderboard && appUi) {
     STATE.ui = presentation.createCommandCenter({

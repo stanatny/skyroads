@@ -7,7 +7,7 @@
   }
 
   function computeShipDrawRect(viewportWidth, viewportHeight, aspectRatio = 1) {
-    const width = Math.min(finiteDimension(viewportWidth) * 0.08, finiteDimension(viewportHeight) * 0.14);
+    const width = Math.min(finiteDimension(viewportWidth) * 0.0875, finiteDimension(viewportHeight) * 0.14);
     const safeAspectRatio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1;
     const height = width / safeAspectRatio;
     return {
@@ -27,6 +27,137 @@
       height: drawRect.height,
       halfWidth: drawRect.width / 2,
     };
+  }
+
+  const VISUAL_ASSET_MANIFEST = Object.freeze({
+    ship: Object.freeze({
+      neutral: './assets/ship/player-neutral.png',
+      thrust: './assets/ship/player-thrust.png',
+    }),
+    ui: Object.freeze({
+      panel: './assets/ui/panel-frame-cyan.png',
+      button: './assets/ui/button-frame-gold.png',
+      meter: './assets/ui/meter-frame-cyan.png',
+    }),
+    icons: Object.freeze({
+      translate: './assets/icons/translate.svg',
+      speakerHigh: './assets/icons/speaker-high.svg',
+      speakerSlash: './assets/icons/speaker-slash.svg',
+      trophy: './assets/icons/trophy.svg',
+      pencilSimple: './assets/icons/pencil-simple.svg',
+      restart: './assets/icons/arrow-counter-clockwise.svg',
+    }),
+    font: Object.freeze({
+      orbitron: './assets/fonts/Orbitron-Medium.ttf',
+    }),
+  });
+
+  function freezeAssetGroup(group) {
+    return Object.freeze(Object.fromEntries(Object.entries(group).map(([key, value]) => [
+      key,
+      Object.freeze({ path: value.path, loaded: Boolean(value.loaded), element: value.element || null }),
+    ])));
+  }
+
+  async function preloadVisualAssets({
+    timeoutMs = 5000,
+    ImageCtor = root.Image,
+    FontFaceCtor = root.FontFace,
+    fontSet = root.document && root.document.fonts,
+    setTimeoutFn = root.setTimeout,
+    clearTimeoutFn = root.clearTimeout,
+  } = {}) {
+    const states = { ship: {}, ui: {}, icons: {}, font: {} };
+    const pending = [];
+
+    function queueImage(groupName, key, assetPath) {
+      const state = { path: assetPath, loaded: false, element: null };
+      states[groupName][key] = state;
+      if (typeof ImageCtor !== 'function') return;
+      let image = null;
+      try { image = new ImageCtor(); } catch (_) { return; }
+      state.element = image;
+      pending.push(new Promise((resolve) => {
+        let settled = false;
+        const finish = (loaded) => {
+          if (settled) return;
+          settled = true;
+          state.loaded = loaded;
+          resolve();
+        };
+        image.onload = () => finish(true);
+        image.onerror = () => finish(false);
+        try {
+          image.decoding = 'async';
+          image.src = assetPath;
+        } catch (_) {
+          finish(false);
+        }
+      }));
+    }
+
+    for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.ship)) queueImage('ship', key, assetPath);
+    for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.ui)) queueImage('ui', key, assetPath);
+    for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.icons)) queueImage('icons', key, assetPath);
+
+    const fontPath = VISUAL_ASSET_MANIFEST.font.orbitron;
+    const fontState = { path: fontPath, loaded: false, element: null };
+    states.font.orbitron = fontState;
+    if (typeof FontFaceCtor === 'function' && fontSet && typeof fontSet.add === 'function') {
+      pending.push((async () => {
+        try {
+          const face = new FontFaceCtor('Orbitron', `url("${fontPath}") format("truetype")`, { weight: '500' });
+          const loadedFace = await face.load();
+          fontSet.add(loadedFace);
+          fontState.element = loadedFace;
+          fontState.loaded = true;
+        } catch (_) {
+          fontState.loaded = false;
+        }
+      })());
+    }
+
+    let timedOut = false;
+    let timer = null;
+    const allSettled = Promise.all(pending);
+    if (pending.length > 0 && typeof setTimeoutFn === 'function') {
+      const timeout = Math.max(0, Number(timeoutMs) || 0);
+      await Promise.race([
+        allSettled,
+        new Promise((resolve) => {
+          timer = setTimeoutFn(() => { timedOut = true; resolve(); }, timeout);
+        }),
+      ]);
+      if (timer !== null && typeof clearTimeoutFn === 'function') clearTimeoutFn(timer);
+    } else {
+      await allSettled;
+    }
+
+    const assets = Object.freeze({
+      ship: freezeAssetGroup(states.ship),
+      ui: freezeAssetGroup(states.ui),
+      icons: freezeAssetGroup(states.icons),
+      font: freezeAssetGroup(states.font),
+    });
+    const entries = Object.values(assets).flatMap((group) => Object.values(group));
+    const loadedCount = entries.filter((entry) => entry.loaded).length;
+    const shipFramesReady = assets.ship.neutral.loaded && assets.ship.thrust.loaded;
+    return Object.freeze({
+      assets,
+      shipFramesReady,
+      fallbackRequired: !shipFramesReady,
+      timedOut,
+      loadedCount,
+      failedCount: entries.length - loadedCount,
+    });
+  }
+
+  function resolvePlayerShipFrame(visualAssets, energized = false) {
+    if (!visualAssets || !visualAssets.shipFramesReady || !visualAssets.assets || !visualAssets.assets.ship) return null;
+    const frames = visualAssets.assets.ship;
+    if (!frames.neutral || !frames.thrust || !frames.neutral.loaded || !frames.thrust.loaded) return null;
+    const frame = energized ? frames.thrust : frames.neutral;
+    return frame.element || null;
   }
 
   function computeHudLayout(viewportWidth, viewportHeight) {
@@ -472,6 +603,7 @@
     ui.languageButton.setAttribute('aria-label', `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`);
     ui.audioButton.textContent = translator.t(audioMuted ? 'hud.musicOff' : 'hud.musicOn');
     ui.audioButton.setAttribute('aria-label', ui.audioButton.textContent);
+    ui.audioButton.setAttribute('data-muted', String(Boolean(audioMuted)));
     ui.titleKicker.textContent = translator.t('menu.subtitle');
     ui.titleHeading.textContent = translator.t('menu.title');
     ui.profileName.textContent = `${translator.t('rename.label')}: ${snapshot.profile.name}`;
@@ -543,6 +675,9 @@
   const api = {
     computeShipDrawRect,
     fallbackShipLayout,
+    VISUAL_ASSET_MANIFEST,
+    preloadVisualAssets,
+    resolvePlayerShipFrame,
     computeHudLayout,
     canvasMetrics,
     overlayForMode,

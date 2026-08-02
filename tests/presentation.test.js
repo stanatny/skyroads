@@ -453,6 +453,7 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(ui.legacyBest.hidden, false);
   assert.equal(elements.persistenceWarning.hidden, false);
   assert.equal(ui.leaderboardEmpty.hidden, false);
+  assert.equal(ui.audioButton.getAttribute('data-muted'), 'false');
 });
 
 test('overlay buttons invoke game actions and rename submits the optional value', () => {
