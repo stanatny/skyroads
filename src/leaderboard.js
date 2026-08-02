@@ -23,8 +23,81 @@
     return Math.floor(distanceMeters) + Math.floor(enemyKills) * enemyKillBonus;
   }
 
+  function isRegionalIndicator(codePoint) {
+    return codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff;
+  }
+
+  function isGraphemeExtension(codePoint) {
+    return (codePoint >= 0x0300 && codePoint <= 0x036f)
+      || (codePoint >= 0x1ab0 && codePoint <= 0x1aff)
+      || (codePoint >= 0x1dc0 && codePoint <= 0x1dff)
+      || (codePoint >= 0x20d0 && codePoint <= 0x20ff)
+      || (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
+      || (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+      || (codePoint >= 0xe0100 && codePoint <= 0xe01ef)
+      || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff)
+      || (codePoint >= 0xe0020 && codePoint <= 0xe007f);
+  }
+
+  function fallbackSegmentGraphemes(value) {
+    const codePoints = Array.from(value);
+    const clusters = [];
+    for (let index = 0; index < codePoints.length;) {
+      if (codePoints[index] === '\u200d') {
+        index += 1;
+        continue;
+      }
+
+      let cluster = codePoints[index];
+      const firstCodePoint = cluster.codePointAt(0);
+      index += 1;
+
+      if (cluster === '\r' && codePoints[index] === '\n') {
+        cluster += codePoints[index];
+        index += 1;
+      } else if (isRegionalIndicator(firstCodePoint)
+        && index < codePoints.length
+        && isRegionalIndicator(codePoints[index].codePointAt(0))) {
+        cluster += codePoints[index];
+        index += 1;
+      }
+
+      while (index < codePoints.length && isGraphemeExtension(codePoints[index].codePointAt(0))) {
+        cluster += codePoints[index];
+        index += 1;
+      }
+
+      while (codePoints[index] === '\u200d') {
+        if (index + 1 >= codePoints.length) {
+          index += 1;
+          break;
+        }
+        cluster += codePoints[index] + codePoints[index + 1];
+        index += 2;
+        while (index < codePoints.length && isGraphemeExtension(codePoints[index].codePointAt(0))) {
+          cluster += codePoints[index];
+          index += 1;
+        }
+      }
+      clusters.push(cluster);
+    }
+    return clusters;
+  }
+
+  function segmentGraphemes(value) {
+    try {
+      if (root.Intl && typeof root.Intl.Segmenter === 'function') {
+        const segmenter = new root.Intl.Segmenter(undefined, { granularity: 'grapheme' });
+        return Array.from(segmenter.segment(value), (part) => part.segment);
+      }
+    } catch (_) {
+      // Older WebViews and partial Intl implementations use the safe fallback.
+    }
+    return fallbackSegmentGraphemes(value);
+  }
+
   function sanitizeCharacters(value, limit) {
-    return Array.from(String(value == null ? '' : value).replace(CONTROL_CHARACTERS, '').trim())
+    return segmentGraphemes(String(value == null ? '' : value).replace(CONTROL_CHARACTERS, '').trim())
       .slice(0, limit)
       .join('');
   }
@@ -47,12 +120,18 @@
     return DEFAULT_NAMES[Math.floor(bounded * DEFAULT_NAMES.length)];
   }
 
+  function compareCodeUnits(a, b) {
+    const left = String(a);
+    const right = String(b);
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+
   function compareEntries(a, b) {
     return (b.score - a.score)
       || (b.distanceMeters - a.distanceMeters)
       || (a.elapsedMs - b.elapsedMs)
-      || String(a.createdAt).localeCompare(String(b.createdAt))
-      || String(a.id).localeCompare(String(b.id));
+      || compareCodeUnits(a.createdAt, b.createdAt)
+      || compareCodeUnits(a.id, b.id);
   }
 
   function sortEntries(entries) {

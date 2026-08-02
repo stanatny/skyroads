@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const {
   DEFAULT_NAMES,
   STORAGE_KEYS,
@@ -29,6 +32,28 @@ test('name normalization removes controls and limits Unicode characters', () => 
   assert.equal(normalizeName('   ', 'Vega'), 'Vega');
 });
 
+test('name normalization keeps ZWJ emoji intact at the 16-visible-character boundary', () => {
+  const family = '👨‍👩‍👧‍👦';
+  assert.equal(normalizeName(family.repeat(17), 'Vega'), family.repeat(16));
+});
+
+test('name normalization counts combining sequences as one visible character', () => {
+  const accented = 'e\u0301';
+  assert.equal(normalizeName(accented.repeat(17), 'Vega'), accented.repeat(16));
+});
+
+test('name normalization fallback preserves joined and combining sequences without Intl.Segmenter', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'leaderboard.js'), 'utf8');
+  const context = { Intl: {}, module: { exports: {} } };
+  context.globalThis = context;
+  vm.runInNewContext(source, context, { filename: 'leaderboard-without-segmenter.js' });
+  const fallbackNormalizeName = context.module.exports.normalizeName;
+  const family = '👨‍👩‍👧‍👦';
+  const accented = 'e\u0301';
+  assert.equal(fallbackNormalizeName(family.repeat(17), 'Vega'), family.repeat(16));
+  assert.equal(fallbackNormalizeName(accented.repeat(17), 'Vega'), accented.repeat(16));
+});
+
 test('name fallback is also sanitized and never empty', () => {
   assert.equal(normalizeName('', '  Lu\u0000na  '), 'Luna');
   assert.equal(normalizeName('', '\u0000   '), DEFAULT_NAMES[0]);
@@ -51,6 +76,14 @@ test('sorting applies all deterministic tie breakers including final ID order', 
   assert.deepEqual(sortEntries(entries).map((entry) => entry.id), ['high', 'c', 'a', 'z', 'b']);
   assert.ok(compareEntries(entries[4], entries[3]) < 0);
   assert.deepEqual(entries.map((entry) => entry.id), ['b', 'z', 'a', 'c', 'high']);
+});
+
+test('sorting uses locale-independent code-unit order for exact-tie IDs', () => {
+  const tied = [
+    { id:'a', score:10, distanceMeters:10, elapsedMs:100, createdAt:'2026-01-02T00:00:00.000Z' },
+    { id:'Z', score:10, distanceMeters:10, elapsedMs:100, createdAt:'2026-01-02T00:00:00.000Z' },
+  ];
+  assert.deepEqual(sortEntries(tied).map((entry) => entry.id), ['Z', 'a']);
 });
 
 test('entry validation sanitizes valid data and rejects malformed identifiers dates and numerics', () => {
@@ -308,13 +341,21 @@ test('renamePlayer updates only entries owned by the current player ID', () => {
   assert.deepEqual(result.snapshot.entries.map((entry) => entry.name), ['Lyra', 'Vega']);
 });
 
-test('failed active readback restores the backup while retaining the next document in memory', () => {
+test('failed active readback writes backup first, restores it, and retains the next document in memory', () => {
   const active = makeDocument({ entries: [makeEntry(1)] });
   const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(active) });
   const leaderboard = createTestLeaderboard(storage);
   leaderboard.initialize();
+  const mutationStart = storage.events.length;
   storage.corruptNextRead(STORAGE_KEYS.active);
   const result = leaderboard.finalizeRun({ id: 'new-run', distanceMeters: 2000, enemyKills: 0, elapsedMs: 10 });
+  const mutationEvents = storage.events.slice(mutationStart);
+  const backupWrite = mutationEvents.findIndex(([operation, key]) => operation === 'set' && key === STORAGE_KEYS.backup);
+  const activeWrite = mutationEvents.findIndex(([operation, key]) => operation === 'set' && key === STORAGE_KEYS.active);
+  const verificationRead = mutationEvents.findIndex(([operation, key]) => operation === 'get' && key === STORAGE_KEYS.active);
+  const activeRestore = mutationEvents.findLastIndex(([operation, key]) => operation === 'set' && key === STORAGE_KEYS.active);
+  assert.ok(backupWrite >= 0 && backupWrite < activeWrite);
+  assert.ok(activeWrite < verificationRead && verificationRead < activeRestore);
   assert.equal(result.qualified, true);
   assert.equal(result.snapshot.entries.some((entry) => entry.id === 'new-run'), true);
   assert.equal(result.snapshot.persistenceAvailable, false);
