@@ -1743,6 +1743,7 @@ function renderPlayer(ctx) {
     superActive: STATE.tripleT > 0,
   });
   const shipFrame = visualPlan.shipFrame;
+  const spanK = STATE.gliding ? 1.15 : 1;
   if (shipFrame) {
     const frameRect = presentation.computeShipDrawRect(STATE.width, STATE.height, 4 / 3);
     ctx.drawImage(
@@ -1781,7 +1782,6 @@ function renderPlayer(ctx) {
   }
 
   // ---- 滑翔姿态参数：机翼展开 ×1.15、尾焰收小 ×0.5、机体拉平（noseLift 已 ×0.3）----
-  const spanK = STATE.gliding ? 1.15 : 1;
   const flameK = STATE.gliding ? 0.5 : 1;
 
   // ---- 双引擎舱 + 双主尾焰（橙色主引擎；超级加速期间尾焰拉长变大）----
