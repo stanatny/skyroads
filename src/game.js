@@ -238,6 +238,8 @@ const STATE = {
   leaderboardSnapshot: null,
   ui: null,
   uiController: null,
+  audioController: null,
+  audioMixKey: null,
   visualAssets: null,
   visualAssetsReady: Promise.resolve(null),
   // 赛道
@@ -2836,13 +2838,19 @@ function currentLeaderboardSnapshot() {
 function refreshPresentation() {
   const presentation = globalThis.Skyroads.presentation;
   if (!presentation || !STATE.ui || !STATE.translator) return;
+  const audioState = adaptiveAudioState();
   presentation.renderCommandCenter(STATE.ui, {
     translator: STATE.translator,
     snapshot: currentLeaderboardSnapshot(),
     mode: STATE.mode,
     finalResult: STATE.finalResult,
     deathReason: STATE.deathReason,
-    audioMuted: AUDIO.muted,
+    audioMuted: audioState.musicMuted && audioState.sfxMuted,
+    musicMuted: audioState.musicMuted,
+    sfxMuted: audioState.sfxMuted,
+    audioStatus: audioState.status,
+    audioFormat: audioState.format,
+    audioDecoded: audioState.decoded,
   });
 }
 
@@ -2929,10 +2937,14 @@ function resetGame() {
 }
 
 function startGame() {
-  audioInit();                 // 首次有效手势：创建/resume AudioContext（自动播放策略）
+  audioInit();                 // 首次有效手势：创建/resume 音效 AudioContext
+  if (STATE.audioController) {
+    STATE.audioController.unlock().then(refreshPresentation).catch(function () { refreshPresentation(); });
+  }
   if (STATE.uiController) STATE.uiController.closeDialog(undefined, { restoreFocus: false });
   resetGame();
   STATE.mode = 'PLAYING';
+  syncAdaptiveAudio(true);
   refreshPresentation();
   focusPrimarySurface();
 }
@@ -2941,6 +2953,7 @@ function gotoMenu() {
   clearMovementInput();
   if (STATE.uiController) STATE.uiController.closeDialog(undefined, { restoreFocus: false });
   STATE.mode = 'MENU';
+  syncAdaptiveAudio(true);
   refreshPresentation();
   focusPrimarySurface();
 }
@@ -2949,6 +2962,7 @@ function die(reason) {
   if (STATE.mode !== 'PLAYING') return;
   clearMovementInput();
   STATE.mode = 'GAMEOVER';
+  syncAdaptiveAudio(true);
   STATE.deathReason = reason;
   finalizeCurrentRun();
   refreshPresentation();
@@ -3300,7 +3314,8 @@ function renderHUD(ctx) {
   // 静音状态指示
   ctx.fillStyle = '#89a';
   ctx.font = '10px monospace';
-  ctx.fillText(uiText(AUDIO.muted ? 'hud.musicOff' : 'hud.musicOn'), fx, ey + 12);
+  const audioState = adaptiveAudioState();
+  ctx.fillText(uiText(audioState.musicMuted && audioState.sfxMuted ? 'hud.musicOff' : 'hud.musicOn'), fx, ey + 12);
 
   // 距离/速度/时间/最佳/操作提示
   ctx.textAlign = 'right';
@@ -3338,7 +3353,7 @@ function renderGameOver(ctx) {
 }
 
 // ============================================================
-// 9b. 音频 Audio —— Web Audio 程序化芯片音乐 + 音效（零音频文件）
+// 9b. 音频 Audio —— 自适应三轨音乐 + 程序化回退与音效
 // ============================================================
 // 防御策略：AudioContext 不存在 / 创建失败 / 被自动播放策略拦截时，
 // 全部静默降级 —— 游戏照常运行，绝不抛异常中断游戏。
@@ -3346,7 +3361,7 @@ function renderGameOver(ctx) {
 const AUDIO = {
   ctx: null,        // AudioContext 实例（未创建 = 无声模式）
   master: null,     // 主增益节点（静音开关作用于此）
-  muted: false,     // M 键切换；即使 ctx 未创建也记录状态
+  muted: false,     // M 键总静音镜像；具体音乐/音效偏好由 audioController 保存
   bgmTimer: null,
   bgmStep: 0,
   nextNoteTime: 0,
@@ -3365,15 +3380,47 @@ function audioInit() {
     AUDIO.master = AUDIO.ctx.createGain();
     AUDIO.master.gain.value = AUDIO.muted ? 0 : 0.45; // 主音量适中
     AUDIO.master.connect(AUDIO.ctx.destination);
-    AUDIO.nextNoteTime = AUDIO.ctx.currentTime + 0.1;
-    AUDIO.bgmTimer = setInterval(bgmScheduler, 40);   // 前瞻式调度器
   } catch (e) {
     AUDIO.ctx = null;                                 // 创建失败 → 无声模式
   }
 }
 
+function startProceduralMusic() {
+  audioInit();
+  if (!AUDIO.ctx || AUDIO.bgmTimer) return;
+  AUDIO.nextNoteTime = AUDIO.ctx.currentTime + 0.1;
+  AUDIO.bgmTimer = setInterval(bgmScheduler, 40);
+}
+
+function adaptiveAudioState() {
+  if (STATE.audioController && typeof STATE.audioController.getState === 'function') {
+    return STATE.audioController.getState();
+  }
+  return { status: 'unavailable', format: 'procedural', decoded: false, musicMuted: AUDIO.muted, sfxMuted: AUDIO.muted, storageAvailable: false, error: null };
+}
+
+function audioIsMusicMuted() { return Boolean(adaptiveAudioState().musicMuted); }
+function audioIsSfxMuted() { return Boolean(adaptiveAudioState().sfxMuted); }
+
+function syncAdaptiveAudio(force = false) {
+  if (!STATE.audioController) return;
+  const speedRatio = CONFIG.MAX_SPEED > 0 ? STATE.speed / CONFIG.MAX_SPEED : 0;
+  const danger = STATE.mode === 'PLAYING' && STATE.fuel <= CONFIG.FUEL_MAX * 0.2;
+  const boost = STATE.mode === 'PLAYING' && STATE.boostT > 0;
+  const key = `${STATE.mode}|${speedRatio >= 0.75}|${danger}|${boost}`;
+  if (!force && key === STATE.audioMixKey) return;
+  STATE.audioMixKey = key;
+  STATE.audioController.setGameState({ mode: STATE.mode, speedRatio, danger, boost });
+}
+
 function toggleMute() {
-  AUDIO.muted = !AUDIO.muted;
+  const current = adaptiveAudioState();
+  const nextMuted = !(current.musicMuted && current.sfxMuted);
+  if (STATE.audioController) {
+    STATE.audioController.setMusicMuted(nextMuted);
+    STATE.audioController.setSfxMuted(nextMuted);
+  }
+  AUDIO.muted = nextMuted;
   try {
     if (AUDIO.master) AUDIO.master.gain.value = AUDIO.muted ? 0 : 0.45;
   } catch (e) {}
@@ -3450,7 +3497,7 @@ function bgmPlayPerc(time, kind, vol) {
 
 function bgmScheduler() {
   try {
-    if (!AUDIO.ctx) return;
+    if (!AUDIO.ctx || audioIsMusicMuted()) return;
     const stepDur = 60 / BGM_BPM / 2;               // 8 分音符时长
     while (AUDIO.nextNoteTime < AUDIO.ctx.currentTime + 0.15) {
       const step = AUDIO.bgmStep % 32;
@@ -3473,7 +3520,7 @@ function bgmScheduler() {
 // ---- 音效：扫频音 + 噪声爆发，全部 try/catch + 静音/未初始化防御 ----
 function sfxSweep(f0, f1, dur, type, vol, delay) {
   try {
-    if (!AUDIO.ctx || AUDIO.muted) return;
+    if (!AUDIO.ctx || audioIsSfxMuted()) return;
     const t0 = AUDIO.ctx.currentTime + (delay || 0);
     const osc = AUDIO.ctx.createOscillator();
     const g = AUDIO.ctx.createGain();
@@ -3493,7 +3540,7 @@ function sfxSweep(f0, f1, dur, type, vol, delay) {
 let noiseBuffer = null;
 function sfxNoise(dur, vol, lowpass) {
   try {
-    if (!AUDIO.ctx || AUDIO.muted) return;
+    if (!AUDIO.ctx || audioIsSfxMuted()) return;
     if (!noiseBuffer) {
       noiseBuffer = AUDIO.ctx.createBuffer(1, Math.floor(AUDIO.ctx.sampleRate * 0.5), AUDIO.ctx.sampleRate);
       const data = noiseBuffer.getChannelData(0);
@@ -3561,7 +3608,7 @@ function sfxTripleWarn(st){ const f = [780, 780, 940, 1180][st] || 780;         
 //      + 双层无公倍数慢 LFO 模拟气流不规则涌动，音量 ≈0.07，随滑翔状态淡入淡出；全 try/catch 防御 ----
 function syncGlideAudio() {
   try {
-    const want = STATE.mode === 'PLAYING' && STATE.gliding && !AUDIO.muted;
+    const want = STATE.mode === 'PLAYING' && STATE.gliding && !audioIsSfxMuted();
     if (want && !AUDIO.glideNodes && AUDIO.ctx) {
       if (!noiseBuffer) {
         // 2 秒长缓冲：避免短循环的周期脉冲感（"滴滴滴"听感来源之一）
@@ -3633,6 +3680,7 @@ function loop(now) {
   STATE.time += dt;            // 全局时钟：驱动警报灯/晶体浮动/警示脉冲等动画
 
   if (STATE.mode === 'PLAYING') updatePhysics(dt);
+  syncAdaptiveAudio();
   updateEffects(dt);
   render();
   requestAnimationFrame(loop);
@@ -3690,6 +3738,7 @@ function installDiagnostics() {
         leaderboard: Boolean(globalThis.Skyroads.leaderboard),
         presentation: Boolean(presentation),
         input: Boolean(globalThis.Skyroads.input),
+        audio: Boolean(globalThis.Skyroads.audio),
         game: true,
       }),
       locale: STATE.translator ? STATE.translator.locale : null,
@@ -3707,6 +3756,7 @@ function installDiagnostics() {
         loadedCount: STATE.visualAssets.loadedCount,
         failedCount: STATE.visualAssets.failedCount,
       }) : null,
+      audio: Object.freeze({ ...adaptiveAudioState() }),
     });
   };
   const diagnostics = Object.freeze({
@@ -3740,6 +3790,25 @@ function init() {
     STATE.leaderboardSnapshot = STATE.leaderboard.initialize();
   }
   resetRunResult();
+
+  const audioApi = globalThis.Skyroads.audio;
+  if (audioApi && typeof audioApi.createAudioController === 'function') {
+    let audioProbe = null;
+    try { audioProbe = typeof document.createElement === 'function' ? document.createElement('audio') : null; } catch (_) {}
+    const canPlayType = (mime) => audioProbe && typeof audioProbe.canPlayType === 'function' ? audioProbe.canPlayType(mime) : '';
+    let fetchImpl = null;
+    try { if (typeof globalThis.fetch === 'function') fetchImpl = globalThis.fetch.bind(globalThis); } catch (_) {}
+    STATE.audioController = audioApi.createAudioController({
+      AudioContextClass: window.AudioContext || window.webkitAudioContext || null,
+      fetchImpl,
+      storage: localeStorage,
+      canPlayType,
+      proceduralFallback: startProceduralMusic,
+    });
+    const initialAudioState = STATE.audioController.getState();
+    AUDIO.muted = initialAudioState.musicMuted && initialAudioState.sfxMuted;
+    syncAdaptiveAudio(true);
+  }
 
   const presentation = globalThis.Skyroads.presentation;
   if (presentation && typeof presentation.preloadVisualAssets === 'function') {

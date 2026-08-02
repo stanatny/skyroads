@@ -452,7 +452,11 @@ test('command center builds one semantic control tree and renders translated sta
     translator,
     mode: 'GAMEOVER',
     deathReason: 'wall',
-    audioMuted: false,
+    musicMuted: false,
+    sfxMuted: true,
+    audioStatus: 'ready',
+    audioFormat: 'ogg',
+    audioDecoded: true,
     snapshot: {
       profile: { playerId: 'player-1', name: '<Nova>' },
       entries: [],
@@ -481,6 +485,11 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(elements.persistenceWarning.hidden, false);
   assert.equal(ui.leaderboardEmpty.hidden, false);
   assert.equal(ui.audioButton.getAttribute('data-muted'), 'false');
+  assert.equal(ui.audioButton.getAttribute('data-music-muted'), 'false');
+  assert.equal(ui.audioButton.getAttribute('data-sfx-muted'), 'true');
+  assert.equal(ui.audioButton.getAttribute('data-audio-status'), 'ready');
+  assert.equal(ui.audioButton.getAttribute('data-audio-format'), 'ogg');
+  assert.equal(ui.audioButton.getAttribute('data-audio-decoded'), 'true');
 });
 
 test('overlay buttons invoke game actions and rename submits the optional value', () => {

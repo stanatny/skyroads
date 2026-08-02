@@ -27,6 +27,14 @@ test('the browser namespace exists before feature modules attach', () => {
   assert.match(source, /globalThis\.Skyroads\s*\|\|/);
 });
 
+test('the adaptive audio policy loads as a classic script before the game', () => {
+  const scripts = [...html.matchAll(/<script defer src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+  const audioIndex = scripts.indexOf('./src/audio.js');
+  const gameIndex = scripts.indexOf('./src/game.js');
+  assert.ok(audioIndex >= 0, 'the audio policy must be part of the static resource graph');
+  assert.ok(audioIndex < gameIndex, 'audio must initialize before the game consumes it');
+});
+
 test('blocked storage does not prevent startup or saving a new best score', () => {
   const canvas = { getContext() { return {}; }, setAttribute() {} };
   const languageToggle = { addEventListener() {}, textContent: '' };
@@ -51,4 +59,34 @@ test('blocked storage does not prevent startup or saving a new best score', () =
     `${fs.readFileSync(path.join(root, 'src/game.js'), 'utf8')}\nSTATE.mode = 'PLAYING'; STATE.distance = 1; STATE.best = 0; die('wall');`,
     sandbox,
   ));
+});
+
+test('startup exposes a locked adaptive-audio diagnostic without creating AudioContext', () => {
+  let contextConstructions = 0;
+  class GuardAudioContext { constructor() { contextConstructions++; } }
+  const canvas = { getContext() { return {}; }, setAttribute() {} };
+  const sandbox = {
+    console,
+    navigator: { languages: ['en-US'], language: 'en-US' },
+    window: { innerWidth: 320, innerHeight: 480, addEventListener() {}, AudioContext: GuardAudioContext },
+    document: {
+      documentElement: {},
+      createElement(tag) { return tag === 'audio' ? { canPlayType() { return 'probably'; } } : {}; },
+      getElementById(id) { return id === 'game' ? canvas : null; },
+      querySelector() { return { setAttribute() {} }; },
+      addEventListener() {},
+    },
+    requestAnimationFrame() {},
+    fetch: async () => { throw new Error('must not fetch before a gesture'); },
+  };
+  vm.createContext(sandbox);
+  for (const file of ['i18n.js', 'input.js', 'audio.js', 'game.js']) {
+    vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
+  }
+
+  const diagnostic = sandbox.Skyroads.diagnostics.snapshot();
+  assert.equal(contextConstructions, 0);
+  assert.equal(diagnostic.scripts.audio, true);
+  assert.equal(diagnostic.audio.status, 'locked');
+  assert.equal(diagnostic.audio.decoded, false);
 });

@@ -1,0 +1,209 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  STEM_TRANSITION_SECONDS,
+  chooseStemFormat,
+  validateStemDurations,
+  mixForGameState,
+  createAudioController,
+} = require('../src/audio.js');
+
+const completeFiles = {
+  atmosphereOgg: 'atmosphere.ogg', driveOgg: 'drive.ogg', overdriveOgg: 'overdrive.ogg',
+  atmosphereMp3: 'atmosphere.mp3', driveMp3: 'drive.mp3', overdriveMp3: 'overdrive.mp3',
+};
+
+test('a complete OGG set wins over MP3', () => {
+  assert.equal(chooseStemFormat(() => 'probably', completeFiles), 'ogg');
+});
+
+test('an incomplete OGG set falls back as a whole to MP3', () => {
+  const files = { ...completeFiles, overdriveOgg: null };
+  assert.equal(chooseStemFormat((mime) => mime.includes('mpeg') ? 'probably' : 'maybe', files), 'mp3');
+});
+
+test('both incomplete sets select procedural fallback', () => {
+  assert.equal(chooseStemFormat(() => '', {}), 'procedural');
+});
+
+test('decoded stem durations must agree within one millisecond', () => {
+  assert.equal(validateStemDurations([{ duration: 68.5710 }, { duration: 68.5715 }, { duration: 68.5719 }], 1), true);
+  assert.equal(validateStemDurations([{ duration: 68.571 }, { duration: 68.573 }, { duration: 68.571 }], 1), false);
+});
+
+test('invalid decoded stem durations are rejected safely', () => {
+  assert.equal(validateStemDurations([], 1), false);
+  assert.equal(validateStemDurations([{ duration: 0 }, { duration: 0 }, { duration: 0 }], 1), false);
+  assert.equal(validateStemDurations([{ duration: 68.571 }, { duration: Number.NaN }, { duration: 68.571 }], 1), false);
+});
+
+test('game over keeps atmosphere and lowers action layers', () => {
+  assert.deepEqual(mixForGameState({ mode: 'GAMEOVER', speedRatio: 1, danger: true }), { atmosphere: 1, drive: 0, overdrive: 0 });
+});
+
+test('cruise uses atmosphere and drive without overdrive', () => {
+  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.5 }), { atmosphere: 1, drive: 0.72, overdrive: 0 });
+});
+
+test('speed ratio at the three-quarter boundary enables overdrive', () => {
+  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.75 }), { atmosphere: 1, drive: 0.72, overdrive: 0.82 });
+});
+
+test('BOOST and danger each override low speed with overdrive', () => {
+  assert.equal(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, boost: true }).overdrive, 0.82);
+  assert.equal(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, danger: true }).overdrive, 0.82);
+});
+
+test('menus and unknown states retain atmosphere only', () => {
+  assert.deepEqual(mixForGameState({ mode: 'MENU', speedRatio: 1 }), { atmosphere: 1, drive: 0, overdrive: 0 });
+  assert.deepEqual(mixForGameState(), { atmosphere: 1, drive: 0, overdrive: 0 });
+});
+
+test('stem changes use a 300 millisecond transition', () => {
+  assert.equal(STEM_TRANSITION_SECONDS, 0.3);
+});
+
+function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null } = {}) {
+  const calls = { fetched: [], starts: [], ramps: [], resumes: 0 };
+  class FakeAudioContext {
+    constructor() {
+      this.currentTime = 10;
+      this.state = 'suspended';
+      this.destination = {};
+    }
+    resume() { calls.resumes++; this.state = 'running'; return Promise.resolve(); }
+    createGain() {
+      return {
+        gain: {
+          value: 0,
+          cancelScheduledValues() {},
+          setValueAtTime(value, time) { calls.ramps.push(['set', value, time]); },
+          linearRampToValueAtTime(value, time) { calls.ramps.push(['ramp', value, time]); },
+        },
+        connect() {},
+      };
+    }
+    createBufferSource() {
+      return {
+        loop: false,
+        connect() {},
+        start(time) { calls.starts.push(time); },
+      };
+    }
+    decodeAudioData(arrayBuffer) {
+      const url = arrayBuffer.url;
+      if (decodeFailure && decodeFailure(url)) return Promise.reject(new Error('decode failed'));
+      return Promise.resolve({ duration: durationByUrl[url] || 68.571 });
+    }
+  }
+  const fetchImpl = async (url) => {
+    calls.fetched.push(url);
+    if (fetchFailure && fetchFailure(url)) throw new Error('fetch failed');
+    return {
+      ok: true,
+      arrayBuffer: async () => ({ url }),
+    };
+  };
+  return { calls, FakeAudioContext, fetchImpl };
+}
+
+test('unlock loads one complete format and starts all stems on one timeline', async () => {
+  const harness = makeAudioHarness();
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+
+  await controller.unlock();
+  await controller.ready;
+
+  assert.deepEqual(harness.calls.fetched, ['atmosphere.ogg', 'drive.ogg', 'overdrive.ogg']);
+  assert.deepEqual(harness.calls.starts, [10.05, 10.05, 10.05]);
+  assert.equal(controller.getState().format, 'ogg');
+  assert.equal(controller.getState().decoded, true);
+});
+
+test('a failed OGG load retries the complete MP3 set without mixing formats', async () => {
+  const harness = makeAudioHarness({ fetchFailure: (url) => url.endsWith('.ogg') });
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+
+  await controller.unlock();
+  await controller.ready;
+
+  assert.deepEqual(harness.calls.fetched.slice(-3), ['atmosphere.mp3', 'drive.mp3', 'overdrive.mp3']);
+  assert.equal(controller.getState().format, 'mp3');
+});
+
+test('decode or duration failure falls back without rejecting game startup', async () => {
+  const harness = makeAudioHarness({ decodeFailure: () => true });
+  let fallbacks = 0;
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    proceduralFallback() { fallbacks++; },
+  });
+
+  await assert.doesNotReject(controller.unlock());
+  await assert.doesNotReject(controller.ready);
+  assert.equal(fallbacks, 1);
+  assert.equal(controller.getState().format, 'procedural');
+  assert.equal(controller.getState().decoded, false);
+});
+
+test('game state updates ramp every stem to its mix over exactly 300 milliseconds', async () => {
+  const harness = makeAudioHarness();
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+  await controller.unlock();
+  harness.calls.ramps.length = 0;
+
+  controller.setGameState({ mode: 'PLAYING', speedRatio: 0.8 });
+
+  assert.deepEqual(harness.calls.ramps.filter(([kind]) => kind === 'ramp').map(([, value, time]) => [value, time]), [
+    [1, 10.3], [0.72, 10.3], [0.82, 10.3],
+  ]);
+});
+
+test('mute preferences survive throwing storage and total mute remains observable', () => {
+  const storage = {
+    getItem() { throw new Error('blocked'); },
+    setItem() { throw new Error('blocked'); },
+  };
+  const controller = createAudioController({ storage, AudioContextClass: null, files: completeFiles });
+
+  assert.doesNotThrow(() => controller.setMusicMuted(true));
+  assert.doesNotThrow(() => controller.setSfxMuted(true));
+  assert.deepEqual(controller.getState(), {
+    status: 'locked', format: null, decoded: false,
+    musicMuted: true, sfxMuted: true, storageAvailable: false,
+    error: null,
+  });
+});
+
+test('unlock is idempotent and invokes procedural fallback once when Web Audio is unavailable', async () => {
+  let fallbacks = 0;
+  const controller = createAudioController({
+    AudioContextClass: null,
+    files: completeFiles,
+    proceduralFallback() { fallbacks++; },
+  });
+  await Promise.all([controller.unlock(), controller.unlock()]);
+  assert.equal(fallbacks, 1);
+  assert.equal(controller.getState().status, 'fallback');
+});

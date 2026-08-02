@@ -1,0 +1,10 @@
+{
+  "title": "Nebula Cruise",
+  "bpm": 112,
+  "beatsPerBar": 4,
+  "bars": 32,
+  "sampleRate": 44100,
+  "key": "E minor",
+  "progression": ["Em(add9)", "Cmaj7", "G", "D", "Em", "C", "Am7", "B7"],
+  "seed": 1312965196
+}

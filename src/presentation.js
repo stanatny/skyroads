@@ -615,15 +615,28 @@
     finalResult = null,
     deathReason = null,
     audioMuted = false,
+    musicMuted = null,
+    sfxMuted = null,
+    audioStatus = 'unavailable',
+    audioFormat = null,
+    audioDecoded = false,
   } = {}) {
     if (!ui || !translator || !snapshot) return;
     setOverlayMode(ui, mode);
     if (ui.utilityControls.setAttribute) ui.utilityControls.setAttribute('aria-label', translator.t('menu.subtitle'));
     ui.languageButton.textContent = `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`;
     ui.languageButton.setAttribute('aria-label', `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`);
-    ui.audioButton.textContent = translator.t(audioMuted ? 'hud.musicOff' : 'hud.musicOn');
+    const resolvedMusicMuted = musicMuted == null ? Boolean(audioMuted) : Boolean(musicMuted);
+    const resolvedSfxMuted = sfxMuted == null ? Boolean(audioMuted) : Boolean(sfxMuted);
+    const totalMuted = resolvedMusicMuted && resolvedSfxMuted;
+    ui.audioButton.textContent = translator.t(totalMuted ? 'hud.musicOff' : 'hud.musicOn');
     ui.audioButton.setAttribute('aria-label', ui.audioButton.textContent);
-    ui.audioButton.setAttribute('data-muted', String(Boolean(audioMuted)));
+    ui.audioButton.setAttribute('data-muted', String(totalMuted));
+    ui.audioButton.setAttribute('data-music-muted', String(resolvedMusicMuted));
+    ui.audioButton.setAttribute('data-sfx-muted', String(resolvedSfxMuted));
+    ui.audioButton.setAttribute('data-audio-status', String(audioStatus));
+    ui.audioButton.setAttribute('data-audio-format', audioFormat == null ? '' : String(audioFormat));
+    ui.audioButton.setAttribute('data-audio-decoded', String(Boolean(audioDecoded)));
     ui.titleKicker.textContent = translator.t('menu.subtitle');
     ui.titleHeading.textContent = translator.t('menu.title');
     ui.profileName.textContent = `${translator.t('rename.label')}: ${snapshot.profile.name}`;
