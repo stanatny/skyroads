@@ -2745,13 +2745,31 @@ function gotoMenu() {
   STATE.mode = 'MENU';
 }
 
+function readBestScore(storage) {
+  try {
+    return parseFloat((storage && storage.getItem('skyroads_best')) || '0') || 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function writeBestScore(storage, score) {
+  try {
+    if (!storage) return false;
+    storage.setItem('skyroads_best', String(score));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function die(reason) {
   if (STATE.mode !== 'PLAYING') return;
   STATE.mode = 'GAMEOVER';
   STATE.deathReason = reason;
   if (STATE.distance > STATE.best) {
     STATE.best = STATE.distance;
-    localStorage.setItem('skyroads_best', String(STATE.best));
+    writeBestScore(STATE.storage, STATE.best);
   }
   sfxDeath();
   STATE.gliding = false;                 // 停止滑翔（喷火轰鸣随之停止）
@@ -3481,6 +3499,7 @@ function init() {
   STATE.canvas = document.getElementById('game');
   let localeStorage = null;
   try { localeStorage = globalThis.localStorage; } catch (_) {}
+  STATE.storage = localeStorage;
   const savedLocale = i18n.readLocalePreference(localeStorage);
   applyLocale(i18n.resolveLocale({ savedLocale, languages: navigator.languages, language: navigator.language }));
   languageToggle.addEventListener('click', () => {
@@ -3495,7 +3514,7 @@ function init() {
   }
   window.addEventListener('resize', resize);
   resize();
-  STATE.best = parseFloat(localStorage.getItem('skyroads_best') || '0') || 0;
+  STATE.best = readBestScore(localeStorage);
   STATE.gen = newGenState();
   STATE.track = buildTrack();
   requestAnimationFrame(loop);

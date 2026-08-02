@@ -25,3 +25,28 @@ test('the browser namespace exists before feature modules attach', () => {
   const source = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8');
   assert.match(source, /globalThis\.Skyroads\s*\|\|/);
 });
+
+test('blocked storage does not prevent startup or saving a new best score', () => {
+  const canvas = { getContext() { return {}; }, setAttribute() {} };
+  const languageToggle = { addEventListener() {}, textContent: '' };
+  const sandbox = {
+    console,
+    navigator: { languages: ['en-US'], language: 'en-US' },
+    window: { innerWidth: 320, innerHeight: 480, addEventListener() {} },
+    document: {
+      documentElement: {},
+      getElementById(id) { return id === 'game' ? canvas : languageToggle; },
+      querySelector() { return { setAttribute() {} }; },
+    },
+    requestAnimationFrame() {},
+  };
+  Object.defineProperty(sandbox, 'localStorage', {
+    get() { throw new Error('storage blocked'); },
+  });
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/i18n.js'), 'utf8'), sandbox);
+  assert.doesNotThrow(() => vm.runInContext(
+    `${fs.readFileSync(path.join(root, 'src/game.js'), 'utf8')}\nSTATE.mode = 'PLAYING'; STATE.distance = 1; STATE.best = 0; die('wall');`,
+    sandbox,
+  ));
+});
