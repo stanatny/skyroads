@@ -56,7 +56,9 @@
   function keepProceduralTimelineCurrent({ muted = false, currentTime = 0, nextNoteTime = 0 } = {}) {
     const now = Number.isFinite(Number(currentTime)) ? Number(currentTime) : 0;
     const next = Number.isFinite(Number(nextNoteTime)) ? Number(nextNoteTime) : now + 0.1;
-    return muted ? now + 0.1 : next;
+    // A normal 40 ms scheduler may be slightly late; only discard deadlines
+    // more than 500 ms behind after a muted/backgrounded tab resumes.
+    return muted || now - next > 0.5 ? now + 0.1 : next;
   }
 
   function readPreference(storage, key) {
@@ -218,6 +220,7 @@
 
           gains = {};
           masterFilter = context.createBiquadFilter();
+          adaptiveNodes.push(masterFilter);
           masterFilter.type = 'lowpass';
           const initialSpeedRatio = Number(gameState.speedRatio) || 0;
           masterFilter.frequency.value = gameState.mode === 'PLAYING'
@@ -225,23 +228,24 @@
             ? 14000 : 4200;
           masterFilter.connect(context.destination);
           const musicBus = context.createGain();
+          adaptiveNodes.push(musicBus);
           musicBus.gain.value = 0.72;
           musicBus.connect(masterFilter);
-          adaptiveNodes.push(musicBus, masterFilter);
           const startTime = context.currentTime + 0.05;
           const initialMix = mixForGameState(gameState);
           buffers.forEach((buffer, index) => {
             const stem = STEM_NAMES[index];
             const gain = context.createGain();
+            adaptiveNodes.push(gain);
             gain.gain.value = state.musicMuted ? 0 : initialMix[stem];
             gain.connect(musicBus);
             const source = context.createBufferSource();
+            adaptiveSources.push(source);
+            adaptiveNodes.push(source);
             source.buffer = buffer;
             source.loop = true;
             source.connect(gain);
             gains[stem] = gain;
-            adaptiveSources.push(source);
-            adaptiveNodes.push(source, gain);
           });
           adaptiveSources.forEach((source) => source.start(startTime));
           state.status = 'ready';

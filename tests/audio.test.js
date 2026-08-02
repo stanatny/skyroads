@@ -72,9 +72,30 @@ test('muted procedural music advances its clock instead of accumulating past not
   assert.equal(keepProceduralTimelineCurrent({ muted: false, currentTime: 60, nextNoteTime: 60.08 }), 60.08);
 });
 
-function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null, startFailureAt = 0 } = {}) {
-  const calls = { fetched: [], starts: [], ramps: [], filterRamps: [], filters: [], resumes: 0, stops: 0, disconnects: 0, closes: 0 };
+test('an audible procedural timeline recovers from a long background gap', () => {
+  assert.equal(keepProceduralTimelineCurrent({ muted: false, currentTime: 60, nextNoteTime: 0.1 }), 60.1);
+});
+
+test('ordinary scheduler lateness is preserved so no regular note is skipped', () => {
+  assert.equal(keepProceduralTimelineCurrent({ muted: false, currentTime: 60, nextNoteTime: 59.7 }), 59.7);
+});
+
+function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null, startFailureAt = 0, connectFailureKind = null } = {}) {
+  const calls = { fetched: [], starts: [], ramps: [], filterRamps: [], filters: [], nodes: [], resumes: 0, stopAttempts: 0, stops: 0, disconnects: 0, closes: 0 };
   let startAttempts = 0;
+  function makeConnection(kind) {
+    return {
+      kind,
+      disconnected: false,
+      connect() {
+        if (connectFailureKind === kind) throw new Error(`${kind} connect failed`);
+      },
+      disconnect() {
+        this.disconnected = true;
+        calls.disconnects++;
+      },
+    };
+  }
   class FakeAudioContext {
     constructor() {
       this.currentTime = 10;
@@ -84,18 +105,23 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
     resume() { calls.resumes++; this.state = 'running'; return Promise.resolve(); }
     close() { calls.closes++; this.state = 'closed'; return Promise.resolve(); }
     createGain() {
-      return {
+      const connection = makeConnection(calls.nodes.some((node) => node.kind === 'bus') ? 'gain' : 'bus');
+      const gain = {
+        ...connection,
         gain: {
           value: 0,
           cancelScheduledValues() {},
           setValueAtTime(value, time) { calls.ramps.push(['set', value, time]); },
           linearRampToValueAtTime(value, time) { calls.ramps.push(['ramp', value, time]); },
         },
-        connect() {}, disconnect() { calls.disconnects++; },
       };
+      calls.nodes.push(gain);
+      return gain;
     }
     createBiquadFilter() {
+      const connection = makeConnection('filter');
       const filter = {
+        ...connection,
         type: '',
         frequency: {
           value: 0,
@@ -103,22 +129,32 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
           setValueAtTime() {},
           linearRampToValueAtTime(value, time) { calls.filterRamps.push([value, time]); },
         },
-        connect() {}, disconnect() { calls.disconnects++; },
       };
       calls.filters.push(filter);
+      calls.nodes.push(filter);
       return filter;
     }
     createBufferSource() {
-      return {
+      const connection = makeConnection('source');
+      const source = {
+        ...connection,
         loop: false,
-        connect() {}, disconnect() { calls.disconnects++; },
+        started: false,
         start(time) {
           startAttempts++;
           if (startFailureAt === startAttempts) throw new Error('start failed');
+          this.started = true;
           calls.starts.push(time);
         },
-        stop() { calls.stops++; },
+        stop() {
+          calls.stopAttempts++;
+          if (!this.started) throw new Error('cannot stop an unstarted source');
+          calls.stops++;
+          this.started = false;
+        },
       };
+      calls.nodes.push(source);
+      return source;
     }
     decodeAudioData(arrayBuffer) {
       const url = arrayBuffer.url;
@@ -208,6 +244,28 @@ test('partial source startup failure stops and disconnects adaptive nodes before
   assert.ok(harness.calls.disconnects >= 4, 'created sources, gains, and bus must be disconnected');
   assert.equal(harness.calls.closes, 1, 'the failed adaptive context must be closed');
   assert.equal(controller.getState().status, 'fallback');
+});
+
+test('every node is cleaned when adaptive graph setup throws during connect', async () => {
+  for (const connectFailureKind of ['filter', 'bus', 'gain', 'source']) {
+    const harness = makeAudioHarness({ connectFailureKind });
+    let fallbacks = 0;
+    const controller = createAudioController({
+      AudioContextClass: harness.FakeAudioContext,
+      fetchImpl: harness.fetchImpl,
+      canPlayType: () => 'probably',
+      files: completeFiles,
+      proceduralFallback() { fallbacks++; },
+    });
+
+    await controller.unlock();
+
+    assert.equal(fallbacks, 1, `${connectFailureKind}: fallback must run once`);
+    assert.equal(harness.calls.closes, 1, `${connectFailureKind}: failed context must close`);
+    assert.equal(harness.calls.starts.length, 0, `${connectFailureKind}: no source may start`);
+    assert.equal(harness.calls.nodes.every((node) => node.disconnected), true, `${connectFailureKind}: every created node must disconnect`);
+    assert.equal(harness.calls.nodes.some((node) => node.kind === 'source' && node.started), false, `${connectFailureKind}: no source may remain started`);
+  }
 });
 
 test('game state updates ramp every stem to its mix over exactly 300 milliseconds', async () => {

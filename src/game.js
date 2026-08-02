@@ -3402,6 +3402,15 @@ function adaptiveAudioState() {
 function audioIsMusicMuted() { return Boolean(adaptiveAudioState().musicMuted); }
 function audioIsSfxMuted() { return Boolean(adaptiveAudioState().sfxMuted); }
 
+function syncLegacyAudioMuteState() {
+  const current = adaptiveAudioState();
+  AUDIO.muted = Boolean(current.musicMuted && current.sfxMuted);
+  try {
+    if (AUDIO.master) AUDIO.master.gain.value = AUDIO.muted ? 0 : 0.45;
+  } catch (e) {}
+  return AUDIO.muted;
+}
+
 function syncAdaptiveAudio(force = false) {
   if (!STATE.audioController) return;
   const speedRatio = CONFIG.MAX_SPEED > 0 ? STATE.speed / CONFIG.MAX_SPEED : 0;
@@ -3419,11 +3428,8 @@ function toggleMute() {
   if (STATE.audioController) {
     STATE.audioController.setMusicMuted(nextMuted);
     STATE.audioController.setSfxMuted(nextMuted);
-  }
-  AUDIO.muted = nextMuted;
-  try {
-    if (AUDIO.master) AUDIO.master.gain.value = AUDIO.muted ? 0 : 0.45;
-  } catch (e) {}
+  } else AUDIO.muted = nextMuted;
+  syncLegacyAudioMuteState();
   refreshPresentation();
 }
 
@@ -3820,8 +3826,7 @@ function init() {
       canPlayType,
       proceduralFallback: startProceduralMusic,
     });
-    const initialAudioState = STATE.audioController.getState();
-    AUDIO.muted = initialAudioState.musicMuted && initialAudioState.sfxMuted;
+    syncLegacyAudioMuteState();
     syncAdaptiveAudio(true);
   }
 
@@ -3880,12 +3885,14 @@ function init() {
           if (!STATE.audioController) return;
           const current = STATE.audioController.getState();
           STATE.audioController.setMusicMuted(!current.musicMuted);
+          syncLegacyAudioMuteState();
           refreshPresentation();
         },
         sfx() {
           if (!STATE.audioController) return;
           const current = STATE.audioController.getState();
           STATE.audioController.setSfxMuted(!current.sfxMuted);
+          syncLegacyAudioMuteState();
           refreshPresentation();
         },
       },
