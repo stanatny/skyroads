@@ -215,6 +215,84 @@ test('local-file responses with status zero still decode their complete stem set
   assert.equal(controller.getState().decoded, true);
 });
 
+test('responses without an exact boolean success flag fall back instead of decoding', async () => {
+  for (const scenario of [
+    { label: 'absent', fields: {} },
+    { label: 'null', fields: { ok: null } },
+    { label: 'numeric', fields: { ok: 1 } },
+    { label: 'string', fields: { ok: 'true' } },
+  ]) {
+    const harness = makeAudioHarness({
+      responseFactory: (url) => ({
+        ...scenario.fields,
+        status: 200,
+        url: `https://example.test/${url}`,
+        arrayBuffer: async () => ({ url }),
+      }),
+    });
+    const controller = createAudioController({
+      AudioContextClass: harness.FakeAudioContext,
+      fetchImpl: harness.fetchImpl,
+      canPlayType: () => 'probably',
+      files: completeFiles,
+    });
+
+    await controller.unlock();
+
+    assert.equal(controller.getState().status, 'fallback', scenario.label);
+    assert.equal(controller.getState().decoded, false, scenario.label);
+  }
+});
+
+test('HTTP 500 and non-file status-zero responses are rejected', async () => {
+  for (const response of [
+    { ok: false, status: 500, url: 'https://example.test/stem.ogg' },
+    { ok: false, status: 0, url: 'https://example.test/stem.ogg' },
+  ]) {
+    const harness = makeAudioHarness({
+      responseFactory: (url) => ({ ...response, arrayBuffer: async () => ({ url }) }),
+    });
+    const controller = createAudioController({
+      AudioContextClass: harness.FakeAudioContext,
+      fetchImpl: harness.fetchImpl,
+      canPlayType: () => 'probably',
+      files: completeFiles,
+    });
+
+    await controller.unlock();
+
+    assert.equal(controller.getState().status, 'fallback', response.url);
+    assert.equal(controller.getState().format, 'procedural', response.url);
+  }
+});
+
+test('a rejected local-file body read reaches one terminal fallback', async () => {
+  let fallbacks = 0;
+  const harness = makeAudioHarness({
+    responseFactory: () => ({
+      ok: false,
+      status: 0,
+      url: 'file:///bundle/assets/audio/stem.ogg',
+      arrayBuffer: async () => { throw new Error('local body read failed'); },
+    }),
+  });
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    proceduralFallback() { fallbacks++; },
+  });
+
+  await assert.doesNotReject(controller.unlock());
+  await assert.doesNotReject(controller.ready);
+
+  assert.equal(fallbacks, 1);
+  assert.equal(controller.getState().status, 'fallback');
+  assert.equal(controller.getState().format, 'procedural');
+  assert.equal(controller.getState().decoded, false);
+});
+
 test('a failed OGG load retries the complete MP3 set without mixing formats', async () => {
   const harness = makeAudioHarness({ fetchFailure: (url) => url.endsWith('.ogg') });
   const controller = createAudioController({

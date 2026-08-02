@@ -80,7 +80,7 @@
 
   function usableStemResponse(response) {
     if (!response || typeof response.arrayBuffer !== 'function') return false;
-    if (response.ok !== false) return true;
+    if (response.ok === true) return true;
     return response.status === 0 && typeof response.url === 'string' && response.url.startsWith('file:');
   }
 
