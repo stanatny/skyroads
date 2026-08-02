@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
 test('the static shell references loadable classic CSS and JavaScript', () => {
+  assert.match(html, /<link rel="icon" href="data:,">/);
   assert.match(html, /href="\.\/styles\/game\.css"/);
   assert.match(html, /src="\.\/src\/game\.js"/);
   const urls = [

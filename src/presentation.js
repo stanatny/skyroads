@@ -18,6 +18,32 @@
     };
   }
 
+  function fallbackShipLayout(viewportWidth, viewportHeight, centerX, centerY) {
+    const drawRect = computeShipDrawRect(viewportWidth, viewportHeight, 2.4);
+    return {
+      centerX: Number(centerX) || 0,
+      centerY: Number(centerY) || 0,
+      width: drawRect.width,
+      height: drawRect.height,
+      halfWidth: drawRect.width / 2,
+    };
+  }
+
+  function computeHudLayout(viewportWidth, viewportHeight) {
+    const width = finiteDimension(viewportWidth);
+    const utilityBottom = 60;
+    const rightTop = utilityBottom + 20;
+    const lineHeight = 20;
+    const lineCount = 6;
+    return {
+      utilityBottom,
+      rightX: Math.max(16, width - 16),
+      rightTop,
+      rightBottom: rightTop + lineHeight * (lineCount - 1),
+      lineHeight,
+    };
+  }
+
   function canvasMetrics(cssWidth, cssHeight, devicePixelRatio = 1) {
     const width = finiteDimension(cssWidth);
     const height = finiteDimension(cssHeight);
@@ -85,7 +111,7 @@
     const outside = !focusable.includes(activeElement);
     if (outside || (!backwards && activeElement === last) || (backwards && activeElement === first)) {
       if (typeof event.preventDefault === 'function') event.preventDefault();
-      (backwards && !outside ? last : first).focus();
+      (backwards ? last : first).focus();
     }
     return true;
   }
@@ -108,9 +134,11 @@
 
   function bindOverlayActions({ documentObject = root.document, elements = {}, actions = {} } = {}) {
     let activeDialogFrame = null;
+    let backgroundState = null;
     const dialogStack = [];
     const cleanup = [];
     const backgroundElements = [
+      elements.canvas,
       elements.utilityControls,
       elements.titleScreen,
       elements.gameOverScreen,
@@ -118,11 +146,29 @@
     ].filter(Boolean);
 
     function setBackgroundBlocked(blocked) {
+      if (blocked) {
+        if (!backgroundState) {
+          backgroundState = new Map(backgroundElements.map((element) => [element, {
+            inert: Boolean(element.inert),
+            hadAriaHidden: Boolean(element.getAttribute && element.getAttribute('aria-hidden') !== null),
+            ariaHidden: element.getAttribute ? element.getAttribute('aria-hidden') : null,
+          }]));
+        }
+        backgroundElements.forEach((element) => {
+          element.inert = true;
+          if (element.setAttribute) element.setAttribute('aria-hidden', 'true');
+        });
+        return;
+      }
+      if (!backgroundState) return;
       backgroundElements.forEach((element) => {
-        element.inert = blocked;
-        if (blocked && element.setAttribute) element.setAttribute('aria-hidden', 'true');
-        else if (!blocked && element.removeAttribute) element.removeAttribute('aria-hidden');
+        const prior = backgroundState.get(element);
+        if (!prior) return;
+        element.inert = prior.inert;
+        if (prior.hadAriaHidden && element.setAttribute) element.setAttribute('aria-hidden', prior.ariaHidden);
+        else if (element.removeAttribute) element.removeAttribute('aria-hidden');
       });
+      backgroundState = null;
     }
 
     function listen(target, type, listener) {
@@ -202,8 +248,14 @@
     listen(elements.startButton, 'click', () => { if (actions.start) actions.start(); });
     listen(elements.restartButton, 'click', () => { if (actions.start) actions.start(); });
     listen(elements.menuButton, 'click', () => { if (actions.menu) actions.menu(); });
-    listen(elements.languageButton, 'click', () => { if (actions.language) actions.language(); });
-    listen(elements.audioButton, 'click', () => { if (actions.audio) actions.audio(); });
+    function runUtilityAction(action) {
+      if (action) action();
+      if (!activeDialogFrame && actions.getMode && actions.getMode() === 'PLAYING') {
+        focusPrimaryForMode(elements, 'PLAYING');
+      }
+    }
+    listen(elements.languageButton, 'click', () => runUtilityAction(actions.language));
+    listen(elements.audioButton, 'click', () => runUtilityAction(actions.audio));
 
     function showLeaderboard(event) {
       if (actions.beforeLeaderboard) actions.beforeLeaderboard();
@@ -490,6 +542,8 @@
 
   const api = {
     computeShipDrawRect,
+    fallbackShipLayout,
+    computeHudLayout,
     canvasMetrics,
     overlayForMode,
     setOverlayMode,

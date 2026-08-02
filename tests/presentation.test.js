@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   computeShipDrawRect,
+  fallbackShipLayout,
+  computeHudLayout,
   canvasMetrics,
   overlayForMode,
   setOverlayMode,
@@ -16,6 +18,12 @@ const {
   focusPrimaryForMode,
 } = require('../src/presentation.js');
 const { createLeaderboard } = require('../src/leaderboard.js');
+const {
+  createMovementState,
+  pressDirection,
+  directionForCode,
+  shouldHandleGameInput,
+} = require('../src/input.js');
 
 test('ship stays within seven to nine percent at target viewports', () => {
   for (const [width, height] of [[960, 600], [1280, 800], [1440, 900], [1920, 1080]]) {
@@ -23,6 +31,29 @@ test('ship stays within seven to nine percent at target viewports', () => {
     const ratio = rect.width / width;
     assert.ok(ratio >= 0.07 && ratio <= 0.09, `${width}x${height}: ${ratio}`);
     assert.equal(rect.height, rect.width / (4 / 3));
+  }
+});
+
+test('the fallback renderer layout consumes the shared ship draw rectangle', () => {
+  for (const [width, height] of [[960, 600], [1280, 800], [1440, 900], [1920, 1080]]) {
+    const drawRect = computeShipDrawRect(width, height, 2.4);
+    const layout = fallbackShipLayout(width, height, width * 0.42, height * 0.73);
+    assert.equal(layout.width, drawRect.width);
+    assert.equal(layout.height, drawRect.height);
+    assert.equal(layout.halfWidth, drawRect.width / 2);
+    assert.equal(layout.centerX, width * 0.42);
+    assert.equal(layout.centerY, height * 0.73);
+  }
+});
+
+test('right HUD starts below utility controls at all target viewports', () => {
+  for (const locale of ['zh-CN', 'en']) {
+    for (const [width, height] of [[960, 600], [1280, 800], [1440, 900], [1920, 1080]]) {
+      const layout = computeHudLayout(width, height, locale);
+      assert.ok(layout.rightTop > layout.utilityBottom, `${locale} ${width}x${height}`);
+      assert.ok(layout.rightBottom <= height, `${locale} ${width}x${height}`);
+      assert.equal(layout.rightX, width - 16);
+    }
   }
 });
 
@@ -90,6 +121,11 @@ test('dialog Tab handling wraps focus in both directions', () => {
   assert.equal(trapDialogTab(dialog, { key: 'Tab', shiftKey: true, preventDefault() { prevented = true; } }, first), true);
   assert.equal(prevented, true);
   assert.deepEqual(focused, ['first', 'last']);
+
+  prevented = false;
+  assert.equal(trapDialogTab(dialog, { key: 'Tab', shiftKey: true, preventDefault() { prevented = true; } }, {}), true);
+  assert.equal(prevented, true);
+  assert.deepEqual(focused, ['first', 'last', 'last']);
 });
 
 test('finalizeRunOnce inserts one result even when called repeatedly', () => {
@@ -239,6 +275,98 @@ test('nested rename dialog returns to its leaderboard opener before restoring th
   controller.closeDialog(leaderboardDialog);
   assert.equal(documentObject.activeElement, pageOpener);
   assert.equal(titleScreen.inert, false);
+  controller.destroy();
+});
+
+test('nested dialogs isolate Canvas and restore its prior accessibility and focus state', () => {
+  const documentObject = makeFakeDocument();
+  const canvas = documentObject.createElement('canvas');
+  canvas.tabIndex = -1;
+  canvas.inert = false;
+  canvas.setAttribute('aria-hidden', 'false');
+  const titleScreen = documentObject.createElement('section');
+  titleScreen.inert = true;
+  const leaderboardOpener = documentObject.createElement('button');
+  const leaderboardDialog = documentObject.createElement('section');
+  const renameDialog = documentObject.createElement('section');
+  const renameInput = documentObject.createElement('input');
+  leaderboardDialog.hidden = true;
+  renameDialog.hidden = true;
+  leaderboardDialog.querySelectorAll = () => [leaderboardOpener];
+  renameDialog.querySelectorAll = () => [renameInput];
+  canvas.focus();
+
+  const controller = bindOverlayActions({ documentObject, elements: { canvas, titleScreen } });
+  controller.openDialog(leaderboardDialog, canvas);
+  assert.equal(canvas.inert, true);
+  assert.equal(canvas.getAttribute('aria-hidden'), 'true');
+  assert.equal(canvas.tabIndex, -1);
+
+  controller.openDialog(renameDialog, leaderboardOpener);
+  controller.closeDialog(renameDialog);
+  assert.equal(canvas.inert, true);
+  assert.equal(canvas.getAttribute('aria-hidden'), 'true');
+  assert.equal(documentObject.activeElement, leaderboardOpener);
+
+  controller.closeDialog(leaderboardDialog);
+  assert.equal(canvas.inert, false);
+  assert.equal(canvas.getAttribute('aria-hidden'), 'false');
+  assert.equal(canvas.tabIndex, -1);
+  assert.equal(titleScreen.inert, true);
+  assert.equal(titleScreen.getAttribute('aria-hidden'), null);
+  assert.equal(documentObject.activeElement, canvas);
+  controller.destroy();
+});
+
+test('language and audio utilities restore gameplay focus before the next movement key', () => {
+  const documentObject = makeFakeDocument();
+  const canvas = documentObject.createElement('canvas');
+  const languageButton = documentObject.createElement('button');
+  const audioButton = documentObject.createElement('button');
+  const dialog = documentObject.createElement('section');
+  const dialogButton = documentObject.createElement('button');
+  dialog.hidden = true;
+  dialog.querySelectorAll = () => [dialogButton];
+  let mode = 'PLAYING';
+  const calls = [];
+  const controller = bindOverlayActions({
+    documentObject,
+    elements: { canvas, languageButton, audioButton },
+    actions: {
+      getMode: () => mode,
+      language() { calls.push('language'); },
+      audio() { calls.push('audio'); },
+    },
+  });
+
+  function pressMovementKey(code) {
+    const movement = createMovementState(3);
+    const canHandle = shouldHandleGameInput({
+      mode,
+      targetInsideAppUi: documentObject.activeElement !== canvas,
+      modalOpen: Boolean(controller.getOpenDialog()),
+    });
+    if (canHandle) pressDirection(movement, directionForCode(code));
+    return movement.segmentTarget;
+  }
+
+  languageButton.focus();
+  languageButton.dispatch('click');
+  assert.equal(documentObject.activeElement, canvas);
+  assert.equal(pressMovementKey('ArrowRight'), 4);
+
+  audioButton.focus();
+  audioButton.dispatch('click');
+  assert.equal(documentObject.activeElement, canvas);
+  assert.equal(pressMovementKey('ArrowLeft'), 2);
+
+  controller.openDialog(dialog, canvas);
+  languageButton.dispatch('click');
+  assert.equal(documentObject.activeElement, dialogButton);
+  assert.equal(pressMovementKey('ArrowRight'), 3);
+  assert.deepEqual(calls, ['language', 'audio', 'language']);
+  mode = 'MENU';
+  controller.closeDialog(dialog);
   controller.destroy();
 });
 

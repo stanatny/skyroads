@@ -1635,11 +1635,12 @@ function renderPlayer(ctx) {
   // —— 投影一致性是"所见即所判"的根基，此处调用方式不可更改
   const p = project(px, STATE.playerY, CONFIG.CAMERA_BACK);
   if (!p.visible) return;
-  const ux = p.scale * STATE.width / 2;    // 世界单位 → 屏幕像素（x）
-  const uy = p.scale * STATE.height / 2;   // 世界单位 → 屏幕像素（y）
   const cx = p.x, cy = p.y;
-  const W2 = CONFIG.SHIP_HALF_SPAN * ux;   // 半翼展 150 世界单位 ≤ 0.4 × 车道宽 720 ✓
-  const H = 200 * uy;                      // 船体高 200 世界单位
+  const shipLayout = globalThis.Skyroads.presentation.fallbackShipLayout(
+    STATE.width, STATE.height, cx, cy,
+  );
+  const W2 = shipLayout.halfWidth;
+  const H = shipLayout.height;
 
   // ---- 船尾尾迹粒子：短寿命，允许随机；在渲染侧生成，updateEffects 推进 ----
   // 超级加速期间：额外喷出青白"速度线"残影（更长、更快、更亮）
@@ -3287,13 +3288,17 @@ function renderHUD(ctx) {
     ? leaderboardApi.calculateScore(STATE) : STATE.score;
   const entries = currentLeaderboardSnapshot().entries;
   const localBest = entries.length > 0 ? entries[0].score : 0;
-  ctx.fillText(`${uiText('hud.distance')} ${uiNumber(Math.floor(STATE.distanceMeters), { style: 'unit', unit: 'meter', unitDisplay: 'short' })}`, STATE.width - 16, 24);
-  ctx.fillText(`${uiText('hud.score')} ${uiNumber(liveScore)}`, STATE.width - 16, 44);
-  ctx.fillText(`${uiText('hud.speed')} ${uiNumber(STATE.speed, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`, STATE.width - 16, 64);
-  ctx.fillText(`${uiText('hud.elapsed')} ${uiSeconds(STATE.elapsedMs)}`, STATE.width - 16, 84);
-  ctx.fillText(`${uiText('hud.localBest')} ${uiNumber(localBest)}`, STATE.width - 16, 104);
+  const hudLayout = globalThis.Skyroads.presentation.computeHudLayout(STATE.width, STATE.height);
+  const hudX = hudLayout.rightX;
+  const hudY = hudLayout.rightTop;
+  const hudLine = hudLayout.lineHeight;
+  ctx.fillText(`${uiText('hud.distance')} ${uiNumber(Math.floor(STATE.distanceMeters), { style: 'unit', unit: 'meter', unitDisplay: 'short' })}`, hudX, hudY);
+  ctx.fillText(`${uiText('hud.score')} ${uiNumber(liveScore)}`, hudX, hudY + hudLine);
+  ctx.fillText(`${uiText('hud.speed')} ${uiNumber(STATE.speed, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`, hudX, hudY + hudLine * 2);
+  ctx.fillText(`${uiText('hud.elapsed')} ${uiSeconds(STATE.elapsedMs)}`, hudX, hudY + hudLine * 3);
+  ctx.fillText(`${uiText('hud.localBest')} ${uiNumber(localBest)}`, hudX, hudY + hudLine * 4);
   ctx.fillStyle = '#c9a26a';
-  ctx.fillText(uiText('hud.shootHint'), STATE.width - 16, 124);
+  ctx.fillText(uiText('hud.shootHint'), hudX, hudY + hudLine * 5);
   ctx.textAlign = 'left';
 
   // （连击倍率大字已随 MULTI 系统移除；三段跳奖励以左侧青色倒计时条呈现）
@@ -3712,6 +3717,7 @@ function init() {
     STATE.ui = presentation.createCommandCenter({
       documentObject: document,
       elements: {
+        canvas: STATE.canvas,
         appUi,
         utilityControls: document.getElementById('utility-controls'),
         titleScreen: document.getElementById('title-screen'),
@@ -3726,6 +3732,7 @@ function init() {
       documentObject: document,
       elements: STATE.ui,
       actions: {
+        getMode: () => STATE.mode,
         start: startGame,
         menu: gotoMenu,
         getPlayerName: () => currentLeaderboardSnapshot().profile.name,
