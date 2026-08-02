@@ -238,6 +238,12 @@
     return 0;
   }
 
+  function shouldHandleGameInput(descriptor) {
+    return descriptor.mode === 'PLAYING'
+      && !descriptor.targetInsideAppUi
+      && !descriptor.modalOpen;
+  }
+
   function intervalsOverlap(centerA, halfA, centerB, halfB) {
     return Math.abs(centerA - centerB) <= halfA + halfB;
   }
@@ -306,6 +312,7 @@
     clearHeldDirections,
     movementSnapshot,
     directionForCode,
+    shouldHandleGameInput,
     intervalsOverlap,
     sweptPointDistance,
     sweptIntervalsOverlap,

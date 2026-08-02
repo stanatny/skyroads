@@ -2,6 +2,25 @@
 
 globalThis.Skyroads = globalThis.Skyroads || {};
 
+const {
+  HITBOX,
+  createMovementState,
+  resetMovement,
+  pressDirection,
+  releaseDirection,
+  requestDiscreteLaneChange,
+  advanceMovement,
+  clearHeldDirections,
+  directionForCode,
+  shouldHandleGameInput,
+  intervalsOverlap,
+  sweptPointDistance,
+  sweptIntervalsOverlap,
+  laneTileContaining,
+  hitboxHalfWidthForEnemy,
+  findIntersectedWallLane,
+} = globalThis.Skyroads.input;
+
 // ============================================================
 // 1. 常量配置 CONFIG —— 所有魔法数字集中在此，附数值推导注释
 // ============================================================
@@ -161,7 +180,7 @@ const CONFIG = {
                                //   车道位置保持不动 —— 推导：满速 24 段/秒下玩家有 ≥0.6s
                                //   反应窗口，≈ 变道耗时 0.18s 的 3.3 倍 ✓ 足以预判规避
   DRONE_MOVE_TIME: 0.4,        // 换道移动秒数：车道位置平滑插值滑到相邻车道（不再跳变），
-                               //   渲染与碰撞共用同一连续位置（与玩家 laneFrom/laneTo/laneT 同源）
+                               //   渲染与碰撞共用同一连续位置（与玩家 movement 状态同源）
 };
 
 // 中间车道索引（玩家出生车道）：LANES=5 → 2
@@ -179,10 +198,7 @@ const STATE = {
   // 玩家
   position: 0,                 // 所在位置（segment 为单位，浮点）
   speed: 0,
-  lane: midLane(),             // 逻辑车道（目标），出生在中间车道
-  laneFrom: midLane(),
-  laneTo: midLane(),
-  laneT: 1,                    // 变道插值进度 0..1
+  movement: createMovementState(midLane()), // 唯一横向真值：连续车道位置 + 按住/分段状态
   playerY: 0,                  // 跳跃高度（世界单位）
   playerVY: 0,
   jumpsUsed: 0,                // 已用跳跃段数（0..MAX_JUMPS，落地重置）
@@ -203,7 +219,7 @@ const STATE = {
   // 战斗（第六轮：J 点按子弹 / 按住 CHARGE_TIME(3)s 蓄力导弹，无弹药概念）
   chargeT: 0,                  // J 蓄力进度（秒，0..CHARGE_TIME；松手时判子弹/导弹）
   chargeStage: 0,              // 蓄力提示音已发档位（0..3：1s/2s tick + 满蓄 ding）
-  shots: [],                   // 飞行中的子弹/导弹 { kind, seg, lane }（lane 为发射时车道）
+  shots: [],                   // 飞行中的子弹/导弹 { kind, seg, lanePosition }（发射瞬间连续位置）
   bulletCD: 0,                 // 子弹冷却剩余秒数
   boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
   // 燃料/计分
@@ -229,10 +245,48 @@ const STATE = {
 // 3. 输入处理 Input（键盘 + 触屏）
 // ============================================================
 const KEYS = {};
+
+function targetInsideAppUi(target) {
+  return !!(target && typeof target.closest === 'function' && target.closest('#app-ui'));
+}
+
+function modalOpen() {
+  return !!document.querySelector('#app-ui [role="dialog"][aria-modal="true"]:not([hidden])');
+}
+
+function gameInputDescriptor(e, mode = STATE.mode) {
+  return {
+    mode,
+    targetInsideAppUi: targetInsideAppUi(e && e.target),
+    modalOpen: modalOpen(),
+  };
+}
+
+function clearMovementInput() {
+  clearHeldDirections(STATE.movement);
+}
+
 window.addEventListener('keydown', (e) => {
+  const focusAvailable = shouldHandleGameInput(gameInputDescriptor(e, 'PLAYING'));
+  if (!focusAvailable) {
+    clearMovementInput();
+    return;
+  }
+
   // 全部游戏键都 preventDefault：macOS 对未处理的按键按住不放会发"滴滴滴"系统提示音
   if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' ','Enter',
-       'w','W','a','A','s','S','d','D','j','J','k','K','l','L','m','M'].includes(e.key)) e.preventDefault();
+       'w','W','a','A','s','S','d','D','j','J','k','K','l','L','m','M'].includes(e.key)
+      || directionForCode(e.code) !== 0) e.preventDefault();
+
+  const direction = directionForCode(e.code);
+  if (direction !== 0 && STATE.mode === 'PLAYING') {
+    const alreadyHeld = direction === -1 ? STATE.movement.heldLeft : STATE.movement.heldRight;
+    if (alreadyHeld) return;
+    const result = pressDirection(STATE.movement, direction);
+    if (result.started || result.reversed) sfxLane();
+    return;
+  }
+
   if (KEYS[e.key]) return;   // 抑制按键重复
   KEYS[e.key] = true;
 
@@ -247,14 +301,8 @@ window.addEventListener('keydown', (e) => {
     else if (e.key === 'Escape') gotoMenu();
     return;
   }
-  if (STATE.mode !== 'PLAYING') return;
+  if (!shouldHandleGameInput(gameInputDescriptor(e))) return;
   switch (e.key) {
-    case 'ArrowLeft':
-    case 'a': case 'A':
-      trySwitchLane(-1); break;
-    case 'ArrowRight':
-    case 'd': case 'D':
-      trySwitchLane(1); break;
     case ' ':
     case 'ArrowUp':
     case 'w': case 'W':
@@ -269,24 +317,49 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => {
   KEYS[e.key] = false;
+  const direction = directionForCode(e.code);
+  if (direction !== 0) {
+    const result = releaseDirection(STATE.movement, direction);
+    if (STATE.mode === 'PLAYING' && result.reversed) sfxLane();
+    return;
+  }
   // J 松手发射：蓄满 CHARGE_TIME(3)s → 蓄力导弹；未满 → 普通子弹
   if ((e.key === 'j' || e.key === 'J') && STATE.mode === 'PLAYING' && STATE.chargeT > 0) {
-    if (STATE.chargeT >= CONFIG.CHARGE_TIME) fireMissile();
-    else fireBullet();
+    if (shouldHandleGameInput(gameInputDescriptor(e))) {
+      if (STATE.chargeT >= CONFIG.CHARGE_TIME) fireMissile();
+      else fireBullet();
+    }
     STATE.chargeT = 0;
     STATE.chargeStage = 0;
   }
 });
+window.addEventListener('blur', clearMovementInput);
+if (typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearMovementInput();
+  });
+  document.addEventListener('focusin', (e) => {
+    if (targetInsideAppUi(e.target)) clearMovementInput();
+  });
+}
 
 // ---- 触屏：左右滑变道，点按跳跃；菜单/结束屏点按开始 ----
 let touchStart = null;
 window.addEventListener('touchstart', (e) => {
+  if (targetInsideAppUi(e.target) || modalOpen()) {
+    touchStart = null;
+    return;
+  }
   const t = e.changedTouches[0];
   touchStart = { x: t.clientX, y: t.clientY, time: performance.now() };
   if (STATE.mode !== 'PLAYING') e.preventDefault();
 }, { passive: false });
 window.addEventListener('touchend', (e) => {
   if (!touchStart) return;
+  if (targetInsideAppUi(e.target) || modalOpen()) {
+    touchStart = null;
+    return;
+  }
   const t = e.changedTouches[0];
   const dx = t.clientX - touchStart.x;
   const dy = t.clientY - touchStart.y;
@@ -305,14 +378,8 @@ window.addEventListener('touchend', (e) => {
 }, { passive: true });
 
 function trySwitchLane(dir) {
-  if (STATE.laneT < 1) return;            // 当前变道未完成（空中也允许变道）
-  const target = STATE.lane + dir;
-  if (target < 0 || target >= CONFIG.LANES) return;
-  STATE.laneFrom = STATE.lane;
-  STATE.laneTo = target;
-  STATE.lane = target;
-  STATE.laneT = 0;
-  sfxLane();                              // 轻 whoosh
+  const result = requestDiscreteLaneChange(STATE.movement, dir);
+  if (result.started) sfxLane();           // 轻 whoosh
 }
 
 function tryJump() {
@@ -365,7 +432,12 @@ function fireBullet() {
   if (n >= CONFIG.MAX_BULLETS) return;              // 同屏上限
   STATE.bulletCD = CONFIG.BULLET_COOLDOWN;
   // 弹道携带发射瞬间高度 y（地面 = 0，空中 = playerY）：跳得高打得远
-  STATE.shots.push({ kind: 'bullet', seg: STATE.position + 0.8, lane: currentLaneIndex(), y: STATE.playerY });
+  STATE.shots.push({
+    kind: 'bullet',
+    seg: STATE.position + 0.8,
+    lanePosition: STATE.movement.lanePosition,
+    y: STATE.playerY,
+  });
   sfxShoot();
 }
 
@@ -375,7 +447,12 @@ function fireMissile() {
   let n = 0;
   for (const s of STATE.shots) if (s.kind === 'missile') n++;
   if (n >= CONFIG.MAX_MISSILE_SHOTS) return;
-  STATE.shots.push({ kind: 'missile', seg: STATE.position + 0.8, lane: currentLaneIndex(), y: STATE.playerY });
+  STATE.shots.push({
+    kind: 'missile',
+    seg: STATE.position + 0.8,
+    lanePosition: STATE.movement.lanePosition,
+    y: STATE.playerY,
+  });
   sfxMissile();
 }
 
@@ -723,9 +800,7 @@ function laneCenterX(lane) {
 
 // 玩家当前 worldX（含变道插值）—— 渲染与碰撞共用同一插值来源
 function playerWorldX() {
-  const from = laneCenterX(STATE.laneFrom);
-  const to = laneCenterX(STATE.laneTo);
-  return from + (to - from) * STATE.laneT;
+  return laneCenterX(STATE.movement.lanePosition);
 }
 
 // 颜色明暗调整
@@ -1173,7 +1248,7 @@ function renderShots(ctx) {
     const zRel = (sh.seg - STATE.position) * CONFIG.SEGMENT_LENGTH + CONFIG.CAMERA_BACK;
     if (zRel < 9) continue;
     const zTail = zRel + CONFIG.SEGMENT_LENGTH * 0.7;      // 尾迹滞后 0.7 段
-    const wx = laneCenterX(sh.lane);
+    const wx = laneCenterX(sh.lanePosition);
     if (sh.kind === 'bullet') {
       const pH = project(wx, sh.y, zRel);
       const pT = project(wx, sh.y, zTail);
@@ -1619,9 +1694,14 @@ function renderPlayer(ctx) {
   }
 
   // ---- 姿态（全部由游戏状态确定性驱动，船体轮廓不随机）----
-  // 变道倾斜（bank/roll）：变道中段倾角最大，两端归零
-  const bank = STATE.laneT < 1
-    ? (STATE.laneTo - STATE.laneFrom) * Math.sin(STATE.laneT * Math.PI) * 0.22
+  // 变道倾斜（bank/roll）：由当前分段方向与已缓动进度派生，不参与碰撞。
+  const movementDirection = Math.sign(STATE.movement.segmentTarget - STATE.movement.segmentStart);
+  const movementDistance = STATE.movement.segmentTarget - STATE.movement.segmentStart;
+  const easedMovementProgress = movementDistance === 0
+    ? 1
+    : (STATE.movement.lanePosition - STATE.movement.segmentStart) / movementDistance;
+  const bank = STATE.movement.segmentActive
+    ? movementDirection * Math.sin(easedMovementProgress * Math.PI) * 0.22
     : 0;
   // 上仰（pitch）：由垂直速度驱动 —— 起跳瞬间上仰最大，顶点归零，下落时压头
   // 滑翔时机体拉平（noseLift ×0.3），配合机翼展开 ×1.15、尾焰 ×0.5（见下方绘制）
@@ -1634,7 +1714,7 @@ function renderPlayer(ctx) {
   // 透视朝向（第六轮反馈）：赛道有近大远小的透视，飞船却永远正面同比例 → 违和。
   // 按车道偏移给船体加 yaw 偏转（机头朝消失点，每车道 ≈2.6°，边缘 ≈8°）+
   // 轻微水平剪切（配合地面倾斜感）；变道插值期间平滑过渡
-  const laneFNow = STATE.laneFrom + (STATE.laneTo - STATE.laneFrom) * STATE.laneT;
+  const laneFNow = STATE.movement.lanePosition;
   const laneOff = laneFNow - (CONFIG.LANES - 1) / 2;      // ±3
   ctx.save();
   ctx.translate(cx, cyR);
@@ -2305,13 +2385,12 @@ function updatePhysics(dt) {
   const steps = Math.max(1, Math.ceil((maxV * dt) / 0.5));
   const sdt = dt / steps;
   for (let i = 0; i < steps; i++) {
+    const movementStep = advanceMovement(STATE.movement, sdt * 1000);
+    const previousLanePosition = movementStep.previousLanePosition;
+    const currentLanePosition = movementStep.lanePosition;
+
     STATE.position += STATE.speed * sdt;
     STATE.distance += STATE.speed * sdt * CONFIG.DISTANCE_PER_SEGMENT;
-
-    // 变道插值（渲染与碰撞读取同一组 laneFrom/laneTo/laneT）
-    if (STATE.laneT < 1) {
-      STATE.laneT = Math.min(1, STATE.laneT + sdt / CONFIG.LANE_SWITCH_TIME);
-    }
 
     // 跳跃物理（含滑翔：空中 + 按住跳跃键 + 下落中 + 有燃料）
     if (STATE.playerY > 0 || STATE.playerVY > 0) {
@@ -2362,19 +2441,18 @@ function updatePhysics(dt) {
     updateEnemies(sdt);         // 无人机换道状态机（预警/平滑移动）
     advanceShots(sdt);          // 弹道推进 + 命中判定（同子步扫掠）
     extendTrack();
-    checkCollisions();
+    checkCollisions(previousLanePosition, currentLanePosition);
     // 磁铁吸附：magnetT > 0 期间，当前段与前方 MAGNET_SEG_AHEAD(2) 段
     // ±MAGNET_RANGE(3) 车道内的燃料自动飞来（无视高度）——
     // 燃料立即入账，同时生成飞行晶体动画实体（updateEffects 推进、renderEffects 绘制）
     if (STATE.magnetT > 0) {
       const mBase = Math.floor(STATE.position);
-      const mLane = currentLaneIndex();
       for (let mi = mBase; mi <= mBase + CONFIG.MAGNET_SEG_AHEAD && mi < STATE.track.length; mi++) {
         const mSeg = STATE.track[mi];
         if (!mSeg) continue;
         for (let ml = 0; ml < CONFIG.LANES; ml++) {
           if (mSeg.lanes[ml] !== LANE_TYPE.FUEL) continue;
-          if (Math.abs(ml - mLane) > CONFIG.MAGNET_RANGE) continue;
+          if (Math.abs(ml - currentLanePosition) > CONFIG.MAGNET_RANGE) continue;
           pickupFuel(mSeg, ml);
           const zRel = (mi - STATE.position) * CONFIG.SEGMENT_LENGTH + CONFIG.CAMERA_BACK;
           const fp = project(laneCenterX(ml), 300, Math.max(9, zRel));
@@ -2389,7 +2467,7 @@ function updatePhysics(dt) {
 
 // 敌人当前连续车道位置（浮点；turret 固定，drone 由换道状态机驱动）
 // —— 渲染、玩家接触判定、弹道命中共用同一插值来源，所见即所判
-// （与玩家 laneFrom/laneTo/laneT 同源思路：warn 期停在 fromLane，
+// （与玩家 movement 同源思路：warn 期停在 fromLane，
 //   move 期 fromLane → toLane 平滑插值，碰撞比较用 ±0.5 车道容差）
 function enemyLane(e) {
   if (e.type !== 'drone' || e.state === undefined) return e.lane;
@@ -2462,7 +2540,12 @@ function advanceShots(sdt) {
     if (seg.enemies && seg.enemies.length > 0) {
       for (let ei = seg.enemies.length - 1; ei >= 0; ei--) {
         const e = seg.enemies[ei];
-        if (Math.abs(enemyLane(e) - sh.lane) >= 0.5) continue;   // 连续车道 ±0.5 容差
+        if (!intervalsOverlap(
+          sh.lanePosition,
+          HITBOX.projectileHalfWidth,
+          enemyLane(e),
+          hitboxHalfWidthForEnemy(e.type),
+        )) continue;
         // 无人机近炸引信：不按高度过滤 —— 伪 3D 透视下地面子弹视觉上"命中"无人机，
         // 高度门会造成"打中了却没反应"的困惑（高度规则只保留给墙体，见下方）
         seg.enemies.splice(ei, 1);
@@ -2472,7 +2555,8 @@ function advanceShots(sdt) {
       }
     }
     if (!hit) {
-      const t = seg.lanes[sh.lane];
+      const wallLane = findIntersectedWallLane(seg.lanes, sh.lanePosition);
+      const t = wallLane === null ? null : seg.lanes[wallLane];
       if (t === LANE_TYPE.WALL_LOW || t === LANE_TYPE.WALL_HIGH) {
         // 超级形态武器强化：
         //   导弹 → 范围清除命中段 ±SUPER_MISSILE_RADIUS × 全车道的建筑与敌人；
@@ -2482,8 +2566,8 @@ function advanceShots(sdt) {
           superMissileBlast(sh.seg);
         } else if (sh.kind === 'bullet' && STATE.tripleT > 0) {
           hit = true;
-          seg.lanes[sh.lane] = LANE_TYPE.ROAD;
-          buildingBurstFx(sh.lane, sh.seg, t === LANE_TYPE.WALL_HIGH ? 500 : 300);
+          seg.lanes[wallLane] = LANE_TYPE.ROAD;
+          buildingBurstFx(wallLane, sh.seg, t === LANE_TYPE.WALL_HIGH ? 500 : 300);
           sfxWallDown();
         } else {
           // 子弹高度规则：y > 矮墙 600 可越过矮墙；高塔 2000 挡一切子弹；导弹不清高度
@@ -2493,11 +2577,11 @@ function advanceShots(sdt) {
           if (bulletBlocked) {
             hit = true;
             if (sh.kind === 'missile') {
-              seg.lanes[sh.lane] = LANE_TYPE.ROAD;      // 导弹清障：墙（含高塔）→ 路面
-              shotBurstFx(sh.lane, sh.seg, t === LANE_TYPE.WALL_HIGH ? 420 : 260, true);
+              seg.lanes[wallLane] = LANE_TYPE.ROAD;      // 导弹清障：墙（含高塔）→ 路面
+              shotBurstFx(wallLane, sh.seg, t === LANE_TYPE.WALL_HIGH ? 420 : 260, true);
               sfxEnemyDown();
             } else {
-              shotBurstFx(sh.lane, sh.seg, 240, false); // 子弹撞墙湮灭小火花
+              shotBurstFx(wallLane, sh.seg, 240, false); // 子弹撞墙湮灭小火花
             }
           }
         }
@@ -2607,57 +2691,30 @@ function superPowerDownFx() {
   sfxPowerDown();
 }
 
-// 玩家当前实际车道索引（0..LANES-1），与渲染插值同源
-function currentLaneIndex() {
-  const laneF = STATE.laneFrom + (STATE.laneTo - STATE.laneFrom) * STATE.laneT;
-  return Math.max(0, Math.min(CONFIG.LANES - 1, Math.round(laneF)));
-}
-
 function pickupFuel(seg, laneIdx) {
   seg.lanes[laneIdx] = LANE_TYPE.ROAD;
   STATE.fuel = Math.min(CONFIG.FUEL_MAX, STATE.fuel + CONFIG.FUEL_PICKUP);
   sfxFuel();
 }
 
-// 每个子步的碰撞检测（高度判定与渲染共用同一组 CONFIG 高度值）
-function checkCollisions() {
-  if (STATE.fuel <= 0) { die('fuel'); return; }
-  const seg = STATE.track[Math.floor(STATE.position)];
-  if (!seg) return;
-  const laneIdx = currentLaneIndex();
-  const type = seg.lanes[laneIdx];
-  const invincible = STATE.boostT > 0;   // 超级加速期间：撞墙/过缺口均穿透不受伤
-
-  if (type === LANE_TYPE.WALL_LOW) {
-    // 矮墙：跳跃顶点 879 > 墙高 600，跳得够高即可安全越过
-    if (!invincible && STATE.playerY <= CONFIG.WALL_LOW_HEIGHT) { die('wall'); return; }
-  } else if (type === LANE_TYPE.WALL_HIGH) {
-    // 高塔：2000 > 二段跳上限 1758，跳不过去 —— 碰到即死，必须变道躲避
-    if (!invincible && STATE.playerY <= CONFIG.WALL_HIGH_HEIGHT) { die('wall'); return; }
-  } else if (type === LANE_TYPE.GAP) {
-    // 高度不足安全高度则坠落（落地瞬间 playerY=0，必须落在路面上）
-    if (!invincible && STATE.playerY < CONFIG.GAP_SAFE_HEIGHT) { die('gap'); return; }
-  } else if (type === LANE_TYPE.FUEL) {
-    // 燃料照常吃（与超级加速不冲突）
-    if (STATE.playerY <= CONFIG.FUEL_COLLECT_HEIGHT) pickupFuel(seg, laneIdx);
+function collectPickup(seg, lane, type) {
+  if (type === LANE_TYPE.FUEL) {
+    if (STATE.playerY > CONFIG.FUEL_COLLECT_HEIGHT) return false;
+    pickupFuel(seg, lane);
   } else if (type === LANE_TYPE.BOOST) {
-    // 闪电超级加速：5 秒无敌穿透 + 速度锁定 BOOST_SPEED(36)，结束后恢复吃前速度
-    seg.lanes[laneIdx] = LANE_TYPE.ROAD;
-    if (STATE.boostT <= 0) STATE.boostPrevSpeed = STATE.speed;  // 连吃不覆盖原始速度
+    seg.lanes[lane] = LANE_TYPE.ROAD;
+    if (STATE.boostT <= 0) STATE.boostPrevSpeed = STATE.speed;
     STATE.boostT = CONFIG.BOOST_DURATION;
-    STATE.boostWarnStage = 0;              // 重置预警 beep 档位
+    STATE.boostWarnStage = 0;
     sfxBoost();
   } else if (type === LANE_TYPE.SLOW) {
-    // 减速：速度立即 ×0.6（不低于 INITIAL_SPEED），之后按 ACCEL 重新爬升
-    seg.lanes[laneIdx] = LANE_TYPE.ROAD;
+    seg.lanes[lane] = LANE_TYPE.ROAD;
     STATE.speed = Math.max(CONFIG.INITIAL_SPEED, STATE.speed * CONFIG.SLOW_FACTOR);
     sfxSlow();
   } else if (type === LANE_TYPE.TRIPLE) {
-    // 青白星超级形态：TRIPLE_DURATION(20)s 三段跳+长滑翔+武器强化+船体变身
-    seg.lanes[laneIdx] = LANE_TYPE.ROAD;
+    seg.lanes[lane] = LANE_TYPE.ROAD;
     STATE.tripleT = CONFIG.TRIPLE_DURATION;
-    STATE.tripleWarnStage = 0;             // 重置预警 beep 档位
-    // ---- 变身瞬间特效：白闪 + 金色冲击波环 + 26 颗金色爆发粒子 + "超级形态"大字 ----
+    STATE.tripleWarnStage = 0;
     STATE.superFx = 0.9;
     STATE.flash = Math.max(STATE.flash, 0.6);
     const sp = project(playerWorldX(), STATE.playerY, CONFIG.CAMERA_BACK);
@@ -2677,17 +2734,52 @@ function checkCollisions() {
     }
     sfxTriple();
   } else if (type === LANE_TYPE.MAGNET) {
-    // 红白马蹄磁铁：MAGNET_DURATION(8)s 内 ±MAGNET_RANGE(2) 车道燃料自动吸附
-    seg.lanes[laneIdx] = LANE_TYPE.ROAD;
+    seg.lanes[lane] = LANE_TYPE.ROAD;
     STATE.magnetT = CONFIG.MAGNET_DURATION;
     sfxMagnet();
+  } else {
+    return false;
+  }
+  return true;
+}
+
+// 每个子步的碰撞检测（高度判定与渲染共用同一组 CONFIG 高度值）
+function checkCollisions(previousLanePosition, currentLanePosition) {
+  if (STATE.fuel <= 0) { die('fuel'); return; }
+  const seg = STATE.track[Math.floor(STATE.position)];
+  if (!seg) return;
+  const invincible = STATE.boostT > 0;
+
+  for (let lane = 0; lane < CONFIG.LANES; lane++) {
+    const type = seg.lanes[lane];
+    if (!sweptIntervalsOverlap(previousLanePosition, currentLanePosition, 0.14, lane, 0.42)) continue;
+    if (type === LANE_TYPE.WALL_LOW
+      && !invincible
+      && STATE.playerY <= CONFIG.WALL_LOW_HEIGHT) { die('wall'); return; }
+    if (type === LANE_TYPE.WALL_HIGH
+      && !invincible
+      && STATE.playerY <= CONFIG.WALL_HIGH_HEIGHT) { die('wall'); return; }
   }
 
-  // ---- 敌人接触：同段同车道（连续车道 ±0.5 容差，含 drone 移动期中间位置）撞上即死 ----
-  // BOOST 无敌期间穿透不死；drone 高 500 可跳过，turret 高 1900 跳不过
+  const supportLane = laneTileContaining(currentLanePosition);
+  if (seg.lanes[supportLane] === LANE_TYPE.GAP
+    && !invincible
+    && STATE.playerY < CONFIG.GAP_SAFE_HEIGHT) { die('gap'); return; }
+
+  for (let lane = 0; lane < CONFIG.LANES; lane++) {
+    if (sweptPointDistance(previousLanePosition, currentLanePosition, lane) > 0.38) continue;
+    if (collectPickup(seg, lane, seg.lanes[lane])) break;
+  }
+
   if (!invincible && seg.enemies) {
     for (const e of seg.enemies) {
-      if (Math.abs(enemyLane(e) - laneIdx) >= 0.5) continue;
+      if (!sweptIntervalsOverlap(
+        previousLanePosition,
+        currentLanePosition,
+        0.14,
+        enemyLane(e),
+        hitboxHalfWidthForEnemy(e.type),
+      )) continue;
       const h = e.type === 'drone' ? CONFIG.DRONE_HEIGHT : CONFIG.TURRET_HEIGHT;
       if (STATE.playerY <= h) { die('enemy'); return; }
     }
@@ -2700,10 +2792,7 @@ function checkCollisions() {
 function resetGame() {
   STATE.position = 0;
   STATE.speed = CONFIG.INITIAL_SPEED;      // 起步即有速度感
-  STATE.lane = midLane();                  // 出生在中间车道（5 车道 → 2）
-  STATE.laneFrom = midLane();
-  STATE.laneTo = midLane();
-  STATE.laneT = 1;
+  resetMovement(STATE.movement, midLane());
   STATE.playerY = 0;
   STATE.playerVY = 0;
   STATE.jumpsUsed = 0;
@@ -2742,6 +2831,7 @@ function startGame() {
 }
 
 function gotoMenu() {
+  clearMovementInput();
   STATE.mode = 'MENU';
 }
 
@@ -2765,6 +2855,7 @@ function writeBestScore(storage, score) {
 
 function die(reason) {
   if (STATE.mode !== 'PLAYING') return;
+  clearMovementInput();
   STATE.mode = 'GAMEOVER';
   STATE.deathReason = reason;
   if (STATE.distance > STATE.best) {
@@ -3487,6 +3578,7 @@ function render() {
 function init() {
   const i18n = globalThis.Skyroads.i18n;
   const languageToggle = document.getElementById('language-toggle');
+  const appUi = document.getElementById('app-ui');
   let translator;
   function applyLocale(locale) {
     translator = i18n.createTranslator(locale);
@@ -3507,6 +3599,16 @@ function init() {
     i18n.writeLocalePreference(localeStorage, locale);
     applyLocale(locale);
   });
+  if (appUi && typeof globalThis.MutationObserver === 'function') {
+    const overlayObserver = new globalThis.MutationObserver(() => {
+      if (modalOpen()) clearMovementInput();
+    });
+    overlayObserver.observe(appUi, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden', 'aria-hidden', 'aria-modal'],
+    });
+  }
   STATE.ctx = STATE.canvas.getContext('2d');
   function resize() {
     STATE.width = STATE.canvas.width = window.innerWidth;

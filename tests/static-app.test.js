@@ -45,6 +45,7 @@ test('blocked storage does not prevent startup or saving a new best score', () =
   });
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(root, 'src/i18n.js'), 'utf8'), sandbox);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/input.js'), 'utf8'), sandbox);
   assert.doesNotThrow(() => vm.runInContext(
     `${fs.readFileSync(path.join(root, 'src/game.js'), 'utf8')}\nSTATE.mode = 'PLAYING'; STATE.distance = 1; STATE.best = 0; die('wall');`,
     sandbox,

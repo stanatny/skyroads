@@ -8,6 +8,7 @@ const {
   advanceMovement,
   clearHeldDirections,
   directionForCode,
+  shouldHandleGameInput,
   intervalsOverlap,
   sweptPointDistance,
   sweptIntervalsOverlap,
@@ -15,6 +16,13 @@ const {
   hitboxHalfWidthForEnemy,
   findIntersectedWallLane,
 } = require('../src/input.js');
+
+test('gameplay input is disabled while UI owns keyboard focus', () => {
+  assert.equal(shouldHandleGameInput({ mode:'PLAYING', targetInsideAppUi:false, modalOpen:false }), true);
+  assert.equal(shouldHandleGameInput({ mode:'PLAYING', targetInsideAppUi:true, modalOpen:false }), false);
+  assert.equal(shouldHandleGameInput({ mode:'PLAYING', targetInsideAppUi:false, modalOpen:true }), false);
+  assert.equal(shouldHandleGameInput({ mode:'MENU', targetInsideAppUi:false, modalOpen:false }), false);
+});
 
 test('tap completes exactly one lane in 145ms', () => {
   const state = createMovementState(3);
