@@ -123,27 +123,27 @@ func addGoldAccents(to model: SCNNode) {
 
 func addExhaust(to model: SCNNode) {
     let outerMaterial = material(
-        color: NSColor(calibratedRed: 0.08, green: 0.70, blue: 0.95, alpha: 0.55),
-        emission: NSColor(calibratedRed: 0.06, green: 0.82, blue: 1.0, alpha: 1),
-        transparency: 0.74
+        color: NSColor(calibratedRed: 0.05, green: 0.58, blue: 0.88, alpha: 0.24),
+        emission: NSColor(calibratedRed: 0.04, green: 0.62, blue: 0.88, alpha: 1),
+        transparency: 0.36
     )
     let coreMaterial = material(
-        color: NSColor(calibratedRed: 0.72, green: 0.98, blue: 1.0, alpha: 0.9),
-        emission: NSColor(calibratedRed: 0.58, green: 0.96, blue: 1.0, alpha: 1),
-        transparency: 0.90
+        color: NSColor(calibratedRed: 0.30, green: 0.86, blue: 1.0, alpha: 0.52),
+        emission: NSColor(calibratedRed: 0.16, green: 0.78, blue: 1.0, alpha: 1),
+        transparency: 0.52
     )
     for side: Float in [-1, 1] {
-        let outer = SCNCone(topRadius: 0.08, bottomRadius: 0.28, height: 1.70)
+        let outer = SCNCone(topRadius: 0.025, bottomRadius: 0.11, height: 0.72)
         outer.materials = [outerMaterial]
         let outerNode = SCNNode(geometry: outer)
-        outerNode.position = SCNVector3(side * 0.88, -0.58, -3.48)
+        outerNode.position = SCNVector3(side * 0.88, -0.58, -2.62)
         outerNode.eulerAngles.x = .pi / 2
         model.addChildNode(outerNode)
 
-        let core = SCNCone(topRadius: 0.025, bottomRadius: 0.105, height: 1.22)
+        let core = SCNCone(topRadius: 0.008, bottomRadius: 0.035, height: 0.40)
         core.materials = [coreMaterial]
         let coreNode = SCNNode(geometry: core)
-        coreNode.position = SCNVector3(side * 0.88, -0.58, -3.36)
+        coreNode.position = SCNVector3(side * 0.88, -0.58, -2.47)
         coreNode.eulerAngles.x = .pi / 2
         model.addChildNode(coreNode)
     }

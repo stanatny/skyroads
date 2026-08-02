@@ -1736,7 +1736,13 @@ function renderPlayer(ctx) {
 
   const presentation = globalThis.Skyroads.presentation;
   const energized = STATE.boostT > 0 || STATE.tripleT > 0 || STATE.playerY > 0 || STATE.jumpBurst > 0;
-  const shipFrame = presentation.resolvePlayerShipFrame(STATE.visualAssets, energized);
+  const visualPlan = presentation.playerVisualLayerPlan(STATE.visualAssets, {
+    energized,
+    chargeActive: STATE.chargeT > 0 && STATE.mode === 'PLAYING',
+    boostActive: STATE.boostT > 0,
+    superActive: STATE.tripleT > 0,
+  });
+  const shipFrame = visualPlan.shipFrame;
   if (shipFrame) {
     const frameRect = presentation.computeShipDrawRect(STATE.width, STATE.height, 4 / 3);
     ctx.drawImage(
@@ -2051,11 +2057,12 @@ function renderPlayer(ctx) {
       ctx.closePath(); ctx.fill();
     }
   }
+  }
 
   // ---- 超级形态变身：金白能量装甲（顶部双光刃 + 金色翼缘辉光 + 金座舱 +
   //      金色流动能量中脊）。预警期（tripleT < TRIPLE_WARN_TIME）与光环同频
   //      time×10 急促闪烁；常驻期 time×6 慢脉冲，一眼可辨"我是超级形态" ----
-  if (STATE.tripleT > 0) {
+  if (visualPlan.layers.includes('super-surface')) {
     const sWarn = STATE.tripleT < CONFIG.TRIPLE_WARN_TIME;
     const sF = sWarn ? (0.55 + 0.45 * Math.sin(STATE.time * 10)) : (0.85 + 0.15 * Math.sin(STATE.time * 6));
     // 顶部双光刃（能量鳍，自座舱后方向斜上方展开，金色半透明）
@@ -2126,7 +2133,7 @@ function renderPlayer(ctx) {
   // ---- J 蓄力能量场（第六轮反馈：原效果太浅，全面加强）----
   // 机头前方能量球显著长大（0.35H → 1.2H）+ 白亮核心（>30%）+ 折线电弧（>40%）
   // + 满蓄金色旋转虚线环 —— 不看 HUD 也能明确感知蓄力进度
-  if (STATE.chargeT > 0 && STATE.mode === 'PLAYING') {
+  if (visualPlan.layers.includes('charge')) {
     const cf = Math.min(1, STATE.chargeT / CONFIG.CHARGE_TIME);
     const full = cf >= 1;
     const cxE = 0, cyE = noseY * 0.55;
@@ -2174,13 +2181,12 @@ function renderPlayer(ctx) {
       ctx.restore();
     }
   }
-  }
 
   ctx.restore();
 
   // ---- 超级加速光环：青白色速度场光罩（剩余 < BOOST_WARN_TIME 时急促闪烁，
   //      与屏幕边缘预警光晕同频 time×8，节奏对齐）----
-  if (STATE.boostT > 0) {
+  if (visualPlan.layers.includes('boost-aura')) {
     const fading = STATE.boostT < CONFIG.BOOST_WARN_TIME ? (0.5 + 0.5 * Math.sin(STATE.time * 8)) : 1;
     const br2 = Math.max(W2, H) * 1.55;
     const pulse = (0.9 + 0.1 * Math.sin(STATE.time * 8)) * fading;
@@ -2196,7 +2202,7 @@ function renderPlayer(ctx) {
 
   // ---- 超级形态金色光环：脉冲能量场光罩（预警期与 HUD 条/船体同频 time×10
   //      急促闪烁；与 BOOST 青白光环可叠加，色温截然不同）----
-  if (STATE.tripleT > 0) {
+  if (visualPlan.layers.includes('super-aura')) {
     const fading = STATE.tripleT < CONFIG.TRIPLE_WARN_TIME ? (0.5 + 0.5 * Math.sin(STATE.time * 10)) : 1;
     const ar = Math.max(W2, H) * 1.75;
     const pulse = (0.9 + 0.1 * Math.sin(STATE.time * 6)) * fading;

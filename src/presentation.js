@@ -69,6 +69,7 @@
   } = {}) {
     const states = { ship: {}, ui: {}, icons: {}, font: {} };
     const pending = [];
+    const imageTasks = [];
 
     function queueImage(groupName, key, assetPath) {
       const state = { path: assetPath, loaded: false, element: null };
@@ -82,9 +83,12 @@
         const finish = (loaded) => {
           if (settled) return;
           settled = true;
+          image.onload = null;
+          image.onerror = null;
           state.loaded = loaded;
           resolve();
         };
+        imageTasks.push({ finish });
         image.onload = () => finish(true);
         image.onerror = () => finish(false);
         try {
@@ -129,6 +133,7 @@
         }),
       ]);
       if (timer !== null && typeof clearTimeoutFn === 'function') clearTimeoutFn(timer);
+      if (timedOut) imageTasks.forEach(({ finish }) => finish(false));
     } else {
       await allSettled;
     }
@@ -158,6 +163,21 @@
     if (!frames.neutral || !frames.thrust || !frames.neutral.loaded || !frames.thrust.loaded) return null;
     const frame = energized ? frames.thrust : frames.neutral;
     return frame.element || null;
+  }
+
+  function playerVisualLayerPlan(visualAssets, {
+    energized = false,
+    chargeActive = false,
+    boostActive = false,
+    superActive = false,
+  } = {}) {
+    const shipFrame = resolvePlayerShipFrame(visualAssets, energized);
+    const layers = [shipFrame ? 'ship-image' : 'procedural-ship'];
+    if (superActive) layers.push('super-surface');
+    if (chargeActive) layers.push('charge');
+    if (boostActive) layers.push('boost-aura');
+    if (superActive) layers.push('super-aura');
+    return Object.freeze({ shipFrame, layers: Object.freeze(layers) });
   }
 
   function computeHudLayout(viewportWidth, viewportHeight) {
@@ -678,6 +698,7 @@
     VISUAL_ASSET_MANIFEST,
     preloadVisualAssets,
     resolvePlayerShipFrame,
+    playerVisualLayerPlan,
     computeHudLayout,
     canvasMetrics,
     overlayForMode,

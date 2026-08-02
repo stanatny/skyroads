@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   computeShipDrawRect,
   fallbackShipLayout,
+  playerVisualLayerPlan,
   computeHudLayout,
   canvasMetrics,
   overlayForMode,
@@ -24,6 +25,32 @@ const {
   directionForCode,
   shouldHandleGameInput,
 } = require('../src/input.js');
+
+test('loaded neutral and thrust frames retain charge boost and super layers in draw order', () => {
+  const neutral = { id: 'neutral' };
+  const thrust = { id: 'thrust' };
+  const ready = {
+    shipFramesReady: true,
+    assets: { ship: { neutral: { loaded: true, element: neutral }, thrust: { loaded: true, element: thrust } } },
+  };
+
+  const charging = playerVisualLayerPlan(ready, { chargeActive: true });
+  assert.equal(charging.shipFrame, neutral);
+  assert.deepEqual(charging.layers, ['ship-image', 'charge']);
+
+  const energized = playerVisualLayerPlan(ready, {
+    energized: true,
+    chargeActive: true,
+    boostActive: true,
+    superActive: true,
+  });
+  assert.equal(energized.shipFrame, thrust);
+  assert.deepEqual(energized.layers, ['ship-image', 'super-surface', 'charge', 'boost-aura', 'super-aura']);
+
+  const fallback = playerVisualLayerPlan(null, { chargeActive: true, boostActive: true, superActive: true });
+  assert.equal(fallback.shipFrame, null);
+  assert.deepEqual(fallback.layers, ['procedural-ship', 'super-surface', 'charge', 'boost-aura', 'super-aura']);
+});
 
 test('ship stays within seven to nine percent at target viewports', () => {
   for (const [width, height] of [[960, 600], [1280, 800], [1440, 900], [1920, 1080]]) {

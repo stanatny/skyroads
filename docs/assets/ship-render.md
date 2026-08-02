@@ -25,9 +25,10 @@ Outputs are transparent RGBA PNGs at 512 × 384. The app icon is a separate 1024
 
 ## Reproducible output hashes
 
+- `tools/render-ship.swift`: `38e28dda6b373c1513e44cb377b085f7b5224e840bbac4fbece7c9f8dbbbdd1a`
 - `assets/ship/player-neutral.png`: `33d7acbe701d7dd243db72dcd6dc89541623160960f794611867699b562af7a4`
-- `assets/ship/player-thrust.png`: `d296010a663acef2a50be84bb00d94614946287b110de3dfb59302fada5967e9`
-- `app/AppIcon.png`: `8177e7054dc93624864b70f0293bac037f039dbe4b7836986299cf345af97092`
+- `assets/ship/player-thrust.png`: `00518ff8b002e5072254d2411d0484e587a8901cde7caf7deccd372733e60e7f`
+- `app/AppIcon.png`: `47287912f71ec01b3d22669fb70c1bfc405142856ac9dfa2eb1a62c79c3c96aa`
 
 ## Fixed SceneKit settings
 
@@ -39,7 +40,8 @@ Outputs are transparent RGBA PNGs at 512 × 384. The app icon is a separate 1024
 - Upper-left cool key: RGB `(0.67, 0.83, 1.00)`, intensity `1750`, Euler rotation `(-0.85, -0.72, -0.20)`, soft shadow radius `5`.
 - Cyan rim: RGB `(0.02, 0.89, 1.00)`, intensity `1200`, Euler rotation `(0.45, 2.25, 0)`.
 - Gold accents: two narrow physically based panels at local `x ±0.72, y 0.12, z -0.45`; calibrated RGB `(0.80, 0.57, 0.18)`.
-- Thrust only: paired additive cyan cones at local `x ±0.88`, centered behind the rear nozzles at `z -3.48/-3.36`; bright inner cores use a separate smaller cone.
+- Thrust only outer plume: paired `SCNCone` nodes with top radius `0.025`, bottom radius `0.11`, height `0.72`, local position `(x ±0.88, y -0.58, z -2.62)`, and X rotation `π/2`. The constant/additive material uses diffuse calibrated RGBA `(0.05, 0.58, 0.88, 0.24)`, emission RGB `(0.04, 0.62, 0.88)`, material transparency `0.36`, double-sided rendering, and no depth-buffer writes.
+- Thrust only inner core: paired `SCNCone` nodes with top radius `0.008`, bottom radius `0.035`, height `0.40`, local position `(x ±0.88, y -0.58, z -2.47)`, and X rotation `π/2`. The constant/additive material uses diffuse calibrated RGBA `(0.30, 0.86, 1.00, 0.52)`, emission RGB `(0.16, 0.78, 1.00)`, material transparency `0.52`, double-sided rendering, and no depth-buffer writes.
 - Renderer: time `0`, 4× multisample antialiasing, no jitter, transparent background.
 
 The camera deliberately looks from the rear and slightly above. At the game size it preserves the Striker's swept silhouette, dark navy mass, cool leading rim, and small gold accents without presenting the toy-like frontal view rejected during visual review.
