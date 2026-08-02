@@ -195,6 +195,7 @@ const STATE = {
   ctx: null,
   width: 0,
   height: 0,
+  dpr: 1,
   // 玩家
   position: 0,                 // 所在位置（segment 为单位，浮点）
   speed: 0,
@@ -224,10 +225,19 @@ const STATE = {
   boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
   // 燃料/计分
   fuel: CONFIG.FUEL_MAX,
-  distance: 0,
-  elapsed: 0,
-  best: 0,
+  distanceMeters: 0,
+  enemyKills: 0,
+  score: 0,
+  elapsedMs: 0,
+  runId: null,
+  finalResult: null,
   deathReason: null,
+  storage: null,
+  translator: null,
+  leaderboard: null,
+  leaderboardSnapshot: null,
+  ui: null,
+  uiController: null,
   // 赛道
   track: [],
   gen: null,                   // 生成器内部状态（见第 4 节）
@@ -2390,7 +2400,7 @@ function updatePhysics(dt) {
     const currentLanePosition = movementStep.lanePosition;
 
     STATE.position += STATE.speed * sdt;
-    STATE.distance += STATE.speed * sdt * CONFIG.DISTANCE_PER_SEGMENT;
+    STATE.distanceMeters += STATE.speed * sdt * CONFIG.DISTANCE_PER_SEGMENT;
 
     // 跳跃物理（含滑翔：空中 + 按住跳跃键 + 下落中 + 有燃料）
     if (STATE.playerY > 0 || STATE.playerVY > 0) {
@@ -2412,7 +2422,7 @@ function updatePhysics(dt) {
 
     // 燃料消耗与计时；道具效果倒计时
     STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_DRAIN_RATE * sdt);
-    STATE.elapsed += sdt;
+    STATE.elapsedMs += sdt * 1000;
     if (STATE.boostT > 0) STATE.boostT = Math.max(0, STATE.boostT - sdt);
     if (STATE.tripleT > 0) {
       STATE.tripleT = Math.max(0, STATE.tripleT - sdt);
@@ -2591,9 +2601,9 @@ function advanceShots(sdt) {
   }
 }
 
-// 击毁敌人：+ENEMY_KILL_SCORE(20)m + 小爆炸 + 音效
+// 击毁敌人：只累积击毁数；竞争得分在首次进入 GAMEOVER 时统一结算。
 function killEnemy(e, segF) {
-  STATE.distance += CONFIG.ENEMY_KILL_SCORE;
+  STATE.enemyKills += 1;
   const h = e.type === 'drone' ? 320 : 900;
   shotBurstFx(enemyLane(e), segF, h, true);
   sfxEnemyDown();
@@ -2789,6 +2799,77 @@ function checkCollisions(previousLanePosition, currentLanePosition) {
 // ============================================================
 // 8. 状态机 GameState + 死亡特效
 // ============================================================
+function currentLeaderboardSnapshot() {
+  if (STATE.leaderboardSnapshot) return STATE.leaderboardSnapshot;
+  return {
+    profile: { playerId: 'local', name: 'Nova' },
+    entries: [],
+    legacyBest: null,
+    persistenceWarning: false,
+  };
+}
+
+function refreshPresentation() {
+  const presentation = globalThis.Skyroads.presentation;
+  if (!presentation || !STATE.ui || !STATE.translator) return;
+  presentation.renderCommandCenter(STATE.ui, {
+    translator: STATE.translator,
+    snapshot: currentLeaderboardSnapshot(),
+    mode: STATE.mode,
+    finalResult: STATE.finalResult,
+    deathReason: STATE.deathReason,
+    audioMuted: AUDIO.muted,
+  });
+}
+
+function focusPrimarySurface() {
+  const presentation = globalThis.Skyroads.presentation;
+  if (!presentation || typeof presentation.focusPrimaryForMode !== 'function') return;
+  presentation.focusPrimaryForMode({
+    canvas: STATE.canvas,
+    startButton: STATE.ui && STATE.ui.startButton,
+    restartButton: STATE.ui && STATE.ui.restartButton,
+  }, STATE.mode);
+}
+
+function resetRunResult() {
+  STATE.distanceMeters = 0;
+  STATE.enemyKills = 0;
+  STATE.score = 0;
+  STATE.elapsedMs = 0;
+  STATE.runId = STATE.leaderboard && typeof STATE.leaderboard.createRunId === 'function'
+    ? STATE.leaderboard.createRunId()
+    : `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  STATE.finalResult = null;
+}
+
+function finalizeCurrentRun() {
+  if (STATE.finalResult) return STATE.finalResult;
+  const presentation = globalThis.Skyroads.presentation;
+  if (STATE.leaderboard && presentation && typeof presentation.finalizeRunOnce === 'function') {
+    const result = presentation.finalizeRunOnce(STATE, STATE.leaderboard);
+    STATE.leaderboardSnapshot = result.snapshot;
+    return result;
+  }
+  const leaderboardApi = globalThis.Skyroads.leaderboard;
+  STATE.score = leaderboardApi && typeof leaderboardApi.calculateScore === 'function'
+    ? leaderboardApi.calculateScore(STATE)
+    : Math.floor(STATE.distanceMeters) + Math.floor(STATE.enemyKills) * CONFIG.ENEMY_KILL_SCORE;
+  STATE.finalResult = {
+    id: STATE.runId,
+    score: STATE.score,
+    distanceMeters: STATE.distanceMeters,
+    enemyKills: STATE.enemyKills,
+    elapsedMs: STATE.elapsedMs,
+    qualified: false,
+    rank: null,
+    cutoff: null,
+    entry: null,
+    newLocalBest: false,
+  };
+  return STATE.finalResult;
+}
+
 function resetGame() {
   STATE.position = 0;
   STATE.speed = CONFIG.INITIAL_SPEED;      // 起步即有速度感
@@ -2814,8 +2895,7 @@ function resetGame() {
   STATE.bulletCD = 0;
   STATE.boostWarnStage = 0;
   STATE.fuel = CONFIG.FUEL_MAX;
-  STATE.distance = 0;
-  STATE.elapsed = 0;
+  resetRunResult();
   STATE.deathReason = null;
   STATE.flash = 0;
   STATE.particles = [];
@@ -2826,31 +2906,19 @@ function resetGame() {
 
 function startGame() {
   audioInit();                 // 首次有效手势：创建/resume AudioContext（自动播放策略）
+  if (STATE.uiController) STATE.uiController.closeDialog(undefined, { restoreFocus: false });
   resetGame();
   STATE.mode = 'PLAYING';
+  refreshPresentation();
+  focusPrimarySurface();
 }
 
 function gotoMenu() {
   clearMovementInput();
+  if (STATE.uiController) STATE.uiController.closeDialog(undefined, { restoreFocus: false });
   STATE.mode = 'MENU';
-}
-
-function readBestScore(storage) {
-  try {
-    return parseFloat((storage && storage.getItem('skyroads_best')) || '0') || 0;
-  } catch (_) {
-    return 0;
-  }
-}
-
-function writeBestScore(storage, score) {
-  try {
-    if (!storage) return false;
-    storage.setItem('skyroads_best', String(score));
-    return true;
-  } catch (_) {
-    return false;
-  }
+  refreshPresentation();
+  focusPrimarySurface();
 }
 
 function die(reason) {
@@ -2858,10 +2926,9 @@ function die(reason) {
   clearMovementInput();
   STATE.mode = 'GAMEOVER';
   STATE.deathReason = reason;
-  if (STATE.distance > STATE.best) {
-    STATE.best = STATE.distance;
-    writeBestScore(STATE.storage, STATE.best);
-  }
+  finalizeCurrentRun();
+  refreshPresentation();
+  focusPrimarySurface();
   sfxDeath();
   STATE.gliding = false;                 // 停止滑翔（喷火轰鸣随之停止）
   // 死亡反馈：闪屏 + 屏幕震动 + 大爆炸粒子 + 冲击波圆环（在玩家屏幕位置）
@@ -3031,7 +3098,7 @@ function renderEffects(ctx) {
     ctx.shadowColor = 'rgba(255,190,80,0.9)';
     ctx.shadowBlur = 24;
     ctx.fillStyle = '#ffe9a0';
-    ctx.fillText('★ 超级形态 ★', STATE.width / 2, STATE.height * 0.30);
+    ctx.fillText(STATE.translator ? STATE.translator.t('effect.superForm') : '', STATE.width / 2, STATE.height * 0.30);
     ctx.restore();
     ctx.textAlign = 'left';
   }
@@ -3045,6 +3112,24 @@ function renderEffects(ctx) {
 // ============================================================
 // 9. UI (HUD / Menu / GameOver)
 // ============================================================
+function uiText(id, values) {
+  return STATE.translator ? STATE.translator.t(id, values) : '';
+}
+
+function uiNumber(value, options) {
+  return STATE.translator ? STATE.translator.formatNumber(value, options) : String(value);
+}
+
+function uiSeconds(milliseconds) {
+  return uiNumber(Math.max(0, milliseconds) / 1000, {
+    style: 'unit',
+    unit: 'second',
+    unitDisplay: 'short',
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+}
+
 function renderHUD(ctx) {
   // 燃料条
   const fx = 20, fy = 20, fw = 200, fh = 20;
@@ -3065,7 +3150,7 @@ function renderHUD(ctx) {
   ctx.strokeRect(fx, fy, fw, fh);
   ctx.fillStyle = '#fff';
   ctx.font = '12px monospace';
-  ctx.fillText('FUEL', fx + 4, fy + 14);
+  ctx.fillText(uiText('hud.fuel'), fx + 4, fy + 14);
 
   // 剩余跳跃段数：菱形引擎指示灯（用掉一段熄一个）；
   // 三段跳奖励期亮起第三颗金色灯，奖励结束自动恢复两颗
@@ -3081,7 +3166,7 @@ function renderHUD(ctx) {
   }
   ctx.fillStyle = '#89a';
   ctx.font = '10px monospace';
-  ctx.fillText('JUMP', fx + 44, fy + fh + 18);
+  ctx.fillText(uiText('hud.jump'), fx + 44, fy + fh + 18);
 
   // 道具效果剩余时间条（闪电青 / 超级形态金 / 磁铁青）
   let ey = fy + fh + 30;
@@ -3102,7 +3187,10 @@ function renderHUD(ctx) {
     ctx.strokeRect(fx, ey, fw, 10);
     ctx.fillStyle = charging ? (full ? '#ffd76a' : '#ff9a55') : 'rgba(140,150,170,0.75)';
     ctx.font = '10px monospace';
-    ctx.fillText(full ? ' 导弹就绪! 松开 J 发射' : (charging ? ' 蓄力中… ' + STATE.chargeT.toFixed(1) + 's' : ' J 按住蓄力'), fx + fw + 8, ey + 9);
+    const chargePercent = Math.round(Math.min(1, STATE.chargeT / CONFIG.CHARGE_TIME) * 100);
+    ctx.fillText(full
+      ? uiText('status.chargeReady')
+      : (charging ? uiText('status.charging', { percent: uiNumber(chargePercent) }) : uiText('status.chargeIdle')), fx + fw + 8, ey + 9);
     ey += 16;
   }
   if (STATE.boostT > 0) {
@@ -3127,7 +3215,9 @@ function renderHUD(ctx) {
     ctx.closePath();
     ctx.fill();
     ctx.font = '10px monospace';
-    ctx.fillText((warn ? ' 加速即将结束! ' : ' 加速 ') + STATE.boostT.toFixed(1) + 's', fx + fw + 20, ey + 9);
+    ctx.fillText(uiText(warn ? 'status.boostWarning' : 'status.boost', {
+      seconds: uiNumber(STATE.boostT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    }), fx + fw + 20, ey + 9);
     ey += 16;
   }
   if (STATE.tripleT > 0) {
@@ -3154,7 +3244,9 @@ function renderHUD(ctx) {
     ctx.closePath();
     ctx.fill();
     ctx.font = '10px monospace';
-    ctx.fillText((warn ? ' 超级形态即将结束! ' : ' 超级形态 ') + STATE.tripleT.toFixed(1) + 's', fx + fw + 24, ey + 9);
+    ctx.fillText(uiText(warn ? 'status.superWarning' : 'status.super', {
+      seconds: uiNumber(STATE.tripleT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    }), fx + fw + 24, ey + 9);
     ey += 16;
   }
   if (STATE.magnetT > 0) {
@@ -3176,80 +3268,45 @@ function renderHUD(ctx) {
     ctx.stroke();
     ctx.fillStyle = '#7fe8ff';
     ctx.font = '10px monospace';
-    ctx.fillText(' 磁铁 ' + STATE.magnetT.toFixed(1) + 's', fx + fw + 24, ey + 9);
+    ctx.fillText(uiText('status.magnet', {
+      seconds: uiNumber(STATE.magnetT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    }), fx + fw + 24, ey + 9);
     ey += 16;
   }
   // 静音状态指示
   ctx.fillStyle = '#89a';
   ctx.font = '10px monospace';
-  ctx.fillText(AUDIO.muted ? 'M 音乐：关' : 'M 音乐：开', fx, ey + 12);
+  ctx.fillText(uiText(AUDIO.muted ? 'hud.musicOff' : 'hud.musicOn'), fx, ey + 12);
 
   // 距离/速度/时间/最佳/操作提示
   ctx.textAlign = 'right';
   ctx.fillStyle = '#9fe';
   ctx.font = '16px monospace';
-  ctx.fillText('距离 ' + Math.floor(STATE.distance) + ' m', STATE.width - 16, 24);
-  ctx.fillText('速度 ' + STATE.speed.toFixed(1), STATE.width - 16, 44);
-  ctx.fillText('用时 ' + STATE.elapsed.toFixed(1) + ' s', STATE.width - 16, 64);
-  ctx.fillText('最佳 ' + Math.floor(STATE.best) + ' m', STATE.width - 16, 84);
+  const leaderboardApi = globalThis.Skyroads.leaderboard;
+  const liveScore = leaderboardApi && typeof leaderboardApi.calculateScore === 'function'
+    ? leaderboardApi.calculateScore(STATE) : STATE.score;
+  const entries = currentLeaderboardSnapshot().entries;
+  const localBest = entries.length > 0 ? entries[0].score : 0;
+  ctx.fillText(`${uiText('hud.distance')} ${uiNumber(Math.floor(STATE.distanceMeters), { style: 'unit', unit: 'meter', unitDisplay: 'short' })}`, STATE.width - 16, 24);
+  ctx.fillText(`${uiText('hud.score')} ${uiNumber(liveScore)}`, STATE.width - 16, 44);
+  ctx.fillText(`${uiText('hud.speed')} ${uiNumber(STATE.speed, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`, STATE.width - 16, 64);
+  ctx.fillText(`${uiText('hud.elapsed')} ${uiSeconds(STATE.elapsedMs)}`, STATE.width - 16, 84);
+  ctx.fillText(`${uiText('hud.localBest')} ${uiNumber(localBest)}`, STATE.width - 16, 104);
   ctx.fillStyle = '#c9a26a';
-  ctx.fillText('J 点按射击 / 按住 3 秒蓄力导弹', STATE.width - 16, 104);
+  ctx.fillText(uiText('hud.shootHint'), STATE.width - 16, 124);
   ctx.textAlign = 'left';
 
   // （连击倍率大字已随 MULTI 系统移除；三段跳奖励以左侧青色倒计时条呈现）
 }
 
 function renderMenu(ctx) {
-  ctx.fillStyle = 'rgba(5,5,20,0.55)';
+  ctx.fillStyle = 'rgba(2,6,17,0.52)';
   ctx.fillRect(0, 0, STATE.width, STATE.height);
-  const cx = STATE.width / 2, cy = STATE.height / 2;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#7fdfff';
-  ctx.font = 'bold 64px monospace';
-  ctx.fillText('太空跳跳车', cx, cy - 60);
-  ctx.font = '24px monospace';
-  ctx.fillStyle = '#aef';
-  ctx.fillText('SKYROADS', cx, cy - 20);
-  ctx.fillStyle = '#fff';
-  ctx.font = '20px monospace';
-  ctx.fillText('按 空格 开始', cx, cy + 40);
-  ctx.fillStyle = '#89a';
-  ctx.font = '14px monospace';
-  ctx.fillText('← → 变道（7 车道）    K/空格 跳跃 · 二段跳 · 按住滑翔    J 点按射击 / 按住 3 秒蓄力导弹    M 音乐', cx, cy + 80);
-  ctx.fillText('红色 = 危险（矮墙可跳过，高塔需变道）    青色晶体 = 燃料    触屏：滑变道 / 点按跳跃', cx, cy + 104);
-  ctx.fillText('道具：闪电 = 加速+无敌    沙漏 = 减速    青星 = 超级形态20s（三段跳·武器强化）    磁铁 = 吸附燃料', cx, cy + 128);
-  ctx.fillText('敌机：无人机可跳过、子弹任意高度可击中    重炮塔跳不过，变道或用导弹清除', cx, cy + 152);
-  if (STATE.best > 0) {
-    ctx.fillText('最佳记录: ' + Math.floor(STATE.best) + ' m', cx, cy + 182);
-  }
-  ctx.textAlign = 'left';
 }
 
 function renderGameOver(ctx) {
-  ctx.fillStyle = 'rgba(40,0,0,0.45)';
+  ctx.fillStyle = 'rgba(22,2,10,0.46)';
   ctx.fillRect(0, 0, STATE.width, STATE.height);
-  const cx = STATE.width / 2, cy = STATE.height / 2;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#ff6677';
-  ctx.font = 'bold 56px monospace';
-  ctx.fillText('GAME OVER', cx, cy - 70);
-
-  const reasons = { wall: '撞上障碍物', gap: '坠入虚空', fuel: '燃料耗尽', enemy: '撞上敌机' };
-  ctx.fillStyle = '#fcc';
-  ctx.font = '22px monospace';
-  ctx.fillText(reasons[STATE.deathReason] || '坠毁', cx, cy - 30);
-
-  ctx.fillStyle = '#fff';
-  ctx.font = '22px monospace';
-  ctx.fillText('距离 ' + Math.floor(STATE.distance) + ' m', cx, cy + 10);
-  ctx.fillText('用时 ' + STATE.elapsed.toFixed(1) + ' s', cx, cy + 40);
-  ctx.fillStyle = STATE.distance >= STATE.best ? '#ffcc33' : '#9fe';
-  ctx.fillText('最佳 ' + Math.floor(STATE.best) + ' m' + (STATE.distance >= STATE.best ? '  ★ 新纪录!' : ''), cx, cy + 70);
-
-  ctx.fillStyle = '#aef';
-  ctx.font = '18px monospace';
-  ctx.fillText('按 空格 重新开始    按 Esc 回主菜单', cx, cy + 120);
-  ctx.textAlign = 'left';
 }
 
 // ============================================================
@@ -3292,6 +3349,7 @@ function toggleMute() {
   try {
     if (AUDIO.master) AUDIO.master.gain.value = AUDIO.muted ? 0 : 0.45;
   } catch (e) {}
+  refreshPresentation();
 }
 
 // ---- 芯片音乐 BGM：三层（低音线 + 琶音 + 打击乐），明快进行 C–G–Am–F ----
@@ -3575,30 +3633,130 @@ function render() {
 // ============================================================
 // 11. 启动
 // ============================================================
+function applyLocale(locale) {
+  const i18n = globalThis.Skyroads.i18n;
+  if (!i18n) return;
+  STATE.translator = i18n.createTranslator(locale);
+  document.documentElement.lang = STATE.translator.locale;
+  document.title = STATE.translator.t('app.documentTitle');
+  const description = document.querySelector('meta[name="description"]');
+  if (description && typeof description.setAttribute === 'function') {
+    description.setAttribute('content', STATE.translator.t('meta.description'));
+  }
+  if (STATE.canvas && typeof STATE.canvas.setAttribute === 'function') {
+    STATE.canvas.setAttribute('aria-label', STATE.translator.t('canvas.label'));
+  }
+  refreshPresentation();
+}
+
+function installDiagnostics() {
+  const presentation = globalThis.Skyroads.presentation;
+  const safeSnapshot = () => {
+    const leaderboardSnapshot = currentLeaderboardSnapshot();
+    let overlays = null;
+    try { overlays = presentation ? presentation.overlayForMode(STATE.mode) : null; } catch (_) {}
+    return Object.freeze({
+      initialized: Boolean(STATE.canvas && STATE.ctx),
+      scripts: Object.freeze({
+        i18n: Boolean(globalThis.Skyroads.i18n),
+        leaderboard: Boolean(globalThis.Skyroads.leaderboard),
+        presentation: Boolean(presentation),
+        input: Boolean(globalThis.Skyroads.input),
+        game: true,
+      }),
+      locale: STATE.translator ? STATE.translator.locale : null,
+      mode: STATE.mode,
+      canvas: Object.freeze({ width: STATE.width, height: STATE.height, dpr: STATE.dpr }),
+      overlays: overlays ? Object.freeze({ ...overlays }) : null,
+      leaderboard: Object.freeze({
+        entryCount: Array.isArray(leaderboardSnapshot.entries) ? leaderboardSnapshot.entries.length : 0,
+        persistenceAvailable: !leaderboardSnapshot.persistenceWarning,
+      }),
+    });
+  };
+  const diagnostics = Object.freeze({
+    snapshot: safeSnapshot,
+    ready: Promise.resolve(safeSnapshot()),
+  });
+  try {
+    Object.defineProperty(globalThis.Skyroads, 'diagnostics', {
+      value: diagnostics,
+      configurable: true,
+      enumerable: true,
+      writable: false,
+    });
+  } catch (_) {
+    globalThis.Skyroads.diagnostics = diagnostics;
+  }
+}
+
 function init() {
   const i18n = globalThis.Skyroads.i18n;
-  const languageToggle = document.getElementById('language-toggle');
-  const appUi = document.getElementById('app-ui');
-  let translator;
-  function applyLocale(locale) {
-    translator = i18n.createTranslator(locale);
-    document.documentElement.lang = translator.locale;
-    document.title = translator.t('app.documentTitle');
-    document.querySelector('meta[name="description"]').setAttribute('content', translator.t('meta.description'));
-    STATE.canvas.setAttribute('aria-label', translator.t('canvas.label'));
-    languageToggle.textContent = `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`;
-  }
   STATE.canvas = document.getElementById('game');
   let localeStorage = null;
   try { localeStorage = globalThis.localStorage; } catch (_) {}
   STATE.storage = localeStorage;
   const savedLocale = i18n.readLocalePreference(localeStorage);
   applyLocale(i18n.resolveLocale({ savedLocale, languages: navigator.languages, language: navigator.language }));
-  languageToggle.addEventListener('click', () => {
-    const locale = translator.locale === 'zh-CN' ? 'en' : 'zh-CN';
-    i18n.writeLocalePreference(localeStorage, locale);
-    applyLocale(locale);
-  });
+
+  const leaderboardApi = globalThis.Skyroads.leaderboard;
+  if (leaderboardApi && typeof leaderboardApi.createLeaderboard === 'function') {
+    STATE.leaderboard = leaderboardApi.createLeaderboard({ storage: localeStorage });
+    STATE.leaderboardSnapshot = STATE.leaderboard.initialize();
+  }
+  resetRunResult();
+
+  const presentation = globalThis.Skyroads.presentation;
+  const appUi = document.getElementById('app-ui');
+  if (presentation && STATE.leaderboard && appUi) {
+    STATE.ui = presentation.createCommandCenter({
+      documentObject: document,
+      elements: {
+        appUi,
+        utilityControls: document.getElementById('utility-controls'),
+        titleScreen: document.getElementById('title-screen'),
+        gameOverScreen: document.getElementById('game-over-screen'),
+        leaderboardDialog: document.getElementById('leaderboard-dialog'),
+        renameDialog: document.getElementById('rename-dialog'),
+        persistenceWarning: document.getElementById('persistence-warning'),
+        ariaStatus: document.getElementById('aria-status'),
+      },
+    });
+    STATE.uiController = presentation.bindOverlayActions({
+      documentObject: document,
+      elements: STATE.ui,
+      actions: {
+        start: startGame,
+        menu: gotoMenu,
+        getPlayerName: () => currentLeaderboardSnapshot().profile.name,
+        beforeLeaderboard() {
+          STATE.leaderboardSnapshot = STATE.leaderboard.getSnapshot();
+          refreshPresentation();
+        },
+        rename(rawName) {
+          const mutation = STATE.leaderboard.renamePlayer(rawName);
+          STATE.leaderboardSnapshot = mutation.snapshot;
+          if (STATE.ui && STATE.ui.ariaStatus) {
+            STATE.ui.ariaStatus.textContent = `${STATE.translator.t('rename.label')}: ${mutation.snapshot.profile.name}`;
+          }
+          refreshPresentation();
+        },
+        nameInput(value) {
+          presentation.updateNameCount(STATE.ui, STATE.translator, value);
+        },
+        language() {
+          const locale = STATE.translator.locale === 'zh-CN' ? 'en' : 'zh-CN';
+          i18n.writeLocalePreference(localeStorage, locale);
+          applyLocale(locale);
+        },
+        audio: toggleMute,
+      },
+    });
+    refreshPresentation();
+    focusPrimarySurface();
+    if (STATE.leaderboardSnapshot.legacyBest != null) STATE.leaderboard.acknowledgeLegacyBest();
+  }
+
   if (appUi && typeof globalThis.MutationObserver === 'function') {
     const overlayObserver = new globalThis.MutationObserver(() => {
       if (modalOpen()) clearMovementInput();
@@ -3611,14 +3769,27 @@ function init() {
   }
   STATE.ctx = STATE.canvas.getContext('2d');
   function resize() {
-    STATE.width = STATE.canvas.width = window.innerWidth;
-    STATE.height = STATE.canvas.height = window.innerHeight;
+    const metrics = presentation
+      ? presentation.canvasMetrics(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1)
+      : { cssWidth: window.innerWidth, cssHeight: window.innerHeight, pixelWidth: window.innerWidth, pixelHeight: window.innerHeight, dpr: 1 };
+    STATE.width = metrics.cssWidth;
+    STATE.height = metrics.cssHeight;
+    STATE.dpr = metrics.dpr;
+    STATE.canvas.width = metrics.pixelWidth;
+    STATE.canvas.height = metrics.pixelHeight;
+    if (STATE.canvas.style) {
+      STATE.canvas.style.width = `${metrics.cssWidth}px`;
+      STATE.canvas.style.height = `${metrics.cssHeight}px`;
+    }
+    if (STATE.ctx && typeof STATE.ctx.setTransform === 'function') {
+      STATE.ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+    }
   }
   window.addEventListener('resize', resize);
   resize();
-  STATE.best = readBestScore(localeStorage);
   STATE.gen = newGenState();
   STATE.track = buildTrack();
+  installDiagnostics();
   requestAnimationFrame(loop);
 }
 init();

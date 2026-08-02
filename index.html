@@ -9,9 +9,19 @@
 </head>
 <body>
 <canvas id="game" aria-label="Nebula Cruise game canvas"></canvas>
-<button id="language-toggle" type="button" aria-label="Switch language" style="position:fixed;top:16px;right:16px;z-index:1">中文 / EN</button>
+<div id="app-ui">
+  <div id="command-frame" aria-hidden="true"></div>
+  <nav id="utility-controls" aria-label="Game settings"></nav>
+  <section id="title-screen" class="screen-panel"></section>
+  <section id="game-over-screen" class="screen-panel" hidden></section>
+  <section id="leaderboard-dialog" role="dialog" aria-modal="true" hidden></section>
+  <section id="rename-dialog" role="dialog" aria-modal="true" hidden></section>
+  <p id="persistence-warning" role="status" hidden></p>
+  <p id="aria-status" class="sr-only" aria-live="polite"></p>
+</div>
 <script defer src="./src/i18n.js"></script>
 <script defer src="./src/leaderboard.js"></script>
+<script defer src="./src/presentation.js"></script>
 <script defer src="./src/input.js"></script>
 <script defer src="./src/game.js"></script>
 </body>
