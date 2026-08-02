@@ -10,14 +10,15 @@ const root = path.resolve(__dirname, '..');
 
 test('the hidden WebKit smoke keeps its storage ephemeral without changing normal persistence', () => {
   const source = fs.readFileSync(path.join(root, 'app/main.swift'), 'utf8');
-  const normalDelegate = source.slice(
-    source.indexOf('final class AppDelegate'),
-    source.indexOf('final class SmokeDelegate'),
-  );
-  const smokeDelegate = source.slice(
-    source.indexOf('final class SmokeDelegate'),
-    source.indexOf('let app = NSApplication.shared'),
-  );
+  const normalStart = source.indexOf('final class AppDelegate');
+  const smokeStart = source.indexOf('final class SmokeDelegate');
+  const smokeEnd = source.indexOf('let app = NSApplication.shared');
+  assert.ok(normalStart >= 0, 'normal delegate delimiter must exist');
+  assert.ok(smokeStart >= 0, 'smoke delegate delimiter must exist');
+  assert.ok(smokeEnd >= 0, 'app-launch delimiter must exist');
+  assert.ok(normalStart < smokeStart && smokeStart < smokeEnd, 'delegate delimiters must remain ordered');
+  const normalDelegate = source.slice(normalStart, smokeStart);
+  const smokeDelegate = source.slice(smokeStart, smokeEnd);
 
   assert.match(
     smokeDelegate,
@@ -38,7 +39,7 @@ test('Git whitespace suppression is limited to the four byte-identical license c
     'licenses/Phosphor-Icons-MIT.txt',
     'licenses/Orbitron-OFL-1.1.txt',
   ];
-  const ordinaryPaths = ['README.md', 'app/main.swift'];
+  const ordinaryPaths = ['README.md', 'app/main.swift', 'src/game.js'];
   const output = execFileSync(
     'git',
     ['check-attr', 'whitespace', '--', ...licensePaths, ...ordinaryPaths],

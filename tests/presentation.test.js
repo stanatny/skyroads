@@ -6,6 +6,7 @@ const {
   computeShipDrawRect,
   fallbackShipLayout,
   playerVisualLayerPlan,
+  canvasMotionPolicy,
   computeHudLayout,
   canvasMetrics,
   overlayForMode,
@@ -15,6 +16,7 @@ const {
   bindOverlayActions,
   renderRankingRows,
   createCommandCenter,
+  updateNameCount,
   renderCommandCenter,
   focusPrimaryForMode,
 } = require('../src/presentation.js');
@@ -50,6 +52,27 @@ test('loaded neutral and thrust frames retain charge boost and super layers in d
   const fallback = playerVisualLayerPlan(null, { chargeActive: true, boostActive: true, superActive: true });
   assert.equal(fallback.shipFrame, null);
   assert.deepEqual(fallback.layers, ['procedural-ship', 'super-surface', 'charge', 'boost-aura', 'super-aura']);
+});
+
+test('canvas reduced-motion policy keeps gameplay moving but steadies decorative effects', () => {
+  assert.deepEqual(canvasMotionPolicy(false), {
+    decorativeMotion: true,
+    warningPulse: true,
+    shakeScale: 1,
+    deathFlashScale: 1,
+    deathParticleCount: 48,
+    deathShockwave: true,
+  });
+  assert.deepEqual(canvasMotionPolicy(true), {
+    decorativeMotion: false,
+    warningPulse: false,
+    shakeScale: 0,
+    deathFlashScale: 0.15,
+    deathParticleCount: 12,
+    deathShockwave: false,
+  });
+  assert.equal(canvasMotionPolicy(false), canvasMotionPolicy(false), 'hot render paths must reuse the normal policy object');
+  assert.equal(canvasMotionPolicy(true), canvasMotionPolicy(true), 'hot render paths must reuse the reduced policy object');
 });
 
 test('ship stays within seven to nine percent at target viewports', () => {
@@ -500,6 +523,158 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(elements.utilityControls.getAttribute('data-audio-status'), 'ready');
   assert.equal(elements.utilityControls.getAttribute('data-audio-format'), 'ogg');
   assert.equal(elements.utilityControls.getAttribute('data-audio-decoded'), 'true');
+  assert.equal(elements.utilityControls.getAttribute('aria-label'), 'settings.label');
+});
+
+test('rename count uses the same grapheme segmentation as the persisted name', () => {
+  const documentObject = makeFakeDocument();
+  const ui = { renameCount: documentObject.createElement('span') };
+  const translator = {
+    t(id, values) { return `${id}:${values.count}/${values.max}`; },
+    countCharacters(value) { return Array.from(value).length; },
+  };
+  updateNameCount(ui, translator, `👨‍👩‍👧‍👦e\u0301`);
+  assert.equal(ui.renameCount.textContent, 'rename.characterCount:2/16');
+});
+
+test('rename input clamps and submits at the shared 16-grapheme boundary', () => {
+  const documentObject = makeFakeDocument();
+  const button = () => documentObject.createElement('button');
+  const elements = {
+    renameForm: documentObject.createElement('form'),
+    renameInput: documentObject.createElement('input'),
+    renameDialog: documentObject.createElement('section'),
+    renameCancelButton: button(),
+  };
+  elements.renameDialog.hidden = false;
+  elements.renameDialog.querySelectorAll = () => [elements.renameInput, elements.renameCancelButton];
+  const calls = [];
+  const controller = bindOverlayActions({
+    documentObject,
+    elements,
+    actions: {
+      nameInput(value) { calls.push(['count', value]); },
+      rename(value) { calls.push(['rename', value]); },
+    },
+  });
+  const family = '👨‍👩‍👧‍👦';
+  const combining = 'e\u0301';
+  const expected = `${'A'.repeat(14)}${family}${combining}`;
+  elements.renameInput.value = `${expected}Z`;
+  elements.renameInput.dispatch('input');
+  elements.renameForm.dispatch('submit', { preventDefault() {} });
+
+  assert.equal(elements.renameInput.value, expected);
+  assert.deepEqual(calls, [['count', expected], ['rename', expected]]);
+  controller.destroy();
+});
+
+test('rename input preserves an in-progress space so multiword pilot names remain typeable', () => {
+  const documentObject = makeFakeDocument();
+  const elements = {
+    renameForm: documentObject.createElement('form'),
+    renameInput: documentObject.createElement('input'),
+    renameDialog: documentObject.createElement('section'),
+    renameCancelButton: documentObject.createElement('button'),
+  };
+  elements.renameDialog.hidden = false;
+  elements.renameDialog.querySelectorAll = () => [elements.renameInput, elements.renameCancelButton];
+  const submitted = [];
+  const controller = bindOverlayActions({
+    documentObject,
+    elements,
+    actions: { rename(value) { submitted.push(value); } },
+  });
+
+  elements.renameInput.value = 'Han ';
+  elements.renameInput.dispatch('input');
+  assert.equal(elements.renameInput.value, 'Han ');
+  elements.renameInput.value += 'Solo';
+  elements.renameForm.dispatch('submit', { preventDefault() {} });
+  assert.deepEqual(submitted, ['Han Solo']);
+  controller.destroy();
+});
+
+test('rename input defers clamping during IME composition and clamps once composition ends', () => {
+  const documentObject = makeFakeDocument();
+  const elements = {
+    renameForm: documentObject.createElement('form'),
+    renameInput: documentObject.createElement('input'),
+    renameDialog: documentObject.createElement('section'),
+    renameCancelButton: documentObject.createElement('button'),
+    leaderboardRenameButton: documentObject.createElement('button'),
+  };
+  elements.renameDialog.hidden = false;
+  elements.renameDialog.querySelectorAll = () => [elements.renameInput, elements.renameCancelButton];
+  const counts = [];
+  const controller = bindOverlayActions({
+    documentObject,
+    elements,
+    actions: { nameInput(value) { counts.push(value); } },
+  });
+  const composing = '星'.repeat(17);
+  elements.renameInput.dispatch('compositionstart');
+  elements.renameInput.value = composing;
+  elements.renameInput.dispatch('input', { isComposing: true });
+
+  assert.equal(elements.renameInput.value, composing);
+  assert.deepEqual(counts, []);
+
+  elements.renameInput.dispatch('compositionend');
+  assert.equal(elements.renameInput.value, '星'.repeat(16));
+  assert.deepEqual(counts, ['星'.repeat(16)]);
+
+  elements.renameInput.dispatch('compositionstart');
+  elements.renameCancelButton.dispatch('click');
+  elements.leaderboardRenameButton.dispatch('click');
+  elements.renameInput.value = 'Nova';
+  elements.renameInput.dispatch('input');
+  assert.deepEqual(counts, ['星'.repeat(16), '星'.repeat(16), 'Nova'], 'reopening clears a stranded composition state');
+  controller.destroy();
+});
+
+test('rename input does not rewrite an unchanged value or move its caret', () => {
+  const documentObject = makeFakeDocument();
+  const renameInput = documentObject.createElement('input');
+  let value = 'Nova';
+  let writes = 0;
+  Object.defineProperty(renameInput, 'value', {
+    configurable: true,
+    get() { return value; },
+    set(next) {
+      writes += 1;
+      value = String(next);
+      this.selectionStart = value.length;
+      this.selectionEnd = value.length;
+    },
+  });
+  renameInput.selectionStart = 1;
+  renameInput.selectionEnd = 1;
+  const elements = {
+    renameForm: documentObject.createElement('form'),
+    renameInput,
+    renameDialog: documentObject.createElement('section'),
+    renameCancelButton: documentObject.createElement('button'),
+  };
+  elements.renameDialog.hidden = false;
+  elements.renameDialog.querySelectorAll = () => [renameInput, elements.renameCancelButton];
+  const controller = bindOverlayActions({ documentObject, elements, actions: {} });
+
+  renameInput.dispatch('input');
+
+  assert.equal(writes, 0);
+  assert.equal(renameInput.selectionStart, 1);
+  assert.equal(renameInput.selectionEnd, 1);
+
+  value = 'No\u0000va';
+  renameInput.selectionStart = 3;
+  renameInput.selectionEnd = 3;
+  renameInput.dispatch('input');
+  assert.equal(writes, 1);
+  assert.equal(renameInput.value, 'Nova');
+  assert.equal(renameInput.selectionStart, 2);
+  assert.equal(renameInput.selectionEnd, 2);
+  controller.destroy();
 });
 
 test('overlay buttons invoke game actions and rename submits the optional value', () => {
@@ -548,7 +723,7 @@ test('overlay buttons invoke game actions and rename submits the optional value'
   elements.renameForm.dispatch('submit', { preventDefault() { submitPrevented = true; } });
 
   assert.equal(submitPrevented, true);
-  assert.deepEqual(calls, ['start', 'menu', 'language', 'music', 'sfx', 'rename:  Lyra  ']);
+  assert.deepEqual(calls, ['start', 'menu', 'language', 'music', 'sfx', 'rename:Lyra']);
   assert.equal(elements.renameDialog.hidden, true);
   controller.destroy();
 });

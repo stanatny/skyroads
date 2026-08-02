@@ -6,6 +6,27 @@
     return Number.isFinite(dimension) && dimension > 0 ? dimension : 0;
   }
 
+  const NORMAL_CANVAS_MOTION_POLICY = Object.freeze({
+    decorativeMotion: true,
+    warningPulse: true,
+    shakeScale: 1,
+    deathFlashScale: 1,
+    deathParticleCount: 48,
+    deathShockwave: true,
+  });
+  const REDUCED_CANVAS_MOTION_POLICY = Object.freeze({
+    decorativeMotion: false,
+    warningPulse: false,
+    shakeScale: 0,
+    deathFlashScale: 0.15,
+    deathParticleCount: 12,
+    deathShockwave: false,
+  });
+
+  function canvasMotionPolicy(reducedMotion) {
+    return reducedMotion ? REDUCED_CANVAS_MOTION_POLICY : NORMAL_CANVAS_MOTION_POLICY;
+  }
+
   function computeShipDrawRect(viewportWidth, viewportHeight, aspectRatio = 1) {
     const width = Math.min(finiteDimension(viewportWidth) * 0.0875, finiteDimension(viewportHeight) * 0.14);
     const safeAspectRatio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1;
@@ -417,7 +438,9 @@
     listen(elements.gameOverLeaderboardButton, 'click', showLeaderboard);
     listen(elements.leaderboardCloseButton, 'click', () => closeDialog(elements.leaderboardDialog));
 
+    let renameComposing = false;
     function showRename(event) {
+      renameComposing = false;
       if (elements.renameInput) {
         elements.renameInput.value = actions.getPlayerName ? actions.getPlayerName() : elements.renameInput.value;
       }
@@ -427,12 +450,58 @@
     listen(elements.leaderboardRenameButton, 'click', showRename);
     listen(elements.gameOverRenameButton, 'click', showRename);
     listen(elements.renameCancelButton, 'click', () => closeDialog(elements.renameDialog));
-    listen(elements.renameInput, 'input', () => {
-      if (actions.nameInput) actions.nameInput(elements.renameInput.value);
+    function processRenameInput() {
+      if (!elements.renameInput) return '';
+      const leaderboard = root.Skyroads && root.Skyroads.leaderboard;
+      const originalValue = elements.renameInput.value;
+      const value = leaderboard && typeof leaderboard.sanitizeNameInput === 'function'
+        ? leaderboard.sanitizeNameInput(originalValue, { trim: false })
+        : originalValue;
+      if (value !== originalValue) {
+        const selectionStart = Number.isInteger(elements.renameInput.selectionStart)
+          ? elements.renameInput.selectionStart
+          : originalValue.length;
+        const selectionEnd = Number.isInteger(elements.renameInput.selectionEnd)
+          ? elements.renameInput.selectionEnd
+          : selectionStart;
+        const sanitizePrefix = (end) => (leaderboard && typeof leaderboard.sanitizeNameInput === 'function'
+          ? leaderboard.sanitizeNameInput(originalValue.slice(0, end), { trim: false }).length
+          : Math.min(end, value.length));
+        const nextStart = Math.min(value.length, sanitizePrefix(selectionStart));
+        const nextEnd = Math.min(value.length, sanitizePrefix(selectionEnd));
+        elements.renameInput.value = value;
+        try {
+          if (typeof elements.renameInput.setSelectionRange === 'function') {
+            elements.renameInput.setSelectionRange(nextStart, nextEnd);
+          } else {
+            elements.renameInput.selectionStart = nextStart;
+            elements.renameInput.selectionEnd = nextEnd;
+          }
+        } catch (_) {
+          // Some non-text input implementations do not expose a writable selection.
+        }
+      }
+      if (actions.nameInput) actions.nameInput(value);
+      return value;
+    }
+    listen(elements.renameInput, 'compositionstart', () => { renameComposing = true; });
+    listen(elements.renameInput, 'compositionend', () => {
+      renameComposing = false;
+      processRenameInput();
+    });
+    listen(elements.renameInput, 'input', (event) => {
+      if (renameComposing || (event && event.isComposing)) return;
+      processRenameInput();
     });
     listen(elements.renameForm, 'submit', (event) => {
       if (event && typeof event.preventDefault === 'function') event.preventDefault();
-      if (actions.rename) actions.rename(elements.renameInput ? elements.renameInput.value : '');
+      let value = elements.renameInput ? elements.renameInput.value : '';
+      const leaderboard = root.Skyroads && root.Skyroads.leaderboard;
+      if (leaderboard && typeof leaderboard.sanitizeNameInput === 'function') {
+        value = leaderboard.sanitizeNameInput(value);
+        if (elements.renameInput) elements.renameInput.value = value;
+      }
+      if (actions.rename) actions.rename(value);
       closeDialog(elements.renameDialog);
     });
 
@@ -604,9 +673,14 @@
   }
 
   function updateNameCount(ui, translator, value) {
+    const leaderboard = root.Skyroads && root.Skyroads.leaderboard;
+    const count = leaderboard && typeof leaderboard.segmentGraphemes === 'function'
+      ? leaderboard.segmentGraphemes(String(value == null ? '' : value)).length
+      : translator.countCharacters(value || '');
     ui.renameCount.textContent = translator.t('rename.characterCount', {
-      count: translator.countCharacters(value || ''),
-      max: 16,
+      count,
+      max: leaderboard && Number.isInteger(leaderboard.MAX_NAME_CHARACTERS)
+        ? leaderboard.MAX_NAME_CHARACTERS : 16,
     });
   }
 
@@ -625,7 +699,7 @@
   } = {}) {
     if (!ui || !translator || !snapshot) return;
     setOverlayMode(ui, mode);
-    if (ui.utilityControls.setAttribute) ui.utilityControls.setAttribute('aria-label', translator.t('menu.subtitle'));
+    if (ui.utilityControls.setAttribute) ui.utilityControls.setAttribute('aria-label', translator.t('settings.label'));
     ui.languageButton.textContent = `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`;
     ui.languageButton.setAttribute('aria-label', `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`);
     const resolvedMusicMuted = musicMuted == null ? Boolean(audioMuted) : Boolean(musicMuted);
@@ -712,6 +786,7 @@
   const api = {
     computeShipDrawRect,
     fallbackShipLayout,
+    canvasMotionPolicy,
     VISUAL_ASSET_MANIFEST,
     preloadVisualAssets,
     resolvePlayerShipFrame,

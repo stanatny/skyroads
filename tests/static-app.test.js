@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'styles/game.css'), 'utf8');
 
 test('the static shell references loadable classic CSS and JavaScript', () => {
   assert.match(html, /<link rel="icon" href="data:,">/);
@@ -22,6 +23,14 @@ test('the static shell references loadable classic CSS and JavaScript', () => {
   }
 });
 
+test('the viewport keeps native browser zoom available', () => {
+  const viewport = html.match(/<meta\s+name="viewport"\s+content="([^"]+)"/i);
+  assert.ok(viewport, 'the page must declare a viewport');
+  assert.doesNotMatch(viewport[1], /user-scalable\s*=\s*no/i);
+  assert.doesNotMatch(viewport[1], /maximum-scale\s*=\s*1(?:\.0+)?(?:\s|,|$)/i);
+  assert.match(css, /#game\s*\{[^}]*touch-action:\s*pinch-zoom\s*;/s);
+});
+
 test('the browser namespace exists before feature modules attach', () => {
   const source = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8');
   assert.match(source, /globalThis\.Skyroads\s*\|\|/);
@@ -33,32 +42,6 @@ test('the adaptive audio policy loads as a classic script before the game', () =
   const gameIndex = scripts.indexOf('./src/game.js');
   assert.ok(audioIndex >= 0, 'the audio policy must be part of the static resource graph');
   assert.ok(audioIndex < gameIndex, 'audio must initialize before the game consumes it');
-});
-
-test('blocked storage does not prevent startup or saving a new best score', () => {
-  const canvas = { getContext() { return {}; }, setAttribute() {} };
-  const languageToggle = { addEventListener() {}, textContent: '' };
-  const sandbox = {
-    console,
-    navigator: { languages: ['en-US'], language: 'en-US' },
-    window: { innerWidth: 320, innerHeight: 480, addEventListener() {} },
-    document: {
-      documentElement: {},
-      getElementById(id) { return id === 'game' ? canvas : languageToggle; },
-      querySelector() { return { setAttribute() {} }; },
-    },
-    requestAnimationFrame() {},
-  };
-  Object.defineProperty(sandbox, 'localStorage', {
-    get() { throw new Error('storage blocked'); },
-  });
-  vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(root, 'src/i18n.js'), 'utf8'), sandbox);
-  vm.runInContext(fs.readFileSync(path.join(root, 'src/input.js'), 'utf8'), sandbox);
-  assert.doesNotThrow(() => vm.runInContext(
-    `${fs.readFileSync(path.join(root, 'src/game.js'), 'utf8')}\nSTATE.mode = 'PLAYING'; STATE.distance = 1; STATE.best = 0; die('wall');`,
-    sandbox,
-  ));
 });
 
 test('startup exposes a locked adaptive-audio diagnostic without creating AudioContext', () => {

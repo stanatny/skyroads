@@ -8,6 +8,8 @@
   'use strict';
 
   const STEM_TRANSITION_SECONDS = 0.3;
+  // Two complete format attempts must still settle before the native 10-second WKWebView smoke deadline.
+  const DEFAULT_FORMAT_LOAD_TIMEOUT_MS = 4000;
   const STORAGE_KEYS = Object.freeze({
     musicMuted: 'nebula-cruise.audio.music-muted',
     sfxMuted: 'nebula-cruise.audio.sfx-muted',
@@ -91,6 +93,10 @@
     proceduralFallback = null,
     canPlayType = null,
     files = DEFAULT_FILES,
+    formatLoadTimeoutMs = DEFAULT_FORMAT_LOAD_TIMEOUT_MS,
+    setTimeoutImpl = typeof setTimeout === 'function' ? setTimeout : null,
+    clearTimeoutImpl = typeof clearTimeout === 'function' ? clearTimeout : null,
+    AbortControllerClass = typeof AbortController === 'function' ? AbortController : null,
   } = {}) {
     const savedMusic = readPreference(storage, STORAGE_KEYS.musicMuted);
     const savedSfx = readPreference(storage, STORAGE_KEYS.sfxMuted);
@@ -109,12 +115,35 @@
     let adaptiveNodes = [];
     let adaptiveSources = [];
     let fallbackActivated = false;
+    let loadGeneration = 0;
     let gameState = { mode: 'MENU', speedRatio: 0, danger: false, boost: false };
     let unlockPromise = null;
     let resolveReady;
     const ready = new Promise((resolve) => { resolveReady = resolve; });
+    const formatTimeoutMs = Number.isFinite(Number(formatLoadTimeoutMs))
+      ? Math.max(0, Number(formatLoadTimeoutMs))
+      : DEFAULT_FORMAT_LOAD_TIMEOUT_MS;
 
     function snapshot() { return Object.freeze({ ...state }); }
+
+    function awaitWithDeadline(operation, message) {
+      if (typeof setTimeoutImpl !== 'function') return Promise.resolve(operation);
+      return new Promise((resolve, reject) => {
+        let timeoutId = setTimeoutImpl(() => reject(new Error(message)), formatTimeoutMs);
+        Promise.resolve(operation).then(
+          (value) => {
+            if (timeoutId !== null && typeof clearTimeoutImpl === 'function') clearTimeoutImpl(timeoutId);
+            timeoutId = null;
+            resolve(value);
+          },
+          (error) => {
+            if (timeoutId !== null && typeof clearTimeoutImpl === 'function') clearTimeoutImpl(timeoutId);
+            timeoutId = null;
+            reject(error);
+          },
+        );
+      });
+    }
 
     function rampMix() {
       if (!context || !gains) return;
@@ -162,10 +191,12 @@
         const failedContext = context;
         context = null;
         try {
-          if (typeof failedContext.close === 'function') await failedContext.close();
-          else if (typeof failedContext.suspend === 'function') await failedContext.suspend();
+          if (typeof failedContext.close === 'function') Promise.resolve(failedContext.close()).catch(() => {
+            try { if (typeof failedContext.suspend === 'function') failedContext.suspend(); } catch (_) {}
+          });
+          else if (typeof failedContext.suspend === 'function') Promise.resolve(failedContext.suspend()).catch(() => {});
         } catch (_) {
-          try { if (typeof failedContext.suspend === 'function') await failedContext.suspend(); } catch (_) {}
+          try { if (typeof failedContext.suspend === 'function') Promise.resolve(failedContext.suspend()).catch(() => {}); } catch (_) {}
         }
       }
     }
@@ -183,14 +214,49 @@
 
     async function loadSet(format) {
       const urls = urlsForFormat(files, format);
-      const responses = await Promise.all(urls.map((url) => fetchImpl(url)));
-      if (responses.some((response) => !usableStemResponse(response))) {
-        throw new Error(`${format} stem response failed`);
+      const generation = ++loadGeneration;
+      let timeoutId = null;
+      let abortController = null;
+      try {
+        if (typeof AbortControllerClass === 'function') abortController = new AbortControllerClass();
+      } catch (_) {}
+      const assertCurrent = () => {
+        if (generation !== loadGeneration) throw new Error(`${format} stem load superseded`);
+      };
+      const deadline = new Promise((_, reject) => {
+        if (typeof setTimeoutImpl !== 'function') return;
+        timeoutId = setTimeoutImpl(() => {
+          if (generation === loadGeneration) loadGeneration++;
+          try { if (abortController) abortController.abort(); } catch (_) {}
+          reject(new Error(`${format} stem load timed out`));
+        }, formatTimeoutMs);
+      });
+      const requestOptions = abortController ? { signal: abortController.signal } : null;
+      const work = (async () => {
+        const responses = await Promise.all(urls.map((url) => requestOptions ? fetchImpl(url, requestOptions) : fetchImpl(url)));
+        assertCurrent();
+        if (responses.some((response) => !usableStemResponse(response))) {
+          throw new Error(`${format} stem response failed`);
+        }
+        const encoded = await Promise.all(responses.map((response) => response.arrayBuffer()));
+        assertCurrent();
+        const buffers = await Promise.all(encoded.map((data) => context.decodeAudioData(data)));
+        assertCurrent();
+        if (!validateStemDurations(buffers, 1)) throw new Error(`${format} stem durations disagree`);
+        return buffers;
+      })();
+      let completed = false;
+      try {
+        const buffers = await Promise.race([work, deadline]);
+        completed = true;
+        return buffers;
+      } finally {
+        if (timeoutId !== null && typeof clearTimeoutImpl === 'function') clearTimeoutImpl(timeoutId);
+        if (!completed) {
+          try { if (abortController) abortController.abort(); } catch (_) {}
+        }
+        if (generation === loadGeneration) loadGeneration++;
       }
-      const encoded = await Promise.all(responses.map((response) => response.arrayBuffer()));
-      const buffers = await Promise.all(encoded.map((data) => context.decodeAudioData(data)));
-      if (!validateStemDurations(buffers, 1)) throw new Error(`${format} stem durations disagree`);
-      return buffers;
     }
 
     async function unlock() {
@@ -203,7 +269,9 @@
             return snapshot();
           }
           context = new AudioContextClass();
-          if (context.state === 'suspended' && typeof context.resume === 'function') await context.resume();
+          if (context.state === 'suspended' && typeof context.resume === 'function') {
+            await awaitWithDeadline(context.resume(), 'Audio context resume timed out');
+          }
 
           const preferred = chooseStemFormat(canPlayType, files);
           const formats = preferred === 'ogg' ? ['ogg', 'mp3'] : preferred === 'mp3' ? ['mp3'] : [];

@@ -6,7 +6,10 @@ const vm = require('node:vm');
 const {
   DEFAULT_NAMES,
   STORAGE_KEYS,
+  MAX_NAME_CHARACTERS,
   calculateScore,
+  segmentGraphemes,
+  sanitizeNameInput,
   normalizeName,
   generateDefaultName,
   compareEntries,
@@ -47,6 +50,26 @@ test('name normalization removes controls and limits Unicode characters', () => 
   assert.equal(normalizeName('   ', 'Vega'), 'Vega');
 });
 
+test('rename presentation helpers count and clamp the same grapheme clusters', () => {
+  const family = '👨‍👩‍👧‍👦';
+  const combining = 'e\u0301';
+  const raw = `${'A'.repeat(14)}${family}${combining}Z`;
+  const sanitized = sanitizeNameInput(raw);
+  assert.equal(segmentGraphemes(sanitized).length, MAX_NAME_CHARACTERS);
+  assert.equal(sanitized, `${'A'.repeat(14)}${family}${combining}`);
+});
+
+test('leaderboard runs when Object.hasOwn is unavailable in an older WebView', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'leaderboard.js'), 'utf8');
+  const context = { module: { exports: {} } };
+  vm.createContext(context);
+  vm.runInContext('Object.hasOwn = undefined;', context);
+  vm.runInContext(source, context, { filename: 'leaderboard-without-object-has-own.js' });
+  const leaderboard = context.module.exports.createLeaderboard({ storage: null, random: () => 0 });
+  assert.doesNotThrow(() => leaderboard.initialize());
+  assert.equal(leaderboard.getSnapshot().entries.length, 0);
+});
+
 test('name normalization keeps ZWJ emoji intact at the 16-visible-character boundary', () => {
   const family = '👨‍👩‍👧‍👦';
   assert.equal(normalizeName(family.repeat(17), 'Vega'), family.repeat(16));
@@ -69,6 +92,51 @@ test('name normalization fallback keeps Unicode spacing marks and combining mark
   const fallbackNormalizeName = loadLeaderboardWithoutSegmenter().normalizeName;
   assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}किB`, 'Vega'), `${'A'.repeat(15)}कि`);
   assert.equal(fallbackNormalizeName(`${'A'.repeat(15)}Б\u0483C`, 'Vega'), `${'A'.repeat(15)}Б\u0483`);
+});
+
+test('name normalization fallback preserves Hangul, Prepend, and Indic conjunct graphemes', () => {
+  const fallback = loadLeaderboardWithoutSegmenter();
+  const clusters = ['가', '؀A', 'क्ष'];
+  assert.deepEqual(Array.from(fallback.segmentGraphemes(clusters.join(''))), clusters);
+  for (const cluster of clusters) {
+    assert.equal(fallback.normalizeName(cluster.repeat(17), 'Vega'), cluster.repeat(16));
+  }
+});
+
+test('fallback follows Unicode 16 GB6-8, GB9b, and GB9c fixture boundaries', () => {
+  const fallback = loadLeaderboardWithoutSegmenter();
+  const fixture = (...codePoints) => String.fromCodePoint(...codePoints);
+  const cases = [
+    ['GB6 L × V', fixture(0x1100, 0x1160)],
+    ['GB6 L × LV', fixture(0x1100, 0xac00)],
+    ['GB7 LV × V × T', fixture(0xac00, 0x1161, 0x11a8)],
+    ['GB8 LVT × T', fixture(0xac01, 0x11a8)],
+    ['GB9b Prepend × Other', fixture(0x0600, 0x0020)],
+    ['GB9c Consonant × Linker × Consonant', fixture(0x0915, 0x094d, 0x0937)],
+    ['GB9c accepts Extend and ZWJ after Linker', fixture(0x0915, 0x094d, 0x0308, 0x200d, 0x0937)],
+    ['GB9c accepts ZWJ before Linker', fixture(0x0915, 0x200d, 0x094d, 0x0937)],
+  ];
+  for (const [rule, value] of cases) {
+    assert.deepEqual(Array.from(fallback.segmentGraphemes(value)), [value], rule);
+  }
+
+  const hangulBreak = fixture(0x1100, 0x0308, 0x1160);
+  assert.deepEqual(Array.from(fallback.segmentGraphemes(hangulBreak)), [
+    fixture(0x1100, 0x0308),
+    fixture(0x1160),
+  ], 'an intervening Extend prevents the adjacent GB6 boundary');
+
+  const missingLinker = fixture(0x0915, 0x200d, 0x0937);
+  assert.deepEqual(Array.from(fallback.segmentGraphemes(missingLinker)), [
+    fixture(0x0915, 0x200d),
+    fixture(0x0937),
+  ], 'GB9c must not join Indic consonants when the Linker is absent');
+
+  const spacingMarkBeforeLinker = fixture(0x0915, 0x093e, 0x094d, 0x0937);
+  assert.deepEqual(Array.from(fallback.segmentGraphemes(spacingMarkBeforeLinker)), [
+    fixture(0x0915, 0x093e, 0x094d),
+    fixture(0x0937),
+  ], 'GB9c must not scan through a SpacingMark that is not InCB=Extend');
 });
 
 test('name normalization fallback rejects consecutive ZWJs instead of returning a dangling joiner', () => {
@@ -278,6 +346,31 @@ test('initialize recovers a corrupt active document from backup and promotes the
   assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.active)), backup);
 });
 
+test('initialize does not promote a stale backup over a peer run saved between storage reads', () => {
+  const storage = new FakeStorage();
+  const peer = createTestLeaderboard(storage, {
+    cryptoObject: { randomUUID: () => 'shared-player' },
+  });
+  const initializing = createTestLeaderboard(storage, {
+    cryptoObject: { randomUUID: () => 'shared-player' },
+  });
+  const originalGetItem = storage.getItem.bind(storage);
+  let injectedPeerWrite = false;
+  storage.getItem = (key) => {
+    if (key === STORAGE_KEYS.backup && !injectedPeerWrite) {
+      injectedPeerWrite = true;
+      peer.initialize();
+      peer.finalizeRun({ id: 'peer-run', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
+    }
+    return originalGetItem(key);
+  };
+
+  const snapshot = initializing.initialize();
+
+  assert.deepEqual(snapshot.entries.map((entry) => entry.id), ['peer-run']);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.active)).entries.map((entry) => entry.id), ['peer-run']);
+});
+
 test('initialize replaces two invalid documents with a fresh safe persisted profile', () => {
   const storage = new FakeStorage({
     [STORAGE_KEYS.active]: JSON.stringify({ version: 2 }),
@@ -380,18 +473,232 @@ test('renamePlayer updates only entries owned by the current player ID', () => {
   assert.deepEqual(result.snapshot.entries.map((entry) => entry.name), ['Lyra', 'Vega']);
 });
 
+test('two initialized controllers reconcile sequential runs and back up the latest active document', () => {
+  const storage = new FakeStorage();
+  const first = createTestLeaderboard(storage, {
+    cryptoObject: { randomUUID: () => 'player-shared' },
+  });
+  const second = createTestLeaderboard(storage, {
+    cryptoObject: { randomUUID: () => 'player-shared' },
+  });
+  first.initialize();
+  second.initialize();
+
+  first.finalizeRun({ id: 'run-a', distanceMeters: 100, enemyKills: 0, elapsedMs: 20 });
+  const result = second.finalizeRun({ id: 'run-b', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
+
+  assert.deepEqual(result.snapshot.entries.map((entry) => entry.id), ['run-b', 'run-a']);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.active)).entries.map((entry) => entry.id), ['run-b', 'run-a']);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.backup)).entries.map((entry) => entry.id), ['run-a']);
+});
+
+test('stale rename and run mutations rebase without losing peer history or profile state', () => {
+  const initial = makeDocument();
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(initial) });
+  const first = createTestLeaderboard(storage);
+  const second = createTestLeaderboard(storage);
+  first.initialize();
+  second.initialize();
+
+  first.finalizeRun({ id: 'run-a', distanceMeters: 100, enemyKills: 0, elapsedMs: 20 });
+  second.renamePlayer('Lyra');
+  let durable = JSON.parse(storage.values.get(STORAGE_KEYS.active));
+  assert.equal(durable.profile.name, 'Lyra');
+  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-a', 'Lyra']]);
+
+  first.finalizeRun({ id: 'run-b', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
+  durable = JSON.parse(storage.values.get(STORAGE_KEYS.active));
+  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-b', 'Lyra'], ['run-a', 'Lyra']]);
+
+  second.renamePlayer('Vega');
+  durable = JSON.parse(storage.values.get(STORAGE_KEYS.active));
+  assert.equal(durable.profile.name, 'Vega');
+  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-b', 'Vega'], ['run-a', 'Vega']]);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.backup)).entries.map((entry) => entry.id), ['run-b', 'run-a']);
+});
+
+test('a mutation reconciles a corrupt active with a valid backup before writing', () => {
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(makeDocument()) });
+  const leaderboard = createTestLeaderboard(storage);
+  leaderboard.initialize();
+  storage.values.set(STORAGE_KEYS.active, '{corrupt');
+  storage.values.set(STORAGE_KEYS.backup, JSON.stringify(makeDocument({ entries: [makeEntry(1, {
+    id: 'run-a', score: 100, distanceMeters: 100,
+  })] })));
+
+  const result = leaderboard.finalizeRun({ id: 'run-b', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
+
+  assert.equal(result.snapshot.persistenceAvailable, true);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.active)).entries.map((entry) => entry.id), ['run-b', 'run-a']);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.backup)).entries.map((entry) => entry.id), ['run-a']);
+});
+
+test('a valid competing readback is merged and retried instead of disabling persistence', () => {
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(makeDocument()) });
+  const leaderboard = createTestLeaderboard(storage);
+  leaderboard.initialize();
+  const originalSetItem = storage.setItem.bind(storage);
+  let controllerActiveWrites = 0;
+  let injected = false;
+  storage.setItem = (key, value) => {
+    originalSetItem(key, value);
+    if (key !== STORAGE_KEYS.active) return;
+    controllerActiveWrites += 1;
+    if (!injected) {
+      injected = true;
+      storage.values.set(STORAGE_KEYS.active, JSON.stringify(makeDocument({ entries: [makeEntry(2, {
+        id: 'run-b', score: 200, distanceMeters: 200,
+      })] })));
+    }
+  };
+
+  const result = leaderboard.finalizeRun({ id: 'run-a', distanceMeters: 100, enemyKills: 0, elapsedMs: 20 });
+
+  assert.equal(result.snapshot.persistenceAvailable, true);
+  assert.equal(controllerActiveWrites, 2);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.active)).entries.map((entry) => entry.id), ['run-b', 'run-a']);
+});
+
+test('bounded contention exhaustion preserves the local semantic mutation in session memory', () => {
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(makeDocument()) });
+  const leaderboard = createTestLeaderboard(storage);
+  leaderboard.initialize();
+  const originalSetItem = storage.setItem.bind(storage);
+  let activeWrites = 0;
+  storage.setItem = (key, value) => {
+    originalSetItem(key, value);
+    if (key !== STORAGE_KEYS.active) return;
+    activeWrites += 1;
+    storage.values.set(STORAGE_KEYS.active, JSON.stringify(makeDocument({ entries: [makeEntry(activeWrites, {
+      id: `peer-${activeWrites}`,
+    })] })));
+  };
+
+  const result = leaderboard.renamePlayer('Lyra');
+
+  assert.equal(activeWrites, 3);
+  assert.equal(result.persisted, false);
+  assert.equal(result.snapshot.persistenceAvailable, false);
+  assert.equal(result.snapshot.profile.name, 'Lyra');
+});
+
+test('active storage events converge once without backup-event or duplicate-event ping-pong', () => {
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(makeDocument()) });
+  const first = createTestLeaderboard(storage);
+  const second = createTestLeaderboard(storage);
+  first.initialize();
+  second.initialize();
+  first.finalizeRun({ id: 'run-a', distanceMeters: 100, enemyKills: 0, elapsedMs: 20 });
+  const afterFirst = storage.values.get(STORAGE_KEYS.active);
+  const writesBeforeEvents = storage.events.filter(([operation]) => operation === 'set').length;
+
+  second.handleStorageEvent({ key: STORAGE_KEYS.backup, storageArea: storage, newValue: storage.values.get(STORAGE_KEYS.backup) });
+  second.handleStorageEvent({ key: STORAGE_KEYS.active, storageArea: storage, newValue: afterFirst });
+  second.handleStorageEvent({ key: STORAGE_KEYS.active, storageArea: storage, newValue: afterFirst });
+  second.handleStorageEvent({ key: 'unrelated', storageArea: storage, newValue: '{}' });
+  assert.deepEqual(second.getSnapshot().entries.map((entry) => entry.id), ['run-a']);
+  assert.equal(storage.events.filter(([operation]) => operation === 'set').length, writesBeforeEvents);
+
+  second.finalizeRun({ id: 'run-b', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
+  const unionValue = storage.values.get(STORAGE_KEYS.active);
+  first.handleStorageEvent({ key: STORAGE_KEYS.active, storageArea: storage, newValue: unionValue });
+  const writesAfterUnion = storage.events.filter(([operation]) => operation === 'set').length;
+  first.handleStorageEvent({ key: STORAGE_KEYS.active, storageArea: storage, newValue: unionValue });
+  assert.deepEqual(first.getSnapshot().entries.map((entry) => entry.id), ['run-b', 'run-a']);
+  assert.equal(storage.events.filter(([operation]) => operation === 'set').length, writesAfterUnion);
+
+  storage.values.set(STORAGE_KEYS.active, JSON.stringify(makeDocument({ entries: [makeEntry(3, {
+    id: 'run-c', score: 300, distanceMeters: 300,
+  })] })));
+  const repairEvent = { key: STORAGE_KEYS.active, storageArea: storage, newValue: storage.values.get(STORAGE_KEYS.active) };
+  first.handleStorageEvent(repairEvent);
+  const afterRepairWrites = storage.events.filter(([operation]) => operation === 'set').length;
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.active)).entries.map((entry) => entry.id), ['run-c', 'run-b', 'run-a']);
+  first.handleStorageEvent({ ...repairEvent, newValue: storage.values.get(STORAGE_KEYS.active) });
+  assert.equal(storage.events.filter(([operation]) => operation === 'set').length, afterRepairWrites);
+});
+
+test('a storage event adopts a peer rename without echoing it', () => {
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(makeDocument()) });
+  const first = createTestLeaderboard(storage);
+  const second = createTestLeaderboard(storage);
+  first.initialize();
+  second.initialize();
+  first.renamePlayer('Lyra');
+  const renamedValue = storage.values.get(STORAGE_KEYS.active);
+  const writesBefore = storage.events.filter(([operation]) => operation === 'set').length;
+
+  const eventResult = second.handleStorageEvent({ key: STORAGE_KEYS.active, storageArea: storage, newValue: renamedValue });
+
+  assert.equal(eventResult.changed, true);
+  assert.equal(second.getSnapshot().profile.name, 'Lyra');
+  assert.equal(storage.events.filter(([operation]) => operation === 'set').length, writesBefore);
+  const run = second.finalizeRun({ id: 'run-a', distanceMeters: 10, enemyKills: 0, elapsedMs: 10 });
+  assert.equal(run.entry.name, 'Lyra');
+});
+
+test('an active storage event repairs corrupt durable state from valid session memory', () => {
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(makeDocument()) });
+  const leaderboard = createTestLeaderboard(storage);
+  leaderboard.initialize();
+  leaderboard.finalizeRun({ id: 'saved-run', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
+  storage.values.set(STORAGE_KEYS.active, '{corrupt');
+  storage.values.delete(STORAGE_KEYS.backup);
+  const writesBefore = storage.events.filter(([operation]) => operation === 'set').length;
+
+  const result = leaderboard.handleStorageEvent({
+    key: STORAGE_KEYS.active,
+    storageArea: storage,
+    newValue: '{corrupt',
+  });
+
+  assert.equal(result.repaired, true);
+  assert.equal(result.snapshot.persistenceAvailable, true);
+  assert.equal(storage.events.filter(([operation]) => operation === 'set').length > writesBefore, true);
+  assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.active)).entries.map((entry) => entry.id), ['saved-run']);
+});
+
+test('repairing corrupt active state keeps a newer in-memory profile over its older backup', () => {
+  const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(makeDocument()) });
+  const leaderboard = createTestLeaderboard(storage);
+  leaderboard.initialize();
+  leaderboard.finalizeRun({ id: 'saved-run', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
+  leaderboard.renamePlayer('Lyra');
+  assert.equal(JSON.parse(storage.values.get(STORAGE_KEYS.backup)).profile.name, 'Nova');
+  storage.values.set(STORAGE_KEYS.active, '{corrupt');
+
+  const result = leaderboard.handleStorageEvent({
+    key: STORAGE_KEYS.active,
+    storageArea: storage,
+    newValue: '{corrupt',
+  });
+
+  assert.equal(result.repaired, true);
+  assert.equal(result.snapshot.profile.name, 'Lyra');
+  assert.equal(result.snapshot.entries[0].name, 'Lyra');
+  assert.equal(JSON.parse(storage.values.get(STORAGE_KEYS.active)).profile.name, 'Lyra');
+});
+
 test('failed active readback writes backup first, restores it, and retains the next document in memory', () => {
   const active = makeDocument({ entries: [makeEntry(1)] });
   const storage = new FakeStorage({ [STORAGE_KEYS.active]: JSON.stringify(active) });
   const leaderboard = createTestLeaderboard(storage);
   leaderboard.initialize();
   const mutationStart = storage.events.length;
-  storage.corruptNextRead(STORAGE_KEYS.active);
+  const originalSetItem = storage.setItem.bind(storage);
+  let corruptVerification = true;
+  storage.setItem = (key, value) => {
+    originalSetItem(key, value);
+    if (key === STORAGE_KEYS.active && corruptVerification) {
+      corruptVerification = false;
+      storage.corruptNextRead(STORAGE_KEYS.active);
+    }
+  };
   const result = leaderboard.finalizeRun({ id: 'new-run', distanceMeters: 2000, enemyKills: 0, elapsedMs: 10 });
   const mutationEvents = storage.events.slice(mutationStart);
   const backupWrite = mutationEvents.findIndex(([operation, key]) => operation === 'set' && key === STORAGE_KEYS.backup);
   const activeWrite = mutationEvents.findIndex(([operation, key]) => operation === 'set' && key === STORAGE_KEYS.active);
-  const verificationRead = mutationEvents.findIndex(([operation, key]) => operation === 'get' && key === STORAGE_KEYS.active);
+  const verificationRead = mutationEvents.findIndex(([operation, key], index) => index > activeWrite && operation === 'get' && key === STORAGE_KEYS.active);
   const activeRestore = mutationEvents.findLastIndex(([operation, key]) => operation === 'set' && key === STORAGE_KEYS.active);
   assert.ok(backupWrite >= 0 && backupWrite < activeWrite);
   assert.ok(activeWrite < verificationRead && verificationRead < activeRestore);

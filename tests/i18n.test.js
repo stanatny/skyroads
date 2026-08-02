@@ -24,8 +24,10 @@ test('translation interpolates and counts Unicode characters', () => {
 });
 
 test('music and sound-effect toggles have independent bilingual labels', () => {
+  assert.equal(createTranslator('en').t('settings.label'), 'Game settings');
   assert.equal(createTranslator('en').t('settings.musicOn'), 'MUSIC ON');
   assert.equal(createTranslator('en').t('settings.sfxOff'), 'SFX OFF');
+  assert.equal(createTranslator('zh-CN').t('settings.label'), '游戏设置');
   assert.equal(createTranslator('zh-CN').t('settings.musicOff'), '音乐关闭');
   assert.equal(createTranslator('zh-CN').t('settings.sfxOn'), '音效开启');
 });

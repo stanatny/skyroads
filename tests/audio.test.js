@@ -80,7 +80,7 @@ test('ordinary scheduler lateness is preserved so no regular note is skipped', (
   assert.equal(keepProceduralTimelineCurrent({ muted: false, currentTime: 60, nextNoteTime: 59.7 }), 59.7);
 });
 
-function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null, startFailureAt = 0, connectFailureKind = null, responseFactory = null } = {}) {
+function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null, decodePending = false, resumePending = false, closePending = false, startFailureAt = 0, connectFailureKind = null, responseFactory = null } = {}) {
   const calls = { fetched: [], starts: [], ramps: [], filterRamps: [], filters: [], nodes: [], resumes: 0, stopAttempts: 0, stops: 0, disconnects: 0, closes: 0 };
   let startAttempts = 0;
   function makeConnection(kind) {
@@ -102,8 +102,8 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
       this.state = 'suspended';
       this.destination = {};
     }
-    resume() { calls.resumes++; this.state = 'running'; return Promise.resolve(); }
-    close() { calls.closes++; this.state = 'closed'; return Promise.resolve(); }
+    resume() { calls.resumes++; this.state = 'running'; return resumePending ? new Promise(() => {}) : Promise.resolve(); }
+    close() { calls.closes++; this.state = 'closed'; return closePending ? new Promise(() => {}) : Promise.resolve(); }
     createGain() {
       const connection = makeConnection(calls.nodes.some((node) => node.kind === 'bus') ? 'gain' : 'bus');
       const gain = {
@@ -158,6 +158,7 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
     }
     decodeAudioData(arrayBuffer) {
       const url = arrayBuffer.url;
+      if (decodePending) return new Promise(() => {});
       if (decodeFailure && decodeFailure(url)) return Promise.reject(new Error('decode failed'));
       return Promise.resolve({ duration: durationByUrl[url] || 68.571 });
     }
@@ -173,6 +174,258 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
   };
   return { calls, FakeAudioContext, fetchImpl };
 }
+
+function makeManualTimers() {
+  const pending = [];
+  return {
+    setTimeout(callback) {
+      const timer = { callback, cleared: false };
+      pending.push(timer);
+      return timer;
+    },
+    clearTimeout(timer) {
+      timer.cleared = true;
+    },
+    count() {
+      return pending.filter((timer) => !timer.cleared).length;
+    },
+    fireNext() {
+      const timer = pending.find((candidate) => !candidate.cleared);
+      assert.ok(timer, 'expected an active format-load timeout');
+      timer.cleared = true;
+      timer.callback();
+    },
+  };
+}
+
+async function settleUntil(predicate, message) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  assert.fail(message);
+}
+
+test('a pending format fetch reaches terminal fallback and aborts its requests at the configured deadline', async () => {
+  const timers = makeManualTimers();
+  let aborts = 0;
+  let fetches = 0;
+  const controller = createAudioController({
+    AudioContextClass: makeAudioHarness().FakeAudioContext,
+    fetchImpl: (_url, { signal }) => new Promise(() => {
+      fetches++;
+      signal.addEventListener('abort', () => { aborts++; });
+    }),
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    formatLoadTimeoutMs: 100,
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+  });
+
+  const unlock = controller.unlock();
+  await settleUntil(() => fetches === 3 && timers.count() === 1, 'format loading should receive one deadline');
+  timers.fireNext();
+  await settleUntil(() => fetches === 6 && timers.count() === 1, 'MP3 retry should receive its own deadline');
+  timers.fireNext();
+  await assert.doesNotReject(unlock);
+  await assert.doesNotReject(controller.ready);
+
+  assert.equal(aborts, 6);
+  assert.equal(controller.getState().status, 'fallback');
+  assert.equal(controller.getState().format, 'procedural');
+});
+
+test('a fast format failure aborts sibling requests before retrying MP3', async () => {
+  const harness = makeAudioHarness();
+  let siblingAborts = 0;
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: (url, { signal }) => {
+      harness.calls.fetched.push(url);
+      if (url === 'atmosphere.ogg') return Promise.reject(new Error('OGG unavailable'));
+      if (url.endsWith('.ogg')) {
+        return new Promise(() => signal.addEventListener('abort', () => { siblingAborts++; }));
+      }
+      return Promise.resolve({ ok: true, url, arrayBuffer: async () => ({ url }) });
+    },
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+
+  await controller.unlock();
+
+  assert.equal(siblingAborts, 2);
+  assert.equal(controller.getState().format, 'mp3');
+});
+
+test('a pending context resume reaches terminal fallback at the configured deadline', async () => {
+  const timers = makeManualTimers();
+  const harness = makeAudioHarness({ resumePending: true });
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    formatLoadTimeoutMs: 100,
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+  });
+
+  const unlock = controller.unlock();
+  await settleUntil(() => timers.count() === 1, 'context resume should receive a deadline');
+  timers.fireNext();
+  await unlock;
+
+  assert.equal(controller.getState().status, 'fallback');
+  assert.equal(harness.calls.closes, 1);
+});
+
+test('a pending context close cannot prevent fallback from resolving unlock or ready', async () => {
+  const harness = makeAudioHarness({
+    closePending: true,
+    responseFactory: (url) => ({ ok: false, status: 500, url, arrayBuffer: async () => ({ url }) }),
+  });
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+
+  await controller.unlock();
+  await controller.ready;
+
+  assert.equal(controller.getState().status, 'fallback');
+  assert.equal(harness.calls.closes, 1);
+});
+
+test('a pending format body read reaches terminal fallback at the configured deadline', async () => {
+  const timers = makeManualTimers();
+  const harness = makeAudioHarness({
+    responseFactory: (url) => ({ ok: true, arrayBuffer: () => new Promise(() => {}), url }),
+  });
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    formatLoadTimeoutMs: 100,
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+  });
+
+  const unlock = controller.unlock();
+  await settleUntil(() => harness.calls.fetched.length === 3 && timers.count() === 1, 'body reading should share the format deadline');
+  timers.fireNext();
+  await settleUntil(() => harness.calls.fetched.length === 6 && timers.count() === 1, 'MP3 body reading should receive its own deadline');
+  timers.fireNext();
+  await unlock;
+
+  assert.equal(controller.getState().status, 'fallback');
+  assert.equal(harness.calls.closes, 1);
+});
+
+test('a pending format decode reaches terminal fallback at the configured deadline', async () => {
+  const timers = makeManualTimers();
+  const harness = makeAudioHarness({ decodePending: true });
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    formatLoadTimeoutMs: 100,
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+  });
+
+  const unlock = controller.unlock();
+  await settleUntil(() => harness.calls.fetched.length === 3 && timers.count() === 1, 'decode should share the format deadline');
+  timers.fireNext();
+  await settleUntil(() => harness.calls.fetched.length === 6 && timers.count() === 1, 'MP3 decode should receive its own deadline');
+  timers.fireNext();
+  await unlock;
+
+  assert.equal(controller.getState().status, 'fallback');
+  assert.equal(harness.calls.closes, 1);
+});
+
+test('a late OGG completion cannot attach after its deadline has selected MP3', async () => {
+  const timers = makeManualTimers();
+  const harness = makeAudioHarness();
+  const delayedOgg = [];
+  let oggBodyReads = 0;
+  const fetchImpl = (url) => {
+    harness.calls.fetched.push(url);
+    if (url.endsWith('.ogg')) {
+      return new Promise((resolve) => delayedOgg.push(() => resolve({
+        ok: true,
+        url,
+        arrayBuffer: async () => { oggBodyReads++; return { url }; },
+      })));
+    }
+    return Promise.resolve({ ok: true, url, arrayBuffer: async () => ({ url }) });
+  };
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    formatLoadTimeoutMs: 100,
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+  });
+
+  const unlock = controller.unlock();
+  await settleUntil(() => harness.calls.fetched.length === 3 && timers.count() === 1, 'OGG should receive its own deadline');
+  timers.fireNext();
+  await unlock;
+  delayedOgg.forEach((resolve) => resolve());
+  await settleUntil(() => controller.getState().status === 'ready', 'MP3 should become ready after OGG times out');
+
+  assert.equal(controller.getState().format, 'mp3');
+  assert.equal(harness.calls.starts.length, 3);
+  assert.equal(oggBodyReads, 0);
+});
+
+test('a late OGG completion cannot revive adaptive audio after MP3 reaches fallback cleanup', async () => {
+  const timers = makeManualTimers();
+  const harness = makeAudioHarness();
+  const delayedOgg = [];
+  let oggBodyReads = 0;
+  const fetchImpl = (url) => {
+    harness.calls.fetched.push(url);
+    if (url.endsWith('.ogg')) {
+      return new Promise((resolve) => delayedOgg.push(() => resolve({
+        ok: true,
+        url,
+        arrayBuffer: async () => { oggBodyReads++; return { url }; },
+      })));
+    }
+    return Promise.reject(new Error('MP3 unavailable'));
+  };
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+    formatLoadTimeoutMs: 100,
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+  });
+
+  const unlock = controller.unlock();
+  await settleUntil(() => harness.calls.fetched.length === 3 && timers.count() === 1, 'OGG should receive its own deadline');
+  timers.fireNext();
+  await unlock;
+  delayedOgg.forEach((resolve) => resolve());
+  await settleUntil(() => controller.getState().status === 'fallback', 'failed MP3 should reach fallback');
+
+  assert.equal(controller.getState().format, 'procedural');
+  assert.equal(harness.calls.starts.length, 0);
+  assert.equal(oggBodyReads, 0);
+  assert.equal(harness.calls.closes, 1);
+});
 
 test('unlock loads one complete format and starts all stems on one timeline', async () => {
   const harness = makeAudioHarness();
