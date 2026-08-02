@@ -1,11 +1,11 @@
 #!/bin/bash
-# 太空跳跳车 SkyRoads — Mac APP 构建脚本
+# 星云巡航 Nebula Cruise — macOS App 构建脚本
 # 用法: bash app/build.sh
-# 产物: 工作区根目录的 太空跳跳车.app（WKWebView 原生壳，几 MB，零依赖）
+# 产物: 工作区根目录的 星云巡航 Nebula Cruise.app（WKWebView 原生壳）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/太空跳跳车.app"
+APP="$ROOT/星云巡航 Nebula Cruise.app"
 BUNDLE_MACOS="$APP/Contents/MacOS"
 BUNDLE_RES="$APP/Contents/Resources"
 DEPLOYMENT_TARGET=12.0
@@ -30,6 +30,9 @@ echo "==> 拷贝游戏本体与元数据"
 cp "$ROOT/index.html" "$BUNDLE_RES/index.html"
 cp -R "$ROOT/src" "$BUNDLE_RES/src"
 cp -R "$ROOT/styles" "$BUNDLE_RES/styles"
+cp -R "$ROOT/assets" "$BUNDLE_RES/assets"
+cp "$ROOT/THIRD_PARTY_NOTICES.md" "$BUNDLE_RES/THIRD_PARTY_NOTICES.md"
+cp -R "$ROOT/licenses" "$BUNDLE_RES/licenses"
 cp "$ROOT/app/Info.plist" "$APP/Contents/Info.plist"
 
 # 图标（可选）：有 AppIcon.png 则生成 icns

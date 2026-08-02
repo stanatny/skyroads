@@ -28,14 +28,16 @@ jobs:
         run: |
           bash tests/app-universal-smoke.sh
           bash tests/app-signature-smoke.sh
-          plutil -lint "太空跳跳车.app/Contents/Info.plist"
+          bash tests/app-resources-smoke.sh
+          bash tests/app-wkwebview-smoke.sh
+          plutil -lint "星云巡航 Nebula Cruise.app/Contents/Info.plist"
 
       - name: Package app
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          archive="SkyRoads-macOS-${RELEASE_TAG}.zip"
-          ditto -c -k --sequesterRsrc --keepParent "太空跳跳车.app" "$archive"
+          archive="Nebula-Cruise-macOS-${RELEASE_TAG}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "星云巡航 Nebula Cruise.app" "$archive"
           shasum -a 256 "$archive"
 
       - name: Upload release asset
@@ -43,4 +45,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh release upload "$RELEASE_TAG" "SkyRoads-macOS-${RELEASE_TAG}.zip" --clobber
+          gh release upload "$RELEASE_TAG" "Nebula-Cruise-macOS-${RELEASE_TAG}.zip" --clobber

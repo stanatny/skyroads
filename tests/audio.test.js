@@ -80,7 +80,7 @@ test('ordinary scheduler lateness is preserved so no regular note is skipped', (
   assert.equal(keepProceduralTimelineCurrent({ muted: false, currentTime: 60, nextNoteTime: 59.7 }), 59.7);
 });
 
-function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null, startFailureAt = 0, connectFailureKind = null } = {}) {
+function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailure = null, startFailureAt = 0, connectFailureKind = null, responseFactory = null } = {}) {
   const calls = { fetched: [], starts: [], ramps: [], filterRamps: [], filters: [], nodes: [], resumes: 0, stopAttempts: 0, stops: 0, disconnects: 0, closes: 0 };
   let startAttempts = 0;
   function makeConnection(kind) {
@@ -165,6 +165,7 @@ function makeAudioHarness({ durationByUrl = {}, fetchFailure = null, decodeFailu
   const fetchImpl = async (url) => {
     calls.fetched.push(url);
     if (fetchFailure && fetchFailure(url)) throw new Error('fetch failed');
+    if (responseFactory) return responseFactory(url);
     return {
       ok: true,
       arrayBuffer: async () => ({ url }),
@@ -187,6 +188,29 @@ test('unlock loads one complete format and starts all stems on one timeline', as
 
   assert.deepEqual(harness.calls.fetched, ['atmosphere.ogg', 'drive.ogg', 'overdrive.ogg']);
   assert.deepEqual(harness.calls.starts, [10.05, 10.05, 10.05]);
+  assert.equal(controller.getState().format, 'ogg');
+  assert.equal(controller.getState().decoded, true);
+});
+
+test('local-file responses with status zero still decode their complete stem set', async () => {
+  const harness = makeAudioHarness({
+    responseFactory: (url) => ({
+      ok: false,
+      status: 0,
+      url: `file:///bundle/assets/audio/${url}`,
+      arrayBuffer: async () => ({ url }),
+    }),
+  });
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+
+  await controller.unlock();
+
+  assert.equal(controller.getState().status, 'ready');
   assert.equal(controller.getState().format, 'ogg');
   assert.equal(controller.getState().decoded, true);
 });

@@ -78,6 +78,12 @@
     return STEM_NAMES.map((stem) => files[`${stem}${suffix}`]);
   }
 
+  function usableStemResponse(response) {
+    if (!response || typeof response.arrayBuffer !== 'function') return false;
+    if (response.ok !== false) return true;
+    return response.status === 0 && typeof response.url === 'string' && response.url.startsWith('file:');
+  }
+
   function createAudioController({
     AudioContextClass = null,
     fetchImpl = null,
@@ -178,7 +184,7 @@
     async function loadSet(format) {
       const urls = urlsForFormat(files, format);
       const responses = await Promise.all(urls.map((url) => fetchImpl(url)));
-      if (responses.some((response) => !response || response.ok === false || typeof response.arrayBuffer !== 'function')) {
+      if (responses.some((response) => !usableStemResponse(response))) {
         throw new Error(`${format} stem response failed`);
       }
       const encoded = await Promise.all(responses.map((response) => response.arrayBuffer()));
