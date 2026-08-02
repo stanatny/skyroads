@@ -1209,7 +1209,7 @@ git diff --check main...HEAD
 
 Expected: every command exits 0 with no warnings that indicate fallback or missing release assets.
 
-- [ ] **Step 2: Run the browser gameplay matrix**
+- [x] **Step 2: Run the browser gameplay matrix**
 
 Serve the worktree over HTTP and verify both locales at 960 × 600, 1280 × 800, 1440 × 900, and 1920 × 1080. Cover title, gameplay, game over, rename, leaderboard, normal/reduced-motion, neutral/thrust/bank/BOOST/super ship states, tap/hold/reverse/edge/focus loss, swipe/tap controls, shooting, magnet, gaps, walls, enemies, score, qualifying/nonqualifying runs, rename persistence, muted audio persistence, and corrupted/disabled storage fallback.
 
@@ -1219,7 +1219,7 @@ Build and open the app, complete a run, rename the player, fully quit, reopen, a
 
 Also build/open the `main` version first, create a legacy `skyroads_best`, quit it, then open the new app with the unchanged bundle identifier. Confirm the old value appears only as the previous-version reference and never as a fabricated Top 15 entry. If WebKit storage does not survive the visible app rename, keep the internal resource origin stable or preserve the old bundle display path until this upgrade check passes.
 
-- [ ] **Step 4: Request independent code and design review**
+- [x] **Step 4: Request independent code and design review**
 
 Review every diff against the approved design specification. Resolve all correctness, data-loss, licensing, accessibility, and packaging findings. Re-run the complete suite after every fix.
 
