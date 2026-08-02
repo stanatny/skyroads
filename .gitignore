@@ -6,6 +6,7 @@ app/AppIcon.iconset/
 # Editor
 .vscode/
 .idea/
+.worktrees/
 *.swp
 *~
 
