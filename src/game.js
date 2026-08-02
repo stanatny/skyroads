@@ -3467,7 +3467,27 @@ function render() {
 // 11. 启动
 // ============================================================
 function init() {
+  const i18n = globalThis.Skyroads.i18n;
+  const languageToggle = document.getElementById('language-toggle');
+  let translator;
+  function applyLocale(locale) {
+    translator = i18n.createTranslator(locale);
+    document.documentElement.lang = translator.locale;
+    document.title = translator.t('app.documentTitle');
+    document.querySelector('meta[name="description"]').setAttribute('content', translator.t('meta.description'));
+    STATE.canvas.setAttribute('aria-label', translator.t('canvas.label'));
+    languageToggle.textContent = `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`;
+  }
   STATE.canvas = document.getElementById('game');
+  let localeStorage = null;
+  try { localeStorage = globalThis.localStorage; } catch (_) {}
+  const savedLocale = i18n.readLocalePreference(localeStorage);
+  applyLocale(i18n.resolveLocale({ savedLocale, languages: navigator.languages, language: navigator.language }));
+  languageToggle.addEventListener('click', () => {
+    const locale = translator.locale === 'zh-CN' ? 'en' : 'zh-CN';
+    i18n.writeLocalePreference(localeStorage, locale);
+    applyLocale(locale);
+  });
   STATE.ctx = STATE.canvas.getContext('2d');
   function resize() {
     STATE.width = STATE.canvas.width = window.innerWidth;
