@@ -19,10 +19,18 @@ const {
 } = require('../tools/generate-music.js');
 
 test('Nebula Cruise score locks the 128 BPM rhythm contract', () => {
-  assert.equal(score.bpm, 128);
-  assert.equal(score.bars, 32);
+  assert.deepEqual(score, {
+    title: 'Nebula Cruise',
+    bpm: 128,
+    beatsPerBar: 4,
+    bars: 32,
+    sampleRate: 44100,
+    key: 'E minor',
+    progression: ['Em(add9)', 'Cmaj7', 'G', 'D', 'Em', 'C', 'Am7', 'B7'],
+    normalization: { atmosphere: 0.68, drive: 0.72, overdrive: 0.66 },
+    seed: 1312965196,
+  });
   assert.equal(exactFrameCount(score), 2646000);
-  assert.deepEqual(score.normalization, { atmosphere: 0.68, drive: 0.72, overdrive: 0.66 });
 });
 
 test('the rhythm-forward score renders deterministically with its target peaks and pulse guardrails', () => {
