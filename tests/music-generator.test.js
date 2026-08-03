@@ -18,16 +18,16 @@ const {
   measureIntenseMixPeak,
 } = require('../tools/generate-music.js');
 
-test('Nebula Cruise score locks the 128 BPM rhythm contract', () => {
+test('Nebula Cruise score locks the 144 BPM arcade-drive contract', () => {
   assert.deepEqual(score, {
     title: 'Nebula Cruise',
-    bpm: 128,
+    bpm: 144,
     beatsPerBar: 4,
-    bars: 32,
+    bars: 36,
     sampleRate: 44100,
     key: 'E minor',
     progression: ['Em(add9)', 'Cmaj7', 'G', 'D', 'Em', 'C', 'Am7', 'B7'],
-    normalization: { atmosphere: 0.68, drive: 0.72, overdrive: 0.66 },
+    normalization: { atmosphere: 0.62, drive: 0.76, overdrive: 0.70 },
     seed: 1312965196,
   });
   assert.equal(exactFrameCount(score), 2646000);
@@ -42,15 +42,15 @@ test('the rhythm-forward score renders deterministically with its target peaks a
     assert.equal(first[stem].right.length, 2646000);
   }
   assert.deepEqual(first.drive.left, second.drive.left);
-  assert.equal(measurePeak(first.atmosphere).toFixed(2), '0.68');
-  assert.equal(measurePeak(first.drive).toFixed(2), '0.72');
-  assert.equal(measurePeak(first.overdrive).toFixed(2), '0.66');
+  assert.equal(measurePeak(first.atmosphere).toFixed(2), '0.62');
+  assert.equal(measurePeak(first.drive).toFixed(2), '0.76');
+  assert.equal(measurePeak(first.overdrive).toFixed(2), '0.70');
   // The first two seconds compare 35 ms beat-centered windows against equally sized inter-beat windows.
   const pulse = measurePulse(first.drive, score.sampleRate, score.bpm);
-  assert.ok(pulse.earlyPulseRatio >= 1.35);
+  assert.ok(pulse.earlyPulseRatio >= 1.65);
   assert.ok(pulse.transientRms > pulse.sustainedRms);
   assert.ok(measureIntenseMixPeak(first, {
-    atmosphere: 0.68, drive: 1, overdrive: 0.78, busGain: 0.55,
+    atmosphere: 0.42, drive: 1, overdrive: 0.90, busGain: 0.55,
   }) <= 0.95);
   assert.equal(crypto.createHash('sha256').update(Buffer.from(first.drive.left.buffer)).digest('hex'),
     crypto.createHash('sha256').update(Buffer.from(second.drive.left.buffer)).digest('hex'));

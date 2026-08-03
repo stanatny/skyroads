@@ -91,6 +91,13 @@ function sha256(relativePath) {
   return crypto.createHash('sha256').update(read(relativePath)).digest('hex');
 }
 
+function audioDuration(relativePath) {
+  const output = execFileSync('afinfo', [path.join(root, relativePath)], { encoding: 'utf8' });
+  const seconds = Number(output.match(/estimated duration:\s*([0-9.]+) sec/)?.[1]);
+  assert.ok(Number.isFinite(seconds), `${relativePath} must report an estimated duration`);
+  return seconds;
+}
+
 function assertPng(relativePath) {
   const bytes = read(relativePath);
   assert.equal(bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE), true, `${relativePath} must be a PNG`);
@@ -638,6 +645,36 @@ test('world-art provenance pins official free archives, CC0 licenses, and reprod
       assert.ok(document.includes(relativePath) && document.includes(expectedHash), `${relativePath} output hash must be frozen`);
     }
   }
+});
+
+test('Nebula Cruise committed codecs match the documented 144 BPM render contract', () => {
+  const outputs = [
+    ['assets/audio/nebula-cruise-atmosphere.ogg', 'c08808afe852ad2fc6d0c33d04ca1898711895e2b83bbd7ce77350570db24eaf'],
+    ['assets/audio/nebula-cruise-drive.ogg', '89d2e0258a6497267743da1416f1ca4d6a7f6aabb1bd28a7edda44b5ccdadf0e'],
+    ['assets/audio/nebula-cruise-overdrive.ogg', '584fb8c0e08187a90339df843be73f2a421247c5f3c920e2d49cc61142d191d6'],
+    ['assets/audio/nebula-cruise-atmosphere.mp3', '664986af51147374ed093a626eb63328be8f94fbf99ee7228e43605546b0de1f'],
+    ['assets/audio/nebula-cruise-drive.mp3', 'a462b0541cd4860d443e32e2755d8dbfa8c383c556ee267ad746c75ae5445655'],
+    ['assets/audio/nebula-cruise-overdrive.mp3', 'b88afe29bc54a5d017341de32d2c023a02ed9d7b2576f87ab59ad67e54484e1d'],
+  ];
+  for (const [relativePath, expectedHash] of outputs) {
+    assert.equal(sha256(relativePath), expectedHash, `${relativePath} must match the deterministic codec output`);
+  }
+
+  for (const extension of ['ogg', 'mp3']) {
+    const durations = outputs
+      .filter(([relativePath]) => relativePath.endsWith(`.${extension}`))
+      .map(([relativePath]) => audioDuration(relativePath));
+    assert.ok(Math.max(...durations) - Math.min(...durations) <= 0.001, `${extension} siblings must agree within 1 ms`);
+  }
+
+  const document = read('docs/assets/audio-generation.md').toString('utf8');
+  for (const expected of [
+    '144 BPM',
+    '2646000',
+    '@ffmpeg-installer/darwin-arm64@4.1.5',
+    'two-loop audition procedure',
+    ...outputs.map(([, hash]) => hash),
+  ]) assert.match(document, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 });
 
 test('runtime HTML, CSS and JavaScript contain no remote URL dependency', () => {

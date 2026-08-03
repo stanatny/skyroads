@@ -27,8 +27,8 @@
   const STEM_NAMES = Object.freeze(['atmosphere', 'drive', 'overdrive']);
   const MUSIC_MIX = Object.freeze({
     menu: Object.freeze({ atmosphere: 1, drive: 0, overdrive: 0, cutoff: 4200 }),
-    normal: Object.freeze({ atmosphere: 0.72, drive: 0.92, overdrive: 0.18, cutoff: 8000 }),
-    intense: Object.freeze({ atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 }),
+    normal: Object.freeze({ atmosphere: 0.48, drive: 1, overdrive: 0.42, cutoff: 11000 }),
+    intense: Object.freeze({ atmosphere: 0.42, drive: 1, overdrive: 0.90, cutoff: 16000 }),
   });
 
   function completeSet(files, format) {
@@ -58,7 +58,7 @@
   function mixForGameState(state = {}) {
     if (state.mode !== 'PLAYING') return MUSIC_MIX.menu;
     const speedRatio = Number.isFinite(Number(state.speedRatio)) ? Number(state.speedRatio) : 0;
-    return speedRatio >= 0.75 || Boolean(state.boost) || Boolean(state.danger)
+    return speedRatio >= 0.55 || Boolean(state.boost) || Boolean(state.danger)
       ? MUSIC_MIX.intense : MUSIC_MIX.normal;
   }
 

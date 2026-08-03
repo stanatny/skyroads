@@ -17,6 +17,13 @@ const CHORDS = Object.freeze({
 });
 const EIGHTH_GRID = Object.freeze([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5]);
 const SIXTEENTH_PICKUPS = Object.freeze([0.75, 1.75, 2.75, 3.75]);
+const SIXTEENTH_GRID = Object.freeze([
+  0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75,
+  2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75,
+]);
+const BASS_PATTERN = Object.freeze([0, 0, 2, 0, 1, 0, 3, 2]);
+const LEAD_PATTERN = Object.freeze([0, 2, 1, 2, 3, 2]);
+const LEAD_OFFSETS = Object.freeze([0, 0.75, 1.5, 2, 2.75, 3.5]);
 
 function exactFrameCount(score) {
   return Math.round(score.bars * score.beatsPerBar * 60 / score.bpm * score.sampleRate);
@@ -69,7 +76,7 @@ function addTone(stem, sampleRate, startSeconds, durationSeconds, midi, amplitud
 }
 
 function addKick(stem, sampleRate, startSeconds, amplitude) {
-  const length = Math.round(0.24 * sampleRate);
+  const length = Math.round(0.20 * sampleRate);
   const start = Math.round(startSeconds * sampleRate);
   let phase = 0;
   for (let offset = 0; offset < length && start + offset < stem.left.length; offset++) {
@@ -204,20 +211,32 @@ function renderScore(score) {
       });
     }
 
-    for (const beatOffset of EIGHTH_GRID) {
+    for (const [stepIndex, beatOffset] of EIGHTH_GRID.entries()) {
       const start = barStart + beatOffset * beat;
-      const note = chord[Math.round(beatOffset * 2) % chord.length] - 12;
-      addTone(drive, sampleRate, start, beat * 0.38, note, 0.12, {
+      const octaveLift = stepIndex === 3 || stepIndex === 7 ? 12 : 0;
+      const note = chord[BASS_PATTERN[stepIndex] % chord.length] - 12 + octaveLift;
+      addTone(drive, sampleRate, start, beat * 0.28, note, 0.13, {
         pan: beatOffset % 1 === 0 ? -0.08 : 0.08,
         attack: 0.006,
-        release: 0.08,
-        brightness: 0.28,
+        release: 0.055,
+        brightness: 0.38,
       });
-      if (beatOffset % 1 === 0) addKick(drive, sampleRate, start, beatOffset === 0 ? 0.24 : 0.17);
-      if (beatOffset === 1 || beatOffset === 3) addNoiseHit(drive, sampleRate, start, 0.14, 0.13, driveRandom, 0.08);
+      if (beatOffset % 1 === 0) addKick(drive, sampleRate, start, beatOffset === 0 ? 0.29 : 0.21);
+      if (beatOffset === 1 || beatOffset === 3) {
+        addNoiseHit(drive, sampleRate, start, 0.13, 0.15, driveRandom, 0.08);
+        addNoiseHit(drive, sampleRate, start + 0.018, 0.08, 0.07, driveRandom, -0.12);
+      }
     }
-    for (const beatOffset of SIXTEENTH_PICKUPS) {
-      addNoiseHit(drive, sampleRate, barStart + beatOffset * beat, 0.03, 0.024, driveRandom);
+    for (const [stepIndex, beatOffset] of SIXTEENTH_GRID.entries()) {
+      const accent = stepIndex % 4 === 2 ? 0.044 : stepIndex % 2 === 0 ? 0.030 : 0.018;
+      addNoiseHit(drive, sampleRate, barStart + beatOffset * beat, 0.026, accent, driveRandom,
+        stepIndex % 2 === 0 ? -0.30 : 0.30);
+    }
+    for (const beatOffset of [0.5, 1.5, 2.5, 3.5]) {
+      addNoiseHit(drive, sampleRate, barStart + beatOffset * beat, 0.075, 0.038, driveRandom, 0.22);
+    }
+    if (barIndex % 2 === 1) {
+      addKick(drive, sampleRate, barStart + 3.75 * beat, 0.09);
     }
 
     for (let sixteenth = 0; sixteenth < score.beatsPerBar * 4; sixteenth++) {
@@ -231,16 +250,22 @@ function renderScore(score) {
         addNoiseHit(overdrive, sampleRate, start, 0.028, 0.028, overdriveRandom, sixteenth % 4 ? 0.38 : -0.38);
       }
     }
-    [0, 2.5].forEach((beatOffset, index) => {
-      const counterNote = chord[(barIndex + index) % chord.length] + 24;
-      addTone(overdrive, sampleRate, barStart + beatOffset * beat, beat * 0.9, counterNote, 0.037, {
-        pan: index ? 0.2 : -0.2, attack: 0.035, release: 0.24, brightness: 0.28,
+    LEAD_OFFSETS.forEach((beatOffset, index) => {
+      const counterNote = chord[LEAD_PATTERN[index] % chord.length] + 24;
+      addTone(overdrive, sampleRate, barStart + beatOffset * beat, beat * 0.34, counterNote, 0.050, {
+        pan: index % 2 ? 0.22 : -0.22, attack: 0.012, release: 0.09, brightness: 0.38,
       });
     });
     for (let beatIndex = 0; beatIndex < score.beatsPerBar; beatIndex++) {
-      if (beatIndex === 0 || beatIndex === 2) addKick(overdrive, sampleRate, barStart + beatIndex * beat, 0.13);
+      addKick(overdrive, sampleRate, barStart + beatIndex * beat, beatIndex === 0 ? 0.13 : 0.09);
       if (beatIndex === 1 || beatIndex === 3) {
-        addNoiseHit(overdrive, sampleRate, barStart + beatIndex * beat, 0.12, 0.09, overdriveRandom, -0.08);
+        addNoiseHit(overdrive, sampleRate, barStart + beatIndex * beat, 0.11, 0.10, overdriveRandom, -0.08);
+      }
+    }
+    if (barIndex % 4 === 3) {
+      for (const beatOffset of SIXTEENTH_PICKUPS) {
+        addNoiseHit(overdrive, sampleRate, barStart + beatOffset * beat, 0.040, 0.050, overdriveRandom,
+          beatOffset < 2 ? -0.35 : 0.35);
       }
     }
   }

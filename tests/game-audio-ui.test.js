@@ -271,8 +271,8 @@ test('starting a run sends the normal adaptive music mix through the shared bus'
   await controller.ready;
 
   const adaptiveContext = audioContexts.at(-1);
-  assert.deepEqual(adaptiveContext.gains.map((gain) => gain.gain.value), [0.55, 0.72, 0.92, 0.18]);
-  assert.equal(adaptiveContext.filters[0].frequency.value, 8000);
+  assert.deepEqual(adaptiveContext.gains.map((gain) => gain.gain.value), [0.55, 0.48, 1, 0.42]);
+  assert.equal(adaptiveContext.filters[0].frequency.value, 11000);
 });
 
 test('a saved partial preference keeps the shared legacy bus audible for the enabled channel', () => {

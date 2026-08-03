@@ -44,8 +44,8 @@ test('invalid decoded stem durations are rejected safely', () => {
 test('adaptive music uses the frozen menu normal and intense state table', () => {
   const cases = [
     [{ mode: 'MENU', speedRatio: 1 }, { atmosphere: 1, drive: 0, overdrive: 0, cutoff: 4200 }],
-    [{ mode: 'PLAYING', speedRatio: 0.5 }, { atmosphere: 0.72, drive: 0.92, overdrive: 0.18, cutoff: 8000 }],
-    [{ mode: 'PLAYING', speedRatio: 0.75 }, { atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 }],
+    [{ mode: 'PLAYING', speedRatio: 0.54 }, { atmosphere: 0.48, drive: 1, overdrive: 0.42, cutoff: 11000 }],
+    [{ mode: 'PLAYING', speedRatio: 0.55 }, { atmosphere: 0.42, drive: 1, overdrive: 0.90, cutoff: 16000 }],
   ];
 
   for (const [state, expected] of cases) assert.deepEqual(mixForGameState(state), expected);
@@ -53,8 +53,8 @@ test('adaptive music uses the frozen menu normal and intense state table', () =>
 });
 
 test('BOOST and danger each select the intense mix at low speed', () => {
-  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, boost: true }), { atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 });
-  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, danger: true }), { atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 });
+  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, boost: true }), { atmosphere: 0.42, drive: 1, overdrive: 0.90, cutoff: 16000 });
+  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, danger: true }), { atmosphere: 0.42, drive: 1, overdrive: 0.90, cutoff: 16000 });
 });
 
 test('stem changes use a 300 millisecond transition', () => {
@@ -631,7 +631,7 @@ test('game state updates ramp every stem to its mix over exactly 300 millisecond
   controller.setGameState({ mode: 'PLAYING', speedRatio: 0.8 });
 
   assert.deepEqual(harness.calls.ramps.filter(([kind]) => kind === 'ramp').map(([, value, time]) => [value, time]), [
-    [0.68, 10.3], [1, 10.3], [0.78, 10.3],
+    [0.42, 10.3], [1, 10.3], [0.90, 10.3],
   ]);
 });
 
@@ -668,7 +668,7 @@ test('master low-pass brightens for speed danger and boost over the same 300 mil
   assert.equal(harness.calls.filters.length, 1);
   assert.equal(harness.calls.filters[0].type, 'lowpass');
   assert.deepEqual(harness.calls.filterRamps, [
-    [14000, 10.3], [8000, 10.3], [14000, 10.3], [14000, 10.3],
+    [16000, 10.3], [11000, 10.3], [16000, 10.3], [16000, 10.3],
   ]);
 });
 
