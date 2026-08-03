@@ -38,8 +38,8 @@ test('Git whitespace suppression is limited to the six byte-identical license co
     'licenses/Kenney-UI-Pack-Sci-Fi-CC0.txt',
     'licenses/Phosphor-Icons-MIT.txt',
     'licenses/Orbitron-OFL-1.1.txt',
-    'licenses/Quaternius-Sci-Fi-Essentials-CC0.txt',
-    'licenses/KayKit-Space-Base-Bits-CC0.txt',
+    'licenses/Kenney-Space-Kit-CC0.txt',
+    'licenses/Kenney-Modular-Space-Kit-CC0.txt',
   ];
   const ordinaryPaths = ['README.md', 'app/main.swift', 'src/game.js'];
   const output = execFileSync(

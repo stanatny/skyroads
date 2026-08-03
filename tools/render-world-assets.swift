@@ -18,6 +18,12 @@ struct GeometryDimensions: Decodable, Equatable {
     let baseY: Double
 }
 
+struct FramingContract: Decodable, Equatable {
+    let targetWidthRatio: Double
+    let targetHeightRatio: Double
+    let bottomPadding: Int
+}
+
 // Keep these category dimensions byte-for-byte aligned with src/world-art.js.
 let WORLD_GEOMETRY: [String: GeometryDimensions] = [
     "drone": GeometryDimensions(worldWidth: 380, worldHeight: 360, baseY: 140),
@@ -28,7 +34,7 @@ let WORLD_GEOMETRY: [String: GeometryDimensions] = [
 
 struct UpstreamRecord: Decodable {
     let id: String
-    let uploadId: Int
+    let sourcePage: String
     let archiveFilename: String
     let archiveSha256: String
     let downloadDate: String
@@ -59,6 +65,7 @@ struct WorldManifest: Decodable {
     let version: Int
     let frame: FrameContract
     let geometry: [String: GeometryDimensions]
+    let framing: [String: FramingContract]
     let upstream: [UpstreamRecord]
     let sourceHashes: [String: String]
     let assets: [AssetRecipe]
@@ -123,6 +130,13 @@ private let requiredIDs = [
 ]
 
 private let requiredYaw = [-30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0]
+private let requiredFraming: [String: FramingContract] = [
+    "drone": FramingContract(targetWidthRatio: 0.72, targetHeightRatio: 0.64, bottomPadding: 48),
+    "turret": FramingContract(targetWidthRatio: 0.76, targetHeightRatio: 0.86, bottomPadding: 36),
+    "wallLow": FramingContract(targetWidthRatio: 0.86, targetHeightRatio: 0.58, bottomPadding: 36),
+    "wallHigh": FramingContract(targetWidthRatio: 0.78, targetHeightRatio: 0.88, bottomPadding: 28),
+    "gap": FramingContract(targetWidthRatio: 0.88, targetHeightRatio: 0.56, bottomPadding: 32),
+]
 private let radiansPerDegree = Double.pi / 180
 private let supersample = 2
 
@@ -173,8 +187,8 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
     } catch {
         throw RenderError.validation("Could not decode manifest: \(error)")
     }
-    guard manifest.version == 1 else {
-        throw RenderError.validation("Manifest version must be 1")
+    guard manifest.version == 2 else {
+        throw RenderError.validation("Manifest version must be 2")
     }
     guard manifest.frame.width == 512,
           manifest.frame.height == 512,
@@ -183,6 +197,9 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
     }
     guard manifest.geometry == WORLD_GEOMETRY else {
         throw RenderError.validation("Manifest geometry does not match WORLD_GEOMETRY")
+    }
+    guard manifest.framing == requiredFraming else {
+        throw RenderError.validation("Manifest framing does not match the five canonical category contracts")
     }
     guard manifest.assets.map(\.id) == requiredIDs else {
         throw RenderError.validation("Manifest must contain the nine world atlases in runtime order")
@@ -199,11 +216,31 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
             throw RenderError.validation("Upstream archive and license hashes must be lowercase SHA-256")
         }
     }
+    let upstreamIdentity = manifest.upstream.map {
+        [$0.id, $0.sourcePage, $0.archiveFilename, $0.archiveSha256, $0.downloadDate,
+         $0.license, $0.licenseCommitted, $0.licenseSha256]
+    }
+    guard upstreamIdentity == [
+        ["kenney-space-kit", "https://kenney.nl/assets/space-kit", "kenney_space-kit.zip",
+         "d5d7cdf2635ed5a43a9187deaf409b6f47484e402321128341d3c3698e9ef4d9", "2026-08-03",
+         "Creative Commons CC0 1.0 Universal", "licenses/Kenney-Space-Kit-CC0.txt",
+         "bd4e050e69d41351282c4d53f943cd4d80a80b968593e60653ba5292637941b7"],
+        ["kenney-modular-space-kit", "https://kenney.nl/assets/modular-space-kit",
+         "kenney_modular-space-kit_1.0.zip",
+         "f394f7fd9eaf29c9de7e090e55b69926f699841af33b0b116f5cc0088de8a4dc", "2026-08-03",
+         "Creative Commons CC0 1.0 Universal", "licenses/Kenney-Modular-Space-Kit-CC0.txt",
+         "38d94a4c79768cf5dc65e55b85f2dedd9f4bad35e325db1d0e5898fc1b7c5bbb"],
+    ] else {
+        throw RenderError.validation("Manifest must pin the two audited Kenney source archives and licenses")
+    }
 
     var referenced = Set<String>()
     for asset in manifest.assets {
         guard !asset.components.isEmpty else {
             throw RenderError.validation("\(asset.id) must contain at least one component")
+        }
+        guard manifest.framing[asset.category] != nil else {
+            throw RenderError.validation("\(asset.id) has no canonical framing category")
         }
         for component in asset.components {
             guard component.rotationDegrees.count == 3,
@@ -247,6 +284,56 @@ func degreesVector(_ values: [Double]) -> SCNVector3 {
     )
 }
 
+func applyComponentTransform(_ recipe: ComponentRecipe, to node: SCNNode) {
+    node.scale = SCNVector3(CGFloat(recipe.scale), CGFloat(recipe.scale), CGFloat(recipe.scale))
+    node.eulerAngles = degreesVector(recipe.rotationDegrees)
+    node.position = vector(recipe.translation)
+}
+
+func filterOBJSource(
+    _ source: String,
+    hidingGroups: Set<String>,
+    materialFilename: String,
+    label: String
+) throws -> String {
+    guard !hidingGroups.isEmpty else { return source }
+    var activeGroups = Set<String>()
+    var declaredGroups = Set<String>()
+    var removedFaces = Dictionary(uniqueKeysWithValues: hidingGroups.map { ($0, 0) })
+    var output: [String] = []
+    let normalizedSource = source
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+    for line in normalizedSource.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+        let tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
+        if tokens.first == "g" {
+            activeGroups = Set(tokens.dropFirst())
+            declaredGroups.formUnion(activeGroups.intersection(hidingGroups))
+        }
+        if tokens.first == "f" {
+            let hiddenActiveGroups = activeGroups.intersection(hidingGroups)
+            if !hiddenActiveGroups.isEmpty {
+                for group in hiddenActiveGroups { removedFaces[group, default: 0] += 1 }
+                continue
+            }
+        }
+        if tokens.first == "mtllib" {
+            output.append("mtllib \(materialFilename)")
+        } else {
+            output.append(line)
+        }
+    }
+    for requestedGroup in hidingGroups.sorted() {
+        guard declaredGroups.contains(requestedGroup) else {
+            throw RenderError.load("\(label) requested hidden OBJ group '\(requestedGroup)' but it was not declared")
+        }
+        guard removedFaces[requestedGroup, default: 0] > 0 else {
+            throw RenderError.load("\(label) requested hidden OBJ group '\(requestedGroup)' but it removed no faces")
+        }
+    }
+    return output.joined(separator: "\n")
+}
+
 func usableBounds(of node: SCNNode, label: String) throws -> (SCNVector3, SCNVector3) {
     let (minimum, maximum) = node.boundingBox
     let values = [minimum.x, minimum.y, minimum.z, maximum.x, maximum.y, maximum.z]
@@ -259,24 +346,8 @@ func usableBounds(of node: SCNNode, label: String) throws -> (SCNVector3, SCNVec
     return (minimum, maximum)
 }
 
-func normalizedTextureKey(_ path: String) -> String {
-    var name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent.lowercased()
-    for suffix in ["_basecolor", "_emissive", "_normal", "_orm", "_dark"] {
-        name = name.replacingOccurrences(of: suffix, with: "")
-    }
-    return name.replacingOccurrences(of: "t_", with: "")
-}
-
-func texturePath(matching materialName: String, candidates: [String]) -> String? {
-    guard !candidates.isEmpty else { return nil }
-    let materialKey = materialName.lowercased().replacingOccurrences(of: "t_", with: "")
-    return candidates.max { left, right in
-        let leftKey = normalizedTextureKey(left)
-        let rightKey = normalizedTextureKey(right)
-        let leftScore = materialKey.contains(leftKey) ? leftKey.count : 0
-        let rightScore = materialKey.contains(rightKey) ? rightKey.count : 0
-        return leftScore < rightScore
-    }
+func srgb(_ red: Int, _ green: Int, _ blue: Int) -> NSColor {
+    NSColor(srgbRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1)
 }
 
 func styledMaterial(
@@ -286,38 +357,37 @@ func styledMaterial(
     images: [String: NSImage]
 ) -> SCNMaterial {
     let result = source.copy() as? SCNMaterial ?? SCNMaterial()
-    let baseCandidates = texturePaths.filter {
-        let lower = $0.lowercased()
-        return lower.contains("basecolor") || lower.contains("_dark.") || lower.hasSuffix("spacebits_texture.png")
-    }
-    let normalCandidates = texturePaths.filter { $0.lowercased().contains("_normal.") }
-    let emissiveCandidates = texturePaths.filter { $0.lowercased().contains("_emissive.") }
     let materialName = source.name ?? "material-\(index)"
-    if let basePath = texturePath(matching: materialName, candidates: baseCandidates) {
-        result.diffuse.contents = images[basePath]
+    if let texturePath = texturePaths.first, let texture = images[texturePath] {
+        // Modular Space Kit carries its audited palette in colormap.png.
+        result.diffuse.contents = texture
+        result.multiply.contents = NSColor.white
+    } else {
+        let sourceColor = (source.diffuse.contents as? NSColor)?
+            .usingColorSpace(.deviceRGB) ?? NSColor.white
+        let luminance = 0.2126 * sourceColor.redComponent
+            + 0.7152 * sourceColor.greenComponent
+            + 0.0722 * sourceColor.blueComponent
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        sourceColor.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        let isOrange = saturation >= 0.35 && hue >= 0.04 && hue <= 0.14
+        result.diffuse.contents = luminance < 0.32
+            ? srgb(0x25, 0x30, 0x44)
+            : (isOrange ? srgb(0xf0, 0x92, 0x45) : srgb(0xe9, 0xef, 0xf6))
+        result.multiply.contents = NSColor.white
     }
-    if let normalPath = texturePath(matching: materialName, candidates: normalCandidates) {
-        result.normal.contents = images[normalPath]
-        result.normal.intensity = 0.72
-    }
-    result.name = "Nebula hostile \(materialName)"
+    result.name = "Orbital defense \(materialName)"
     result.lightingModel = .physicallyBased
     result.isDoubleSided = true
     result.diffuse.magnificationFilter = .linear
     result.diffuse.minificationFilter = .linear
     result.diffuse.mipFilter = .linear
-    let isVioletSeam = index % 4 == 2 || materialName.lowercased().contains("trim_02")
-    result.multiply.contents = isVioletSeam
-        ? NSColor(calibratedRed: 0.48, green: 0.18, blue: 0.80, alpha: 1)
-        : NSColor(calibratedRed: 0.19, green: 0.29, blue: 0.55, alpha: 1)
-    result.metalness.contents = 0.42
+    result.metalness.contents = 0.24
     result.roughness.contents = 0.38
-    if texturePath(matching: materialName, candidates: emissiveCandidates) != nil {
-        result.emission.contents = NSColor(calibratedRed: 0.92, green: 0.035, blue: 0.12, alpha: 1)
-        result.emission.intensity = 0.48
-    } else {
-        result.emission.contents = NSColor.black
-    }
+    result.emission.contents = NSColor.black
     return result
 }
 
@@ -326,12 +396,51 @@ func loadComponent(
     asset: AssetRecipe,
     sourceRoot: URL
 ) throws -> SCNNode {
-    let modelURL = sourceRoot.appendingPathComponent(recipe.model)
-    let materialURL = sourceRoot.appendingPathComponent(recipe.material)
+    let sourceModelURL = sourceRoot.appendingPathComponent(recipe.model)
+    let sourceMaterialURL = sourceRoot.appendingPathComponent(recipe.material)
+    let materialData: Data
     do {
-        _ = try Data(contentsOf: materialURL, options: .mappedIfSafe)
+        materialData = try Data(contentsOf: sourceMaterialURL, options: .mappedIfSafe)
     } catch {
-        throw RenderError.load("Could not load material at \(materialURL.path)")
+        throw RenderError.load("Could not load material at \(sourceMaterialURL.path)")
+    }
+    var temporaryImportDirectory: URL?
+    var modelURL = sourceModelURL
+    if !asset.hideNodes.isEmpty {
+        let source: String
+        do {
+            source = try String(contentsOf: sourceModelURL, encoding: .utf8)
+        } catch {
+            throw RenderError.load("Could not read OBJ source at \(sourceModelURL.path)")
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("orbital-obj-filter-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            let temporaryMaterialURL = directory.appendingPathComponent("orbital-source.mtl")
+            let temporaryModelURL = directory.appendingPathComponent("orbital-source.obj")
+            let filtered = try filterOBJSource(
+                source,
+                hidingGroups: Set(asset.hideNodes),
+                materialFilename: temporaryMaterialURL.lastPathComponent,
+                label: recipe.model
+            )
+            try materialData.write(to: temporaryMaterialURL, options: .atomic)
+            try Data(filtered.utf8).write(to: temporaryModelURL, options: .atomic)
+            temporaryImportDirectory = directory
+            modelURL = temporaryModelURL
+        } catch let error as RenderError {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw RenderError.write("Could not prepare filtered OBJ for \(recipe.model): \(error)")
+        }
+    }
+    defer {
+        if let directory = temporaryImportDirectory {
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
     var images: [String: NSImage] = [:]
     for texturePath in recipe.textures {
@@ -362,9 +471,6 @@ func loadComponent(
         imported.addChildNode(child)
     }
     imported.enumerateChildNodes { node, _ in
-        if let name = node.name, asset.hideNodes.contains(name) {
-            node.isHidden = true
-        }
         guard let geometry = node.geometry else { return }
         let sourceMaterials = geometry.materials.isEmpty ? [SCNMaterial()] : geometry.materials
         geometry.materials = sourceMaterials.enumerated().map { index, material in
@@ -381,9 +487,7 @@ func loadComponent(
 
     let transformed = SCNNode()
     transformed.addChildNode(imported)
-    transformed.scale = SCNVector3(CGFloat(recipe.scale), CGFloat(recipe.scale), CGFloat(recipe.scale))
-    transformed.eulerAngles = degreesVector(recipe.rotationDegrees)
-    transformed.position = vector(recipe.translation)
+    applyComponentTransform(recipe, to: transformed)
     return transformed
 }
 
@@ -393,8 +497,8 @@ func flatMaterial(_ color: NSColor, emission: NSColor? = nil) -> SCNMaterial {
     material.diffuse.contents = color
     material.emission.contents = emission ?? NSColor.black
     material.isDoubleSided = true
-    material.metalness.contents = 0.36
-    material.roughness.contents = 0.32
+    material.metalness.contents = 0.24
+    material.roughness.contents = 0.38
     return material
 }
 
@@ -408,8 +512,8 @@ func addHostileDetails(to turntable: SCNNode, category: String) throws {
     let seamDepth = CGFloat(max(0.008, min(Double(depth) * 0.018, 0.016)))
     let seam = SCNBox(width: seamWidth, height: seamHeight, length: seamDepth, chamferRadius: seamHeight / 2)
     seam.materials = [flatMaterial(
-        NSColor(calibratedRed: 0.70, green: 0.05, blue: 0.90, alpha: 1),
-        emission: NSColor(calibratedRed: 0.70, green: 0.025, blue: 0.82, alpha: 1)
+        srgb(0x68, 0xe8, 0xff),
+        emission: srgb(0x68, 0xe8, 0xff)
     )]
     let seamNode = SCNNode(geometry: seam)
     let relativeHeight: CGFloat
@@ -424,15 +528,15 @@ func addHostileDetails(to turntable: SCNNode, category: String) throws {
     seamNode.position = SCNVector3(seamX, seamY, seamZ)
     turntable.addChildNode(seamNode)
 
-    let red = flatMaterial(
-        NSColor(calibratedRed: 1.0, green: 0.025, blue: 0.055, alpha: 1),
-        emission: NSColor(calibratedRed: 1.0, green: 0.012, blue: 0.035, alpha: 1)
-    )
+    let statusLights = [
+        flatMaterial(srgb(0x58, 0xe7, 0xff), emission: srgb(0x58, 0xe7, 0xff)),
+        flatMaterial(srgb(0xff, 0x8a, 0x42), emission: srgb(0xff, 0x8a, 0x42)),
+    ]
     let lightRadius = CGFloat(max(0.012, min(Double(height) * 0.026, 0.025)))
-    for side: CGFloat in [-1, 1] {
+    for (lightIndex, side) in [CGFloat(-1), CGFloat(1)].enumerated() {
         let sphere = SCNSphere(radius: lightRadius)
         sphere.segmentCount = 16
-        sphere.materials = [red]
+        sphere.materials = [statusLights[lightIndex]]
         let lightNode = SCNNode(geometry: sphere)
         let lightX = seamX + side * min(width * 0.22, 0.17)
         let lightY = seamNode.position.y
@@ -444,8 +548,19 @@ func addHostileDetails(to turntable: SCNNode, category: String) throws {
 
 func buildTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
     let assembly = SCNNode()
+    var sourceTemplates: [String: SCNNode] = [:]
     for component in asset.components {
-        assembly.addChildNode(try loadComponent(component, asset: asset, sourceRoot: sourceRoot))
+        let sourceIdentity = ([component.model, component.material] + component.textures)
+            .joined(separator: "\u{0}")
+        let componentNode: SCNNode
+        if let cloned = sourceTemplates[sourceIdentity]?.clone() {
+            componentNode = cloned
+            applyComponentTransform(component, to: componentNode)
+        } else {
+            componentNode = try loadComponent(component, asset: asset, sourceRoot: sourceRoot)
+            sourceTemplates[sourceIdentity] = componentNode
+        }
+        assembly.addChildNode(componentNode)
     }
     let (minimum, maximum) = try usableBounds(of: assembly, label: asset.id)
     let width = Double(maximum.x - minimum.x)
@@ -496,8 +611,8 @@ func addLighting(to scene: SCNScene) {
 
     let hostileFill = SCNLight()
     hostileFill.type = .directional
-    hostileFill.color = NSColor(calibratedRed: 0.74, green: 0.08, blue: 0.88, alpha: 1)
-    hostileFill.intensity = 510
+    hostileFill.color = srgb(0xff, 0x8a, 0x42)
+    hostileFill.intensity = 360
     let hostileNode = SCNNode()
     hostileNode.light = hostileFill
     hostileNode.eulerAngles = SCNVector3(-0.15, -2.2, 0.1)
@@ -555,6 +670,9 @@ func renderFrames(
     renderer.pointOfView = cameraNode
     renderer.autoenablesDefaultLighting = false
     renderer.isJitteringEnabled = false
+    guard renderer.prepare(scene, shouldAbortBlock: nil) else {
+        throw RenderError.render("SceneKit could not prepare \(asset.id) before snapshot rendering")
+    }
     var frames: [CGImage] = []
     let renderWidth = frame.width * supersample
     let renderHeight = frame.height * supersample
@@ -587,6 +705,173 @@ func rasterizedPremultipliedRGBA(_ image: CGImage) throws -> [UInt8] {
     }
     context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
     return pixels
+}
+
+struct AlphaBounds {
+    var minX: Int
+    var maxX: Int
+    var minY: Int
+    var maxY: Int
+
+    var width: Int { maxX - minX + 1 }
+    var height: Int { maxY - minY + 1 }
+}
+
+func alphaBounds(
+    _ pixels: [UInt8],
+    width: Int,
+    height: Int,
+    bytesPerRow: Int,
+    threshold: UInt8 = 16
+) throws -> AlphaBounds {
+    var bounds = AlphaBounds(minX: width, maxX: -1, minY: height, maxY: -1)
+    for y in 0..<height {
+        for x in 0..<width where pixels[y * bytesPerRow + x * 4 + 3] >= threshold {
+            bounds.minX = min(bounds.minX, x)
+            bounds.maxX = max(bounds.maxX, x)
+            bounds.minY = min(bounds.minY, y)
+            bounds.maxY = max(bounds.maxY, y)
+        }
+    }
+    guard bounds.maxX >= bounds.minX, bounds.maxY >= bounds.minY else {
+        throw RenderError.render("Raw SceneKit frame has no alpha at or above 16")
+    }
+    return bounds
+}
+
+func bottomBandAnchoredFrames(
+    _ frames: [[UInt8]],
+    width: Int,
+    height: Int,
+    minimumBottom: Int,
+    maximumBottom: Int
+) throws -> [[UInt8]] {
+    let bytesPerRow = width * 4
+    let bounds = try frames.map {
+        try alphaBounds($0, width: width, height: height, bytesPerRow: bytesPerRow)
+    }
+    guard let lowestBottom = bounds.map(\.maxY).min(),
+          let highestBottom = bounds.map(\.maxY).max() else {
+        throw RenderError.render("Could not measure canonical frame bottoms")
+    }
+    let minimumShift = minimumBottom - lowestBottom
+    let maximumShift = maximumBottom - highestBottom
+    guard minimumShift <= maximumShift else {
+        throw RenderError.render("Yaw-frame bottom spread cannot fit the required anchor band")
+    }
+    let shift: Int
+    if minimumShift > 0 {
+        shift = minimumShift
+    } else if maximumShift < 0 {
+        shift = maximumShift
+    } else {
+        shift = 0
+    }
+    guard shift != 0 else { return frames }
+    return frames.map { source in
+        var shifted = [UInt8](repeating: 0, count: source.count)
+        for targetY in 0..<height {
+            let sourceY = targetY - shift
+            guard sourceY >= 0, sourceY < height else { continue }
+            let sourceStart = sourceY * bytesPerRow
+            let targetStart = targetY * bytesPerRow
+            shifted.replaceSubrange(
+                targetStart..<(targetStart + bytesPerRow),
+                with: source[sourceStart..<(sourceStart + bytesPerRow)]
+            )
+        }
+        return shifted
+    }
+}
+
+func canonicallyFrame(
+    _ images: [CGImage],
+    frame: FrameContract,
+    framing: FramingContract,
+    assetID: String
+) throws -> [[UInt8]] {
+    guard images.count == 7 else {
+        throw RenderError.render("\(assetID) must contain seven raw yaw frames")
+    }
+    let rawWidth = frame.width * supersample
+    let rawHeight = frame.height * supersample
+    let rawBytesPerRow = rawWidth * 4
+    var sources: [[UInt8]] = []
+    var union = AlphaBounds(minX: rawWidth, maxX: -1, minY: rawHeight, maxY: -1)
+    for image in images {
+        guard image.width == rawWidth, image.height == rawHeight else {
+            throw RenderError.render("\(assetID) contains a frame with the wrong supersampled geometry")
+        }
+        let pixels = try rasterizedPremultipliedRGBA(image)
+        let bounds = try alphaBounds(
+            pixels,
+            width: rawWidth,
+            height: rawHeight,
+            bytesPerRow: rawBytesPerRow
+        )
+        union.minX = min(union.minX, bounds.minX)
+        union.maxX = max(union.maxX, bounds.maxX)
+        union.minY = min(union.minY, bounds.minY)
+        union.maxY = max(union.maxY, bounds.maxY)
+        sources.append(pixels)
+    }
+
+    let targetWidth = Double(frame.width) * framing.targetWidthRatio
+    let targetHeight = Double(frame.height) * framing.targetHeightRatio
+    let scale = min(targetWidth / Double(union.width), targetHeight / Double(union.height))
+    guard scale.isFinite, scale > 0 else {
+        throw RenderError.render("\(assetID) has an invalid canonical framing scale")
+    }
+    let targetLeft = (Double(frame.width) - Double(union.width) * scale) / 2
+    let targetTop = Double(frame.height - framing.bottomPadding) - Double(union.height) * scale
+    let outputBytesPerRow = frame.width * 4
+
+    let outputs = sources.map { source in
+        var output = [UInt8](repeating: 0, count: outputBytesPerRow * frame.height)
+        for targetY in 0..<frame.height {
+            let sourceY = (Double(targetY) + 0.5 - targetTop) / scale
+                + Double(union.minY) - 0.5
+            guard sourceY >= Double(union.minY), sourceY <= Double(union.maxY) else { continue }
+            let y0 = max(union.minY, Int(floor(sourceY)))
+            let y1 = min(union.maxY, y0 + 1)
+            let fractionY = sourceY - Double(y0)
+            for targetX in 0..<frame.width {
+                let sourceX = (Double(targetX) + 0.5 - targetLeft) / scale
+                    + Double(union.minX) - 0.5
+                guard sourceX >= Double(union.minX), sourceX <= Double(union.maxX) else { continue }
+                let x0 = max(union.minX, Int(floor(sourceX)))
+                let x1 = min(union.maxX, x0 + 1)
+                let fractionX = sourceX - Double(x0)
+                let sampleOffsets = [
+                    y0 * rawBytesPerRow + x0 * 4,
+                    y0 * rawBytesPerRow + x1 * 4,
+                    y1 * rawBytesPerRow + x0 * 4,
+                    y1 * rawBytesPerRow + x1 * 4,
+                ]
+                let weights = [
+                    (1 - fractionX) * (1 - fractionY),
+                    fractionX * (1 - fractionY),
+                    (1 - fractionX) * fractionY,
+                    fractionX * fractionY,
+                ]
+                let destination = targetY * outputBytesPerRow + targetX * 4
+                for channel in 0..<4 {
+                    let value = zip(sampleOffsets, weights).reduce(0.0) {
+                        $0 + Double(source[$1.0 + channel]) * $1.1
+                    }
+                    output[destination + channel] = UInt8(max(0, min(255, Int(value.rounded()))))
+                }
+            }
+        }
+        return output
+    }
+    return try bottomBandAnchoredFrames(
+        outputs,
+        width: frame.width,
+        height: frame.height,
+        minimumBottom: 440,
+        maximumBottom: 488
+    )
 }
 
 func canonicalizeIsolatedOpaqueNoise(
@@ -683,7 +968,17 @@ func validateTransparentAtlasPadding(
     }
 }
 
-func makeAtlas(frames: [CGImage], frame: FrameContract, assetID: String) throws -> Data {
+func quantizedPremultipliedChannel(_ value: UInt8, alpha: UInt8) -> UInt8 {
+    let nearestFourBitBucket = min(255, ((Int(value) + 8) / 16) * 16)
+    return UInt8(min(Int(alpha), nearestFourBitBucket))
+}
+
+func makeAtlas(
+    frames: [CGImage],
+    frame: FrameContract,
+    framing: FramingContract,
+    assetID: String
+) throws -> Data {
     let atlasWidth = frame.width * frames.count
     let atlasHeight = frame.height
     guard frames.count == 7, atlasWidth == 3584, atlasHeight == 512 else {
@@ -693,29 +988,16 @@ func makeAtlas(frames: [CGImage], frame: FrameContract, assetID: String) throws 
     let byteCount = bytesPerRow * atlasHeight
     var pixels = [UInt8](repeating: 0, count: byteCount)
     let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
-    for (frameIndex, image) in frames.enumerated() {
-        guard image.width == frame.width * supersample,
-              image.height == frame.height * supersample else {
-            throw RenderError.render("\(assetID) contains a frame with the wrong supersampled geometry")
-        }
-        let source = try rasterizedPremultipliedRGBA(image)
-        let sourceBytesPerRow = image.width * 4
+    let framedPixels = try canonicallyFrame(frames, frame: frame, framing: framing, assetID: assetID)
+    for (frameIndex, source) in framedPixels.enumerated() {
+        let sourceBytesPerRow = frame.width * 4
         for targetY in 0..<frame.height {
-            for targetX in 0..<frame.width {
-                let destinationPixel = targetY * bytesPerRow + (frameIndex * frame.width + targetX) * 4
-                for channel in 0..<4 {
-                    var sum = 0
-                    for sampleY in 0..<supersample {
-                        for sampleX in 0..<supersample {
-                            let sourcePixel = (targetY * supersample + sampleY) * sourceBytesPerRow
-                                + (targetX * supersample + sampleX) * 4
-                            sum += Int(source[sourcePixel + channel])
-                        }
-                    }
-                    let sampleCount = supersample * supersample
-                    pixels[destinationPixel + channel] = UInt8((sum + sampleCount / 2) / sampleCount)
-                }
-            }
+            let sourceStart = targetY * sourceBytesPerRow
+            let destinationStart = targetY * bytesPerRow + frameIndex * sourceBytesPerRow
+            pixels.replaceSubrange(
+                destinationStart..<(destinationStart + sourceBytesPerRow),
+                with: source[sourceStart..<(sourceStart + sourceBytesPerRow)]
+            )
         }
     }
     var transparentPixels = 0
@@ -729,14 +1011,12 @@ func makeAtlas(frames: [CGImage], frame: FrameContract, assetID: String) throws 
         } else {
             // SceneKit can return extended-color antialias samples a few values above
             // 8-bit alpha. Clamp them into legal premultiplied RGBA before encoding.
-            pixels[index] = min(pixels[index], alpha)
-            pixels[index + 1] = min(pixels[index + 1], alpha)
-            pixels[index + 2] = min(pixels[index + 2], alpha)
-            // Remove sub-sixteen-level GPU rounding noise so repeated offline renders
-            // remain byte-identical across fresh SceneKit renderer processes.
-            pixels[index] &= 0xf0
-            pixels[index + 1] &= 0xf0
-            pixels[index + 2] &= 0xf0
+            // Round to the nearest 4-bit color bucket after clamping. Flooring puts
+            // exact 16-step boundaries on common shader results, allowing a one-unit
+            // GPU rounding difference to become a visible 16-step atlas difference.
+            pixels[index] = quantizedPremultipliedChannel(pixels[index], alpha: alpha)
+            pixels[index + 1] = quantizedPremultipliedChannel(pixels[index + 1], alpha: alpha)
+            pixels[index + 2] = quantizedPremultipliedChannel(pixels[index + 2], alpha: alpha)
         }
     }
     canonicalizeIsolatedOpaqueNoise(
@@ -801,7 +1081,10 @@ func renderAll(arguments: Arguments, manifest: WorldManifest) throws -> [String:
     for asset in manifest.assets {
         let png = try autoreleasepool {
             let frames = try renderFrames(asset: asset, sourceRoot: arguments.sourceRoot, frame: manifest.frame)
-            return try makeAtlas(frames: frames, frame: manifest.frame, assetID: asset.id)
+            guard let framing = manifest.framing[asset.category] else {
+                throw RenderError.validation("\(asset.id) has no canonical framing contract")
+            }
+            return try makeAtlas(frames: frames, frame: manifest.frame, framing: framing, assetID: asset.id)
         }
         totalBytes += png.count
         let outputURL = arguments.output.appendingPathComponent("\(asset.id).png")

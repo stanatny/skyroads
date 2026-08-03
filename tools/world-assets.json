@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "frame": {
     "width": 512,
     "height": 512,
@@ -11,260 +11,211 @@
     "wallLow": { "worldWidth": 648, "worldHeight": 600, "baseY": 0 },
     "wallHigh": { "worldWidth": 648, "worldHeight": 2000, "baseY": 0 }
   },
+  "framing": {
+    "drone": { "targetWidthRatio": 0.72, "targetHeightRatio": 0.64, "bottomPadding": 48 },
+    "turret": { "targetWidthRatio": 0.76, "targetHeightRatio": 0.86, "bottomPadding": 36 },
+    "wallLow": { "targetWidthRatio": 0.86, "targetHeightRatio": 0.58, "bottomPadding": 36 },
+    "wallHigh": { "targetWidthRatio": 0.78, "targetHeightRatio": 0.88, "bottomPadding": 28 },
+    "gap": { "targetWidthRatio": 0.88, "targetHeightRatio": 0.56, "bottomPadding": 32 }
+  },
   "upstream": [
     {
-      "id": "quaternius-sci-fi-essentials-standard",
-      "uploadId": 12009762,
-      "archiveFilename": "Sci-Fi Essentials Kit[Standard].zip",
-      "archiveSha256": "a08346d538aa39fbea9fa492e03620d1860fc6214eedd62a4f5db373ac6fca01",
+      "id": "kenney-space-kit",
+      "sourcePage": "https://kenney.nl/assets/space-kit",
+      "archiveFilename": "kenney_space-kit.zip",
+      "archiveSha256": "d5d7cdf2635ed5a43a9187deaf409b6f47484e402321128341d3c3698e9ef4d9",
       "downloadDate": "2026-08-03",
-      "license": "CC0 1.0 Universal",
-      "licenseSource": "quaternius/License_Standard.txt",
-      "licenseCommitted": "licenses/Quaternius-Sci-Fi-Essentials-CC0.txt",
-      "licenseSha256": "2687fba65dca7bbd2f9ab2fb7a8c51dd0c7c8e9acd7579415612bec43f68b3f5"
+      "license": "Creative Commons CC0 1.0 Universal",
+      "licenseSource": "space-kit/License.txt",
+      "licenseCommitted": "licenses/Kenney-Space-Kit-CC0.txt",
+      "licenseSha256": "bd4e050e69d41351282c4d53f943cd4d80a80b968593e60653ba5292637941b7"
     },
     {
-      "id": "kaykit-space-base-bits-free",
-      "uploadId": 8609688,
-      "archiveFilename": "KayKit_Space_Base_Bits_1.0_FREE.zip",
-      "archiveSha256": "4f8d3e2e90a74d9a0d5262e9e09daccac320f1bcfbe4fa2837559a8ad7b98c17",
+      "id": "kenney-modular-space-kit",
+      "sourcePage": "https://kenney.nl/assets/modular-space-kit",
+      "archiveFilename": "kenney_modular-space-kit_1.0.zip",
+      "archiveSha256": "f394f7fd9eaf29c9de7e090e55b69926f699841af33b0b116f5cc0088de8a4dc",
       "downloadDate": "2026-08-03",
-      "license": "CC0 1.0 Universal",
-      "licenseSource": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/License.txt",
-      "licenseCommitted": "licenses/KayKit-Space-Base-Bits-CC0.txt",
-      "licenseSha256": "ab3bfedd06f2149bd9a3b78294c2797e039cdcf254979a8a4c83973a9900ea91"
+      "license": "Creative Commons CC0 1.0 Universal",
+      "licenseSource": "modular-space-kit/License.txt",
+      "licenseCommitted": "licenses/Kenney-Modular-Space-Kit-CC0.txt",
+      "licenseSha256": "38d94a4c79768cf5dc65e55b85f2dedd9f4bad35e325db1d0e5898fc1b7c5bbb"
     }
   ],
   "sourceHashes": {
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/containers_B.mtl": "bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/containers_B.obj": "2768e85d33c3253e658c7a1a14a9144c2ccc861a44aaaf1845f034f1c0e7f2fd",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/drill_structure.mtl": "bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/drill_structure.obj": "e8181916c9b8f0b08948e12c8b7a39a2d3a7b82f0d83498b988c08a9515e2a4b",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/spacebits_texture.png": "f19fe5ced42f72104a3c2e9f15d591622723695dd461a380691a8a21ebb01ae9",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/structure_tall.mtl": "bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/structure_tall.obj": "99811112971149909c38bfb286d38484e06678228e6476db797b75b94009e24c",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/terrain_low.mtl": "bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14",
-    "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/terrain_low.obj": "10e1d8fe49028038bba3def7ea20e771efa7d57988592c7cdbc88d565a324f5e",
-    "quaternius/OBJ/Enemy_EyeDrone.mtl": "b14e181d95f4c2ff09b03f15afeee1c7989fde2638ec862f2eabd93138a90b2a",
-    "quaternius/OBJ/Enemy_EyeDrone.obj": "c0c0e9c7b0347dcbc22c862e43e67106f7032c081fabf62db1c328fa2eb28d87",
-    "quaternius/OBJ/Enemy_QuadShell.mtl": "6a3da0a19d0c3443af158c84c7713d476cbc6cbe3d49f2cd9085a62ed52c19d1",
-    "quaternius/OBJ/Enemy_QuadShell.obj": "bf8650079aac176f2924d122932ee206345e4bb3b69ef7a2eccce3f08209cc3b",
-    "quaternius/OBJ/Prop_Barrel2_Closed.mtl": "f60be363e5a207e294084b9883a3697d0ee5f4a1546faab339a47e060f2e1d48",
-    "quaternius/OBJ/Prop_Barrel2_Closed.obj": "e9e205c2f7edd3436258056973f1139ee6ee75fe438ef199b79f924650aa8bd3",
-    "quaternius/OBJ/Prop_Crate_Large.mtl": "fa13718900aaaa8d22dcbb1fa5dd140321c14a23646513885c729aeff6a441c1",
-    "quaternius/OBJ/Prop_Crate_Large.obj": "7ecccb65d1c328c05d10803b0c78c92ebf2ab20fd5b7b85c2aeced76bccec255",
-    "quaternius/OBJ/Prop_Crate_Tarp_Large.mtl": "fa13718900aaaa8d22dcbb1fa5dd140321c14a23646513885c729aeff6a441c1",
-    "quaternius/OBJ/Prop_Crate_Tarp_Large.obj": "2cd1a32679df2c608562c9afbd7f40794bd18a4f534af4c71bd57a66b7f2e2a1",
-    "quaternius/OBJ/Prop_Mine.mtl": "6130165535beb5ac72a8620fdac603b89ed702bb239135a5466bbd26d5071147",
-    "quaternius/OBJ/Prop_Mine.obj": "c24bef15e2ba615c2533e264bf135175eab19f9044c1430a5283460d91d377c4",
-    "quaternius/OBJ/Prop_SatelliteDish.mtl": "fd12fb0d4d7f74ccb49c457226a97fc86b60927585cda02888e9d837e70e3074",
-    "quaternius/OBJ/Prop_SatelliteDish.obj": "ae50567124bcca21882cc67fb36df2b4cfbc0f4d6c7772462233cfa9c638bdd7",
-    "quaternius/Textures/T_Enemies_BaseColor.png": "65ab96c4ed89e64d84ed453fd67dfd37027860d81b93fb2a5d5bb2e9e0e35df8",
-    "quaternius/Textures/T_Enemies_Emissive.png": "da6ebc7bb22dc15a39a127bcf4ebdf27047274f0f1fb26ca31bb7fc93a46ed0c",
-    "quaternius/Textures/T_Enemies_Normal.png": "3e1f78e93b93df32828ee9a9389665e9ccbe330065a36f365267bd9e094d2187",
-    "quaternius/Textures/T_Enemies_ORM.png": "c9b85f821df22954ca63cbeb09bc392bba4e12a3776c413886ea86b8457fd08d",
-    "quaternius/Textures/T_Props_Batch1_BaseColor.png": "c0ea20e93b451f65a22a11bbfbc3542e2408f9d5c3f2ac3fd12304f1308106e9",
-    "quaternius/Textures/T_Props_Batch1_Normal.png": "3a0d462366e5d03ef13fb35efc97c38c2463c118a89e303d356bac54d941d4ee",
-    "quaternius/Textures/T_Props_Batch1_ORM.png": "021629ac29f3761db317303a862c731502cd3a1a207291011adac241f9f48fa0",
-    "quaternius/Textures/T_Props_Batch2_BaseColor.png": "8977c1d6ada0ce151552caaf44be0b533827627f0172e6c1912175ab314260cd",
-    "quaternius/Textures/T_Props_Batch2_Emissive.png": "e9ebf8ddd7e4d6c156e084b4d6f00d0a8090f40f0e6e188385980cf1e8a95aa0",
-    "quaternius/Textures/T_Props_Batch2_Normal.png": "5dc16d40e5e92c956f0fdbeea346d2b6792f9f25b13addee5f33d984d75072aa",
-    "quaternius/Textures/T_Props_Batch2_ORM.png": "3b66c58f973d119f8501a38a3bf7743818a1559366ddc4bb5c54b23667d233f3",
-    "quaternius/Textures/T_Props_Crates_BaseColor.png": "79d604644b8ef63731735cfb29a4a9ded81598d20ecffe75e2af3fd9e18d255c",
-    "quaternius/Textures/T_Props_Crates_Normal.png": "9fe8aa4951198c0dd3e06a41cd7aca1e50e308c2629f620f4d5be53dfc835b21",
-    "quaternius/Textures/T_Props_Crates_ORM.png": "a36b59d07082dde265f13689f0acaacfa0cfb22b4769a2dad1bad282a39bf795",
-    "quaternius/Textures/T_Trim_01_BaseColor.png": "a8f3271be2aa9c450ef5ef85c15bf8bcaeeaa48f5fc616df12d1334a96e78605",
-    "quaternius/Textures/T_Trim_01_Normal.png": "1aec7ad47a642fc68216b5a3119341b7dca038c1fc9493df8a15ad4aa27ddbcf",
-    "quaternius/Textures/T_Trim_01_ORM.png": "6ab7ad231df22867652048ebfd602684a9072d45c483ca57df0fcd4cb2cb4feb",
-    "quaternius/Textures/T_Trim_02_BaseColor.png": "7b13c6a7d82b434314237c4b1930b8e12ddc69a70ffef28d73cbd178d3ff6293",
-    "quaternius/Textures/T_Trim_02_Normal.png": "7faaa7059192f43aded9cc2f93917dd54fd14545509c37318d4e6bf0a8104960",
-    "quaternius/Textures/T_Trim_02_ORM.png": "2a433e6a7fbcec375b5c5e5c7aa57dbe1fd23ca6592f48c52d09dde2d622aab8",
-    "quaternius/Textures/T_Trim_03_Dark.png": "758a95beccdc9f0621d8b8a283ee2593e04b56f1cd32776165ec85e1568e8eb8",
-    "quaternius/Textures/T_Trim_03_Normal.png": "b2c3238cbe2586e44df0b00179adf85e5b7ac7fed1713ec0b807482245a30738",
-    "quaternius/Textures/T_Trim_03_ORM.png": "c57134b5d496b39b955a87765ea32b93567b1ab494fe6b890de24c75dcfd6fe4"
+    "modular-space-kit/Models/OBJ format/Textures/colormap.png": "5aa7d186416e85310d99308c8e5510ededda181f3354ba9f4887cd56273f2b1e",
+    "modular-space-kit/Models/OBJ format/gate-lasers.mtl": "45a6736aa344a0c7e286b9c43c6a48f25b6a2f78d8c5949e430c3b4a93b4e060",
+    "modular-space-kit/Models/OBJ format/gate-lasers.obj": "1611d2d1d1d8429b8fffadb337dd570600bde4bc9e9ef6bb933d51fb338a520a",
+    "modular-space-kit/Models/OBJ format/room-large.mtl": "45a6736aa344a0c7e286b9c43c6a48f25b6a2f78d8c5949e430c3b4a93b4e060",
+    "modular-space-kit/Models/OBJ format/room-large.obj": "3ef1dc4b366e76b2bdd1ad44e5ad7a3e78c55e7d0fb067625dbaa6c38390b31e",
+    "space-kit/Models/OBJ format/barrels_rail.mtl": "a7488b28c3724941d54087a27ba05eefea15279bd8ea8e54eedc51250b9c3927",
+    "space-kit/Models/OBJ format/barrels_rail.obj": "51f6f46f6878242f0e5a11d0295a006099ebbec43777ef7def4efddd1f490181",
+    "space-kit/Models/OBJ format/craft_speederA.mtl": "91d172e7a3359183581919a7b5d2e6327f63388942e23dbd1a26ef714415c0e3",
+    "space-kit/Models/OBJ format/craft_speederA.obj": "534e1b1198be654d2925d6a785531974213ac8b43ae05c02aecfeb905c0166fc",
+    "space-kit/Models/OBJ format/craft_speederD.mtl": "ec579d3e3095fc6cb1e7aaf54be2392459383382334ede6b3f27b4cb4f3b127a",
+    "space-kit/Models/OBJ format/craft_speederD.obj": "090e01b12b0d1a0619929d507d8008893e0e13a69235564f677888202c8caea2",
+    "space-kit/Models/OBJ format/rocket_baseA.mtl": "a7488b28c3724941d54087a27ba05eefea15279bd8ea8e54eedc51250b9c3927",
+    "space-kit/Models/OBJ format/rocket_baseA.obj": "3a6c4115e5994079abe83a7b97f14f2bcce0e97b76bd229dcb60fd0112060ccd",
+    "space-kit/Models/OBJ format/rocket_fuelA.mtl": "583541d566dd5edba66cc8e2353e379bdc3de155cd21e173fab33fe9a9248a52",
+    "space-kit/Models/OBJ format/rocket_fuelA.obj": "53f83c675728d51a12014724d413a7a264ae893512189313553581e1135bfa87",
+    "space-kit/Models/OBJ format/rocket_sidesA.mtl": "f1131066d3cdc671b79f7799d5ddf194b25b0027381aea415d8c91d24e0190ba",
+    "space-kit/Models/OBJ format/rocket_sidesA.obj": "3a69d1927e1ac09203c3b514a9714876cfeb4fb8688d003fff09a1e3b8237a8a",
+    "space-kit/Models/OBJ format/rocket_topA.mtl": "7e4036c7a7ec9d8081082f4778338a8bff9a01bebb40c51cae08c8a96bc61785",
+    "space-kit/Models/OBJ format/rocket_topA.obj": "d910a3dd8cccebb8f1eb259af29d436da6839e81ae362fc5e9fd8f4038146bb4",
+    "space-kit/Models/OBJ format/terrain_sideCliff.mtl": "3f5b98315cc38f85580e92d4ac82f2693534ac142098fd1dbe76cc07b962c02d",
+    "space-kit/Models/OBJ format/terrain_sideCliff.obj": "a321d44e8603bd3cdf59866464612d13d4720634bf46e0badb80ced32ba7379b",
+    "space-kit/Models/OBJ format/turret_double.mtl": "762ff003991e23328663179e8246dbe450f15f2467cc1947ff144c0ff1f49c8b",
+    "space-kit/Models/OBJ format/turret_double.obj": "f511dfa73a94274e1a13ab7d136f1087a99149853fa6659132ece1bbc28311e6",
+    "space-kit/Models/OBJ format/turret_single.mtl": "762ff003991e23328663179e8246dbe450f15f2467cc1947ff144c0ff1f49c8b",
+    "space-kit/Models/OBJ format/turret_single.obj": "2b3492cde9c9496d73963669d8d59e9f5ebccb9dcbf15dbf5336e7ca630c6a89"
   },
   "assets": [
     {
-      "id": "drone-scout",
-      "sourceFamily": "quaternius-sci-fi-essentials-standard",
-      "category": "drone",
+      "id": "drone-scout", "sourceFamily": "kenney-space-kit", "category": "drone",
       "components": [{
-        "model": "quaternius/OBJ/Enemy_EyeDrone.obj",
-        "material": "quaternius/OBJ/Enemy_EyeDrone.mtl",
-        "textures": [
-          "quaternius/Textures/T_Enemies_BaseColor.png",
-          "quaternius/Textures/T_Enemies_Emissive.png",
-          "quaternius/Textures/T_Enemies_Normal.png",
-          "quaternius/Textures/T_Enemies_ORM.png"
-        ],
-        "scale": 1.0,
-        "rotationDegrees": [0, 0, 0],
-        "translation": [0, 0, 0]
+        "model": "space-kit/Models/OBJ format/craft_speederA.obj",
+        "material": "space-kit/Models/OBJ format/craft_speederA.mtl",
+        "textures": [], "scale": 1, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
       }],
       "hideNodes": []
     },
     {
-      "id": "drone-striker",
-      "sourceFamily": "quaternius-sci-fi-essentials-standard",
-      "category": "drone",
+      "id": "drone-striker", "sourceFamily": "kenney-space-kit", "category": "drone",
       "components": [{
-        "model": "quaternius/OBJ/Enemy_QuadShell.obj",
-        "material": "quaternius/OBJ/Enemy_QuadShell.mtl",
-        "textures": [
-          "quaternius/Textures/T_Enemies_BaseColor.png",
-          "quaternius/Textures/T_Enemies_Emissive.png",
-          "quaternius/Textures/T_Enemies_Normal.png",
-          "quaternius/Textures/T_Enemies_ORM.png"
-        ],
-        "scale": 1.0,
-        "rotationDegrees": [0, 0, 0],
-        "translation": [0, 0, 0]
+        "model": "space-kit/Models/OBJ format/craft_speederD.obj",
+        "material": "space-kit/Models/OBJ format/craft_speederD.mtl",
+        "textures": [], "scale": 1, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
       }],
       "hideNodes": []
     },
     {
-      "id": "turret-sentry",
-      "sourceFamily": "quaternius-sci-fi-essentials-standard",
-      "category": "turret",
+      "id": "turret-sentry", "sourceFamily": "kenney-space-kit", "category": "turret",
+      "components": [{
+        "model": "space-kit/Models/OBJ format/turret_single.obj",
+        "material": "space-kit/Models/OBJ format/turret_single.mtl",
+        "textures": [], "scale": 1, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
+      }],
+      "hideNodes": ["turret"]
+    },
+    {
+      "id": "turret-heavy", "sourceFamily": "kenney-space-kit", "category": "turret",
+      "components": [{
+        "model": "space-kit/Models/OBJ format/turret_double.obj",
+        "material": "space-kit/Models/OBJ format/turret_double.mtl",
+        "textures": [], "scale": 1, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
+      }],
+      "hideNodes": ["turret"]
+    },
+    {
+      "id": "barrier-rail", "sourceFamily": "kenney-space-kit", "category": "wallLow",
       "components": [
         {
-          "model": "quaternius/OBJ/Prop_Crate_Large.obj",
-          "material": "quaternius/OBJ/Prop_Crate_Large.mtl",
-          "textures": [
-            "quaternius/Textures/T_Props_Crates_BaseColor.png",
-            "quaternius/Textures/T_Props_Crates_Normal.png",
-            "quaternius/Textures/T_Props_Crates_ORM.png"
-          ],
-          "scale": 1.0,
-          "rotationDegrees": [0, 0, 0],
-          "translation": [0, 0, 0]
+          "model": "space-kit/Models/OBJ format/barrels_rail.obj",
+          "material": "space-kit/Models/OBJ format/barrels_rail.mtl",
+          "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [-0.44, 0, 0]
         },
         {
-          "model": "quaternius/OBJ/Prop_SatelliteDish.obj",
-          "material": "quaternius/OBJ/Prop_SatelliteDish.mtl",
-          "textures": [
-            "quaternius/Textures/T_Trim_01_BaseColor.png",
-            "quaternius/Textures/T_Trim_01_Normal.png",
-            "quaternius/Textures/T_Trim_01_ORM.png",
-            "quaternius/Textures/T_Trim_02_BaseColor.png",
-            "quaternius/Textures/T_Trim_02_Normal.png",
-            "quaternius/Textures/T_Trim_02_ORM.png",
-            "quaternius/Textures/T_Trim_03_Dark.png",
-            "quaternius/Textures/T_Trim_03_Normal.png",
-            "quaternius/Textures/T_Trim_03_ORM.png"
-          ],
-          "scale": 0.62,
-          "rotationDegrees": [-12, 0, 0],
-          "translation": [0, 0.72, 0]
+          "model": "space-kit/Models/OBJ format/barrels_rail.obj",
+          "material": "space-kit/Models/OBJ format/barrels_rail.mtl",
+          "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0.44, 0, 0]
         }
       ],
       "hideNodes": []
     },
     {
-      "id": "turret-heavy",
-      "sourceFamily": "quaternius-sci-fi-essentials-standard",
-      "category": "turret",
+      "id": "barrier-crate", "sourceFamily": "kenney-modular-space-kit", "category": "wallLow",
       "components": [
         {
-          "model": "quaternius/OBJ/Prop_Barrel2_Closed.obj",
-          "material": "quaternius/OBJ/Prop_Barrel2_Closed.mtl",
-          "textures": [
-            "quaternius/Textures/T_Props_Batch1_BaseColor.png",
-            "quaternius/Textures/T_Props_Batch1_Normal.png",
-            "quaternius/Textures/T_Props_Batch1_ORM.png"
-          ],
-          "scale": 1.0,
-          "rotationDegrees": [0, 0, 0],
-          "translation": [0, 0, 0]
+          "model": "modular-space-kit/Models/OBJ format/gate-lasers.obj",
+          "material": "modular-space-kit/Models/OBJ format/gate-lasers.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [-0.85, 0, 0]
         },
         {
-          "model": "quaternius/OBJ/Prop_Mine.obj",
-          "material": "quaternius/OBJ/Prop_Mine.mtl",
-          "textures": [
-            "quaternius/Textures/T_Props_Batch2_BaseColor.png",
-            "quaternius/Textures/T_Props_Batch2_Emissive.png",
-            "quaternius/Textures/T_Props_Batch2_Normal.png",
-            "quaternius/Textures/T_Props_Batch2_ORM.png"
-          ],
-          "scale": 0.74,
-          "rotationDegrees": [0, 0, 0],
-          "translation": [0, 0.68, 0]
+          "model": "modular-space-kit/Models/OBJ format/gate-lasers.obj",
+          "material": "modular-space-kit/Models/OBJ format/gate-lasers.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/gate-lasers.obj",
+          "material": "modular-space-kit/Models/OBJ format/gate-lasers.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0.85, 0, 0]
         }
       ],
       "hideNodes": []
     },
     {
-      "id": "barrier-rail",
-      "sourceFamily": "quaternius-sci-fi-essentials-standard",
-      "category": "wallLow",
-      "components": [{
-        "model": "quaternius/OBJ/Prop_Crate_Tarp_Large.obj",
-        "material": "quaternius/OBJ/Prop_Crate_Tarp_Large.mtl",
-        "textures": [
-          "quaternius/Textures/T_Props_Crates_BaseColor.png",
-          "quaternius/Textures/T_Props_Crates_Normal.png",
-          "quaternius/Textures/T_Props_Crates_ORM.png"
-        ],
-        "scale": 1.0,
-        "rotationDegrees": [0, 0, 0],
-        "translation": [0, 0, 0]
-      }],
+      "id": "structure-reactor", "sourceFamily": "kenney-space-kit", "category": "wallHigh",
+      "components": [
+        { "model": "space-kit/Models/OBJ format/rocket_baseA.obj", "material": "space-kit/Models/OBJ format/rocket_baseA.mtl", "textures": [], "scale": 0.85, "rotationDegrees": [0, 0, 0], "translation": [-0.48, 0, 0] },
+        { "model": "space-kit/Models/OBJ format/rocket_sidesA.obj", "material": "space-kit/Models/OBJ format/rocket_sidesA.mtl", "textures": [], "scale": 0.80, "rotationDegrees": [0, 0, 0], "translation": [-0.48, 0.72, 0] },
+        { "model": "space-kit/Models/OBJ format/rocket_fuelA.obj", "material": "space-kit/Models/OBJ format/rocket_fuelA.mtl", "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [-0.48, 1.40, 0] },
+        { "model": "space-kit/Models/OBJ format/rocket_topA.obj", "material": "space-kit/Models/OBJ format/rocket_topA.mtl", "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [-0.48, 2.02, 0] },
+        { "model": "space-kit/Models/OBJ format/rocket_baseA.obj", "material": "space-kit/Models/OBJ format/rocket_baseA.mtl", "textures": [], "scale": 0.85, "rotationDegrees": [0, 0, 0], "translation": [0.48, 0, 0] },
+        { "model": "space-kit/Models/OBJ format/rocket_sidesA.obj", "material": "space-kit/Models/OBJ format/rocket_sidesA.mtl", "textures": [], "scale": 0.80, "rotationDegrees": [0, 0, 0], "translation": [0.48, 0.72, 0] },
+        { "model": "space-kit/Models/OBJ format/rocket_fuelA.obj", "material": "space-kit/Models/OBJ format/rocket_fuelA.mtl", "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0.48, 1.40, 0] },
+        { "model": "space-kit/Models/OBJ format/rocket_topA.obj", "material": "space-kit/Models/OBJ format/rocket_topA.mtl", "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0.48, 2.02, 0] }
+      ],
       "hideNodes": []
     },
     {
-      "id": "barrier-crate",
-      "sourceFamily": "kaykit-space-base-bits-free",
-      "category": "wallLow",
-      "components": [{
-        "model": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/containers_B.obj",
-        "material": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/containers_B.mtl",
-        "textures": ["kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/spacebits_texture.png"],
-        "scale": 1.0,
-        "rotationDegrees": [0, 0, 0],
-        "translation": [0, 0, 0]
-      }],
+      "id": "structure-tower", "sourceFamily": "kenney-modular-space-kit", "category": "wallHigh",
+      "components": [
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0, 0.60, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0, 1.20, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0, 1.80, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0, 2.40, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0, 3.00, 0]
+        }
+      ],
       "hideNodes": []
     },
     {
-      "id": "structure-reactor",
-      "sourceFamily": "kaykit-space-base-bits-free",
-      "category": "wallHigh",
-      "components": [{
-        "model": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/drill_structure.obj",
-        "material": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/drill_structure.mtl",
-        "textures": ["kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/spacebits_texture.png"],
-        "scale": 1.0,
-        "rotationDegrees": [0, 0, 0],
-        "translation": [0, 0, 0]
-      }],
-      "hideNodes": []
-    },
-    {
-      "id": "structure-tower",
-      "sourceFamily": "kaykit-space-base-bits-free",
-      "category": "wallHigh",
-      "components": [{
-        "model": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/structure_tall.obj",
-        "material": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/structure_tall.mtl",
-        "textures": ["kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/spacebits_texture.png"],
-        "scale": 1.0,
-        "rotationDegrees": [0, 0, 0],
-        "translation": [0, 0, 0]
-      }],
-      "hideNodes": []
-    },
-    {
-      "id": "gap-edge",
-      "sourceFamily": "kaykit-space-base-bits-free",
-      "category": "gap",
-      "components": [{
-        "model": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/terrain_low.obj",
-        "material": "kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/terrain_low.mtl",
-        "textures": ["kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/spacebits_texture.png"],
-        "scale": 1.0,
-        "rotationDegrees": [0, 0, 0],
-        "translation": [0, 0, 0]
-      }],
+      "id": "gap-edge", "sourceFamily": "kenney-space-kit", "category": "gap",
+      "components": [
+        {
+          "model": "space-kit/Models/OBJ format/terrain_sideCliff.obj",
+          "material": "space-kit/Models/OBJ format/terrain_sideCliff.mtl",
+          "textures": [], "scale": 0.78, "rotationDegrees": [0, 0, 0], "translation": [-0.42, 0, 0]
+        },
+        {
+          "model": "space-kit/Models/OBJ format/terrain_sideCliff.obj",
+          "material": "space-kit/Models/OBJ format/terrain_sideCliff.mtl",
+          "textures": [], "scale": 0.78, "rotationDegrees": [0, 0, 0], "translation": [0.42, 0, 0]
+        }
+      ],
       "hideNodes": []
     }
   ]

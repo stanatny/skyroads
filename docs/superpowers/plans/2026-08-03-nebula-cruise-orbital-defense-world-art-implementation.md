@@ -220,20 +220,20 @@ Require the exact model/material mapping below. All paths are relative to the te
 | 'turret-sentry' | 'space-kit/Models/OBJ format/turret_single.obj' + matching MTL, textures [], hideNodes ['turret'] |
 | 'turret-heavy' | 'space-kit/Models/OBJ format/turret_double.obj' + matching MTL, textures [], hideNodes ['turret'] |
 | 'barrier-rail' | two 'space-kit/Models/OBJ format/barrels_rail.obj' components at scale 0.72 and X translations -0.44/+0.44 |
-| 'barrier-crate' | 'modular-space-kit/Models/OBJ format/gate-lasers.obj' + matching MTL + 'Models/OBJ format/Textures/colormap.png' |
-| 'structure-reactor' | 'space-kit/Models/OBJ format/machine_generatorLarge.obj' + matching MTL, textures [] |
-| 'structure-tower' | two 'modular-space-kit/Models/OBJ format/room-large.obj' components: base identity, upper scale 0.92 translated to Y 0.82; both use colormap.png |
-| 'gap-edge' | 'space-kit/Models/OBJ format/terrain_sideCliff.obj' + matching MTL, textures [] |
+| 'barrier-crate' | three 'modular-space-kit/Models/OBJ format/gate-lasers.obj' components at scale 0.72 and X translations -0.85/0/+0.85; each uses matching MTL + 'Models/OBJ format/Textures/colormap.png' |
+| 'structure-reactor' | two identical Space Kit rocket assemblies at X -0.48/+0.48: 'rocket_baseA' scale 0.85 at Y 0, 'rocket_sidesA' scale 0.80 at Y 0.72, 'rocket_fuelA' scale 0.72 at Y 1.40, and 'rocket_topA' scale 0.72 at Y 2.02; each uses matching MTL and textures [] |
+| 'structure-tower' | six 'modular-space-kit/Models/OBJ format/room-large.obj' components at scale 0.72 and Y translations 0/0.60/1.20/1.80/2.40/3.00; each uses matching MTL + colormap.png |
+| 'gap-edge' | two 'space-kit/Models/OBJ format/terrain_sideCliff.obj' components at scale 0.78 and X translations -0.42/+0.42; each uses matching MTL and textures [] |
 
 Extend the test-side PNG alpha scan so every frame reports 'minX', 'maxX', 'minY', 'maxY', 'opaqueWidth', and 'opaqueHeight'. Require:
 
 ~~~js
 const minimumOpaqueExtent = {
-  drone: { width: 280, height: 170 },
-  turret: { width: 260, height: 300 },
-  wallLow: { width: 392, height: 150 },
-  wallHigh: { width: 240, height: 400 },
-  gap: { width: 384, height: 120 },
+  drone: { width: 280, height: 140 },
+  turret: { width: 260, height: 240 },
+  wallLow: { width: 392, height: 140 },
+  wallHigh: { width: 240, height: 360 },
+  gap: { width: 330, height: 120 },
 };
 ~~~
 
@@ -288,7 +288,7 @@ Replace the violet/red generated seam treatment with:
 
 Keep warning red/magenta out of the atlas; the runtime cue layer already owns that semantic color.
 
-Retain recursive 'hideNodes' matching and require that both turret recipes actually find and hide a node named 'turret'. A requested hide node that matches zero imported nodes is a renderer error, preventing a static barrel from silently entering the atlas.
+Implement exact OBJ `g`-token filtering for `hideNodes` before SceneKit import. For both turret recipes, remove face records only while the exact group is `turret`; require that the requested group is declared and that at least one face is removed. This prevents a static barrel from silently entering the atlas without depending on SceneKit's imported-node naming.
 
 After safe raw rendering, compute alpha bounds using alpha >= 16. Build one union bound across all seven frames, derive one uniform scale from the asset category's target width/height ratios, then place every frame with the same horizontal center and bottom padding. Downsample into the existing 512×512 premultiplied output and clear RGB wherever alpha is zero.
 

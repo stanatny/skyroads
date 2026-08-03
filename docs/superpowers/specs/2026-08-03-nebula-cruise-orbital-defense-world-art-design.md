@@ -48,12 +48,12 @@ The selected source models are:
 | `turret-sentry` | Space Kit `turret_single` |
 | `turret-heavy` | Space Kit `turret_double` |
 | `barrier-rail` | Space Kit `barrels_rail` assembled into one wide lane barrier |
-| `barrier-crate` | Modular Space Kit `gate-lasers` |
-| `structure-reactor` | Space Kit `machine_generatorLarge` |
-| `structure-tower` | Modular Space Kit `room-large` assembled as a vertical defense structure |
-| `gap-edge` | Space Kit `terrain_sideCliff` used as a repeatable engineered rim module |
+| `barrier-crate` | Three Modular Space Kit `gate-lasers` modules at scale `0.72`, translated to X `-0.85/0/+0.85` |
+| `structure-reactor` | Two Space Kit rocket assemblies at X `-0.48/+0.48`, each built from `rocket_baseA`, `rocket_sidesA`, `rocket_fuelA`, and `rocket_topA` |
+| `structure-tower` | Six Modular Space Kit `room-large` modules at scale `0.72`, stacked at Y `0/0.60/1.20/1.80/2.40/3.00` |
+| `gap-edge` | Two Space Kit `terrain_sideCliff` modules at scale `0.78`, translated to X `-0.42/+0.42` |
 
-Space Kit OBJ materials are solid-color `Kd` materials with no texture dependency. Modular Space Kit `gate-lasers` and `room-large` use `Models/OBJ format/Textures/colormap.png`.
+Space Kit OBJ materials are solid-color `Kd` materials with no texture dependency. Modular Space Kit `gate-lasers` and `room-large` use `Models/OBJ format/Textures/colormap.png`. Each reactor rocket uses base/sides/fuel/top scales `0.85/0.80/0.72/0.72` and Y offsets `0/0.72/1.40/2.02`.
 
 Source archives and extracted models remain outside Git. Commit only the derived runtime atlases, exact license copies, deterministic renderer/manifest, and provenance.
 
@@ -69,6 +69,7 @@ Source archives and extracted models remain outside Git. Commit only the derived
 - Drones target 72% of frame width and retain clear space for banking.
 - Turrets target 76% of frame width or 86% of frame height, whichever is reached first.
 - Gap modules target 88% of frame width and retain at least 24 transparent pixels on every outer edge.
+- Every low-barrier yaw frame must retain an opaque center height of at least 140 pixels, preserving a continuous lane-blocking silhouette without forcing excessive vertical scale.
 
 Runtime visual width for `wallLow` and `wallHigh` becomes `648` world units, exactly 90% of the `720`-unit lane. Their gameplay footprint remains the complete lane and their collision heights remain `600` and `2000` world units.
 
