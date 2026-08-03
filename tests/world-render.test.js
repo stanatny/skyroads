@@ -905,21 +905,26 @@ test('far-to-near wall traversal preserves atlas depth order', () => {
   ]);
 });
 
-test('loaded start corridor clips its atlas before drawing and restores the clip scope', () => {
+test('loaded and fallback corridors leave unclipped atlas topology to live dual conduits', () => {
   const harness = createHarness();
   const fixture = renderCorridorModuleFixture(harness);
   assert.equal(fixture.descriptor.phase, 'start');
   const calls = imageCalls(fixture.events).filter((event) => event.image === 'corridorLow');
   assert.ok(calls.length > 0);
-  assert.ok(calls.every((call) => call.clip), 'every atlas layer must use the live corridor clip');
-  const clipIndex = fixture.events.findIndex((event) => event.type === 'clip');
-  const firstDrawIndex = fixture.events.findIndex((event) => event.type === 'drawImage');
-  assert.ok(clipIndex >= 0 && clipIndex < firstDrawIndex, 'clip must precede atlas drawing');
-
-  vm.runInContext("__ctx.drawImage({ id: 'clipProbe' }, 0, 0, 1, 1, 0, 0, 1, 1)", harness.sandbox);
-  const probe = harness.context.events.at(-1);
-  assert.equal(probe.image, 'clipProbe');
-  assert.equal(probe.clip, null, 'atlas clip must not leak past restore');
+  assert.ok(calls.every((call) => call.clip === null),
+    'body-only corridor atlas layers must not use a topology clip');
+  const lowConduitPath = fixture.events
+    .filter((event) => event.type === 'stroke' && event.style === '#3de6ff')
+    .flatMap((event) => event.path)
+    .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo');
+  const expectedLowConduits = JSON.parse(vm.runInContext(`JSON.stringify(
+    [-18, 18].flatMap((offset) => [
+      project(laneCenterX(3) + offset, 540, zRelOf(10) + 6),
+      project(laneCenterX(3) + offset, 540, zRelOf(11)),
+    ])
+  )`, harness.sandbox));
+  assert.deepEqual(lowConduitPath.map((part) => [part[1], part[2]]),
+    expectedLowConduits.map((point) => [point.x, point.y]));
 
   const fallbackHarness = createHarness({ missing: ['corridorMedium'] });
   const fallback = renderCorridorModuleFixture(fallbackHarness, {
@@ -929,103 +934,87 @@ test('loaded start corridor clips its atlas before drawing and restores the clip
   assert.ok(fallback.events.some((event) => event.type === 'fill'));
   assert.equal(fallback.events.filter((event) => event.type === 'clip').length, 0,
     'procedural fallback must not depend on an atlas clip');
+  const mediumConduitPath = fallback.events
+    .filter((event) => event.type === 'stroke' && event.style === '#3de6ff')
+    .flatMap((event) => event.path)
+    .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo');
+  const expectedMediumConduits = JSON.parse(vm.runInContext(`JSON.stringify(
+    [-18, 18].flatMap((offset) => [
+      project(laneCenterX(3) + offset, 1120, zRelOf(10) + 6),
+      project(laneCenterX(3) + offset, 1120, zRelOf(11) - 6),
+    ])
+  )`, fallbackHarness.sandbox));
+  assert.deepEqual(mediumConduitPath.map((part) => [part[1], part[2]]),
+    expectedMediumConduits.map((point) => [point.x, point.y]));
 });
 
-test('loaded corridor atlases clip start middle end single and mismatched modules to live prism depths', () => {
-  const epsilon = 1e-8;
-  const verticesOf = (path) => path
+test('live plinths and dual conduits obey every corridor phase and mismatch boundary', () => {
+  const pathPoints = (events, type, style) => events
+    .filter((event) => event.type === type && event.style === style)
+    .flatMap((event) => event.path)
     .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo')
-    .map((part) => ({ x: part[1], y: part[2] }));
-  const includesPoint = (vertices, expected) => vertices.some((point) => (
-    Math.abs(point.x - expected.x) < epsilon && Math.abs(point.y - expected.y) < epsilon
-  ));
-  const projectedFace = (harness, height, zExpression) => JSON.parse(vm.runInContext(
-    `JSON.stringify({
-      bottomLeft: project(laneCenterX(3) - 324, 0, ${zExpression}),
-      bottomRight: project(laneCenterX(3) + 324, 0, ${zExpression}),
-      topLeft: project(laneCenterX(3) - 324, ${height}, ${zExpression}),
-      topRight: project(laneCenterX(3) + 324, ${height}, ${zExpression})
-    })`,
-    harness.sandbox,
-  ));
-  const assertConvex = (vertices, label) => {
-    assert.ok(vertices.length >= 3, `${label} polygon vertex count`);
-    const turns = vertices.map((point, index) => {
-      const next = vertices[(index + 1) % vertices.length];
-      const after = vertices[(index + 2) % vertices.length];
-      return (next.x - point.x) * (after.y - next.y)
-        - (next.y - point.y) * (after.x - next.x);
-    }).filter((turn) => Math.abs(turn) > 1e-10);
-    assert.ok(turns.length > 0, `${label} polygon must have area`);
-    assert.ok(turns.every((turn) => Math.sign(turn) === Math.sign(turns[0])),
-      `${label} polygon must be convex`);
-  };
+    .map((part) => [part[1], part[2]]);
   const cases = [
-    {
-      label: 'start', length: 3, index: 10, phase: 'start',
-      near: 'zRelOf(10) + 6', far: 'zRelOf(11)', excludedNear: 'zRelOf(10)',
-    },
-    {
-      label: 'middle', length: 3, index: 11, phase: 'middle',
-      near: 'zRelOf(11)', far: 'zRelOf(12)',
-    },
-    {
-      label: 'end', length: 3, index: 12, phase: 'end',
-      near: 'zRelOf(12)', far: 'zRelOf(13) - 6', excludedFar: 'zRelOf(13)',
-    },
-    {
-      label: 'single', length: 1, index: 10, phase: 'single',
-      near: 'zRelOf(10) + 6', far: 'zRelOf(11) - 6',
-      excludedNear: 'zRelOf(10)', excludedFar: 'zRelOf(11)',
-    },
+    { label: 'start', length: 3, index: 10, phase: 'start' },
+    { label: 'middle', length: 3, index: 11, phase: 'middle' },
+    { label: 'end', length: 3, index: 12, phase: 'end' },
+    { label: 'single', length: 1, index: 10, phase: 'single' },
     {
       label: 'id mismatch', length: 2, index: 10, phase: 'single',
       mutation: "STATE.track[11].corridor.id = 'different'",
-      near: 'zRelOf(10) + 6', far: 'zRelOf(11) - 6',
-      excludedNear: 'zRelOf(10)', excludedFar: 'zRelOf(11)',
     },
+    { label: 'lane mismatch', length: 2, index: 10, phase: 'single', mutation: 'STATE.track[11].corridor.lane = 4' },
+    { label: 'hole', length: 2, index: 10, phase: 'single', mutation: 'STATE.track[11].lanes[3] = LANE_TYPE.ROAD' },
   ];
 
-  for (const [type, category, height] of [
-    ['WALL_LOW', 'corridorLow', 600],
-    ['WALL_MEDIUM', 'corridorMedium', 1250],
+  for (const [type, otherType, category, conduitY] of [
+    ['WALL_LOW', 'WALL_MEDIUM', 'corridorLow', 540],
+    ['WALL_MEDIUM', 'WALL_LOW', 'corridorMedium', 1120],
   ]) {
-    for (const fixtureCase of cases) {
-      const harness = createHarness();
-      const fixture = renderCorridorModuleFixture(harness, {
-        type,
-        length: fixtureCase.length,
-        index: fixtureCase.index,
-        mutation: fixtureCase.mutation,
-      });
-      const label = `${category} ${fixtureCase.label}`;
-      assert.equal(fixture.descriptor.phase, fixtureCase.phase, `${label} phase`);
-      const calls = imageCalls(fixture.events).filter((event) => event.image === category);
-      assert.ok(calls.length > 0, `${label} atlas draw count`);
-      assert.ok(calls.every((call) => call.clip), `${label} atlas layers must all be clipped`);
-      for (const call of calls.slice(1)) assert.deepEqual(call.clip, calls[0].clip, `${label} clip stability`);
+    const typeMismatch = {
+      label: 'type mismatch', length: 2, index: 10, phase: 'single',
+      mutation: `
+        STATE.track[11].corridor.type = LANE_TYPE.${otherType};
+        STATE.track[11].lanes[3] = LANE_TYPE.${otherType};
+      `,
+    };
+    for (const loaded of [true, false]) {
+      for (const fixtureCase of [...cases, typeMismatch]) {
+        const harness = createHarness({ missing: loaded ? [] : [category] });
+        const fixture = renderCorridorModuleFixture(harness, {
+          type,
+          length: fixtureCase.length,
+          index: fixtureCase.index,
+          mutation: fixtureCase.mutation,
+        });
+        const label = `${loaded ? 'loaded' : 'fallback'} ${category} ${fixtureCase.label}`;
+        assert.equal(fixture.descriptor.phase, fixtureCase.phase, `${label} phase`);
+        const calls = imageCalls(fixture.events).filter((event) => event.image === category);
+        assert.equal(calls.length > 0, loaded, `${label} atlas availability`);
+        assert.ok(calls.every((call) => call.clip === null), `${label} body-only atlas clip`);
 
-      const vertices = verticesOf(calls[0].clip);
-      assertConvex(vertices, label);
-      const nearFace = projectedFace(harness, height, fixtureCase.near);
-      for (const [name, point] of Object.entries(nearFace)) {
-        assert.ok(includesPoint(vertices, point), `${label} expected near ${name}`);
-      }
-      const farFace = projectedFace(harness, height, fixtureCase.far);
-      for (const name of ['topLeft', 'topRight']) {
-        assert.ok(includesPoint(vertices, farFace[name]), `${label} expected far ${name}`);
-      }
-
-      if (fixtureCase.excludedNear) {
-        const excluded = projectedFace(harness, height, fixtureCase.excludedNear);
-        assert.ok(Object.values(excluded).every((point) => !includesPoint(vertices, point)),
-          `${label} must stop after its open near boundary`);
-      }
-      if (fixtureCase.excludedFar) {
-        const excluded = projectedFace(harness, height, fixtureCase.excludedFar);
-        assert.ok(!includesPoint(vertices, excluded.topLeft)
-          && !includesPoint(vertices, excluded.topRight),
-        `${label} must stop before its open far boundary`);
+        const zNear = vm.runInContext(`zRelOf(${fixtureCase.index})`, harness.sandbox);
+        const zFar = vm.runInContext(`zRelOf(${fixtureCase.index} + 1)`, harness.sandbox);
+        const connectBefore = fixture.descriptor.phase === 'middle' || fixture.descriptor.phase === 'end';
+        const connectAfter = fixture.descriptor.phase === 'middle' || fixture.descriptor.phase === 'start';
+        const interiorNear = zNear + (connectBefore ? 0 : 6);
+        const interiorFar = zFar - (connectAfter ? 0 : 6);
+        const expected = JSON.parse(vm.runInContext(`JSON.stringify({
+          plinth: [
+            project(laneCenterX(3) - 324, 20, ${interiorNear}),
+            project(laneCenterX(3) + 324, 20, ${interiorNear}),
+            project(laneCenterX(3) + 324, 20, ${interiorFar}),
+            project(laneCenterX(3) - 324, 20, ${interiorFar})
+          ],
+          conduits: [-18, 18].flatMap((offset) => [
+            project(laneCenterX(3) + offset, ${conduitY}, ${interiorNear}),
+            project(laneCenterX(3) + offset, ${conduitY}, ${interiorFar})
+          ])
+        })`, harness.sandbox));
+        assert.deepEqual(pathPoints(fixture.events, 'fill', '#101b2a'),
+          expected.plinth.map((point) => [point.x, point.y]), `${label} plinth`);
+        assert.deepEqual(pathPoints(fixture.events, 'stroke', '#3de6ff'),
+          expected.conduits.map((point) => [point.x, point.y]), `${label} conduits`);
       }
     }
   }
@@ -1054,7 +1043,7 @@ test('live low and medium corridors split immediately after destruction in atlas
       setupCorridorFixture(harness, type);
       const initial = renderCorridorSnapshot(harness);
       assert.deepEqual(initial.descriptors, expectedInitial(category, height));
-      assert.equal(eventCount(initial.events, 'stroke', '#3de6ff'), 8);
+      assert.equal(eventCount(initial.events, 'stroke', '#3de6ff'), 10);
       assert.equal(eventCount(initial.events, 'stroke', '#b8f7ff'), 2);
       assert.equal(eventCount(initial.events, 'fill', '#54e7ff'), 1);
       const initialImages = imageCalls(initial.events);
@@ -1075,7 +1064,7 @@ test('live low and medium corridors split immediately after destruction in atlas
         { phase: 'start', category, height, connectBefore: false, connectAfter: true },
         { phase: 'end', category, height, connectBefore: true, connectAfter: false },
       ]);
-      assert.equal(eventCount(split.events, 'stroke', '#3de6ff'), 4);
+      assert.equal(eventCount(split.events, 'stroke', '#3de6ff'), 8);
       assert.equal(eventCount(split.events, 'stroke', '#b8f7ff'), 4);
       assert.equal(eventCount(split.events, 'fill', '#54e7ff'), 2);
       const destroyedDepth = vm.runInContext('(zRelOf(12) + zRelOf(13)) / 2', harness.sandbox);
@@ -1087,33 +1076,38 @@ test('live low and medium corridors split immediately after destruction in atlas
         assert.equal(bodySignals, (height === 600 ? 1 : 2) * 4,
           'destroyed center must have no procedural body');
       }
-      const connectorTargets = split.events
+      const conduitPoints = split.events
         .filter((event) => event.type === 'stroke' && event.style === '#3de6ff')
         .flatMap((event) => event.path)
-        .filter((part) => part[0] === 'lineTo')
+        .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo')
         .map((part) => [part[1], part[2]]);
-      const beforeHole = vm.runInContext(
-        `project(laneCenterX(3), ${height * 0.16}, zRelOf(11))`,
+      const conduitY = height === 600 ? 540 : 1120;
+      const projectedConduits = (zExpression) => JSON.parse(vm.runInContext(
+        `JSON.stringify([-18, 18].map((offset) => (
+          project(laneCenterX(3) + offset, ${conduitY}, ${zExpression})
+        )))`,
         harness.sandbox,
-      );
-      const afterHole = vm.runInContext(
-        `project(laneCenterX(3), ${height * 0.16}, zRelOf(14))`,
-        harness.sandbox,
-      );
-      const roundedTargets = connectorTargets.map(([x, y]) => [x.toFixed(8), y.toFixed(8)]).sort();
-      assert.deepEqual(roundedTargets, [
-        [beforeHole.x.toFixed(8), beforeHole.y.toFixed(8)],
-        [beforeHole.x.toFixed(8), beforeHole.y.toFixed(8)],
-        [afterHole.x.toFixed(8), afterHole.y.toFixed(8)],
-        [afterHole.x.toFixed(8), afterHole.y.toFixed(8)],
-      ].sort(), 'connectors must turn away from both destroyed-tile boundaries');
+      ));
+      const pointCountAt = (expected) => conduitPoints.filter(([x, y]) => expected.some((point) => (
+        Math.abs(x - point.x) < 1e-8 && Math.abs(y - point.y) < 1e-8
+      ))).length;
+      for (const holeBoundary of ['zRelOf(12)', 'zRelOf(13)']) {
+        assert.equal(pointCountAt(projectedConduits(holeBoundary)), 0,
+          `dual conduits must not reach ${holeBoundary}`);
+      }
+      assert.equal(pointCountAt(projectedConduits('zRelOf(12) - 6')), 2);
+      assert.equal(pointCountAt(projectedConduits('zRelOf(13) + 6')), 2);
+      for (const connectedBoundary of ['zRelOf(11)', 'zRelOf(14)']) {
+        assert.equal(pointCountAt(projectedConduits(connectedBoundary)), 4,
+          `both adjacent dual conduits must meet at ${connectedBoundary}`);
+      }
 
       vm.runInContext('STATE.track[11].lanes[3] = LANE_TYPE.ROAD', harness.sandbox);
       const isolated = renderCorridorSnapshot(harness);
       assert.deepEqual(isolated.descriptors[0], {
         phase: 'single', category, height, connectBefore: false, connectAfter: false,
       });
-      assert.equal(eventCount(isolated.events, 'stroke', '#3de6ff'), 2);
+      assert.equal(eventCount(isolated.events, 'stroke', '#3de6ff'), 6);
       assert.equal(eventCount(isolated.events, 'stroke', '#b8f7ff'), 4);
       assert.equal(eventCount(isolated.events, 'fill', '#54e7ff'), 2);
     }

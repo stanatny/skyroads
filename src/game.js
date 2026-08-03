@@ -1528,32 +1528,6 @@ function rotatedSpriteBounds(bounds, origin, rotation) {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-function convexScreenHull(points) {
-  const sorted = points
-    .filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y))
-    .map(({ x, y }) => ({ x, y }))
-    .sort((left, right) => left.x - right.x || left.y - right.y)
-    .filter((point, index, values) => index === 0
-      || point.x !== values[index - 1].x || point.y !== values[index - 1].y);
-  if (sorted.length < 3) return null;
-  const cross = (origin, first, second) => (
-    (first.x - origin.x) * (second.y - origin.y)
-      - (first.y - origin.y) * (second.x - origin.x)
-  );
-  const buildHalf = (values) => {
-    const half = [];
-    for (const point of values) {
-      while (half.length >= 2 && cross(half.at(-2), half.at(-1), point) <= 0) half.pop();
-      half.push(point);
-    }
-    return half;
-  };
-  const lower = buildHalf(sorted);
-  const upper = buildHalf([...sorted].reverse());
-  const hull = [...lower.slice(0, -1), ...upper.slice(0, -1)];
-  return hull.length >= 3 ? hull : null;
-}
-
 function drawWorldAtlasSprite(ctx, atlasKey, placement) {
   const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
   const presentation = globalThis.Skyroads && globalThis.Skyroads.presentation;
@@ -1576,20 +1550,6 @@ function drawWorldAtlasSprite(ctx, atlasKey, placement) {
   const incomingAlpha = Number.isFinite(ctx.globalAlpha) ? ctx.globalAlpha : 1;
   ctx.save();
   try {
-    const clipPoints = Array.isArray(placement.clipPoints)
-      ? placement.clipPoints.filter((point) => (
-        point && Number.isFinite(point.x) && Number.isFinite(point.y)
-      ))
-      : null;
-    if (clipPoints && clipPoints.length >= 3) {
-      ctx.beginPath();
-      ctx.moveTo(clipPoints[0].x, clipPoints[0].y);
-      for (let index = 1; index < clipPoints.length; index += 1) {
-        ctx.lineTo(clipPoints[index].x, clipPoints[index].y);
-      }
-      ctx.closePath();
-      ctx.clip();
-    }
     if (rotation !== 0) {
       ctx.translate(origin.x, origin.y);
       ctx.rotate(rotation);
@@ -1918,8 +1878,10 @@ const CORRIDOR_CATEGORY = Object.freeze({
 });
 const CORRIDOR_HALF_WIDTH = 324;
 const CORRIDOR_OPEN_END_INSET = 6;
+const CORRIDOR_CONDUIT_X_OFFSETS = Object.freeze([-18, 18]);
+const CORRIDOR_CONDUIT_Y = Object.freeze({ corridorLow: 540, corridorMedium: 1120 });
 
-function drawDefenseAtlas(ctx, category, height, lane, segIndex, zNear, zFar, { clipPoints = null } = {}) {
+function drawDefenseAtlas(ctx, category, height, lane, segIndex, zNear, zFar) {
   const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
   if (!worldArt || typeof worldArt.variantKey !== 'function') return false;
   const geometry = worldArt.WORLD_GEOMETRY && worldArt.WORLD_GEOMETRY[category];
@@ -1929,7 +1891,7 @@ function drawDefenseAtlas(ctx, category, height, lane, segIndex, zNear, zFar, { 
   return drawWorldAtlasSprite(
     ctx,
     worldArt.variantKey(category, segIndex, lane),
-    { ...uprightAtlasPlacement(worldX, zMid, geometry.baseY, { alpha: 1 }), clipPoints },
+    uprightAtlasPlacement(worldX, zMid, geometry.baseY, { alpha: 1 }),
   );
 }
 
@@ -1963,22 +1925,6 @@ function liveCorridorDescriptor(track, segIndex, lane) {
   });
 }
 
-function corridorAtlasClipPoints(lane, zNear, zFar, descriptor) {
-  const centerX = laneCenterX(lane);
-  const interiorNear = zNear + (descriptor.connectBefore ? 0 : CORRIDOR_OPEN_END_INSET);
-  const interiorFar = zFar - (descriptor.connectAfter ? 0 : CORRIDOR_OPEN_END_INSET);
-  const corners = [];
-  for (const z of [interiorNear, interiorFar]) {
-    for (const x of [centerX - CORRIDOR_HALF_WIDTH, centerX + CORRIDOR_HALF_WIDTH]) {
-      for (const y of [0, descriptor.height]) {
-        const point = project(x, y, z);
-        if (point.visible) corners.push(point);
-      }
-    }
-  }
-  return convexScreenHull(corners);
-}
-
 function drawCorridorDetails(ctx, lane, zNear, zFar, descriptor) {
   const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
   const centerX = laneCenterX(lane);
@@ -1997,25 +1943,21 @@ function drawCorridorDetails(ctx, lane, zNear, zFar, descriptor) {
     ctx.fill();
   }
 
-  const conduitY = descriptor.height * 0.16;
+  const conduitY = CORRIDOR_CONDUIT_Y[descriptor.category];
   const conduitMid = project(centerX, conduitY, midZ);
   ctx.strokeStyle = '#3de6ff';
   ctx.lineWidth = Math.max(1, laneWidth * conduitMid.scale * STATE.width * 0.008);
   ctx.beginPath();
-  let connectorCount = 0;
-  if (descriptor.connectBefore) {
-    const target = project(centerX, conduitY, zNear);
-    ctx.moveTo(conduitMid.x, conduitMid.y);
-    ctx.lineTo(target.x, target.y);
-    connectorCount += 1;
+  let conduitCount = 0;
+  for (const offset of CORRIDOR_CONDUIT_X_OFFSETS) {
+    const near = project(centerX + offset, conduitY, plinthNearZ);
+    const far = project(centerX + offset, conduitY, plinthFarZ);
+    if (!near.visible || !far.visible) continue;
+    ctx.moveTo(near.x, near.y);
+    ctx.lineTo(far.x, far.y);
+    conduitCount += 1;
   }
-  if (descriptor.connectAfter) {
-    const target = project(centerX, conduitY, zFar);
-    ctx.moveTo(conduitMid.x, conduitMid.y);
-    ctx.lineTo(target.x, target.y);
-    connectorCount += 1;
-  }
-  if (connectorCount > 0) ctx.stroke();
+  if (conduitCount > 0) ctx.stroke();
 
   ctx.strokeStyle = '#b8f7ff';
   ctx.lineWidth = Math.max(1, laneWidth * conduitMid.scale * STATE.width * 0.006);
@@ -2061,7 +2003,6 @@ function drawProceduralWallByType(ctx, wallType, lane, segIndex, zNear, zFar) {
 function renderWallModule(ctx, wallType, lane, segIndex, zNear, zFar) {
   const corridor = liveCorridorDescriptor(STATE.track, segIndex, lane);
   if (corridor) {
-    const clipPoints = corridorAtlasClipPoints(lane, zNear, zFar, corridor);
     const plan = drawDefenseAtlas(
       ctx,
       corridor.category,
@@ -2070,7 +2011,6 @@ function renderWallModule(ctx, wallType, lane, segIndex, zNear, zFar) {
       segIndex,
       zNear,
       zFar,
-      { clipPoints },
     );
     if (!plan) drawProceduralWallByType(ctx, wallType, lane, segIndex, zNear, zFar);
     drawCorridorDetails(ctx, lane, zNear, zFar, corridor);

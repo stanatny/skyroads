@@ -286,9 +286,7 @@
       ],
       "hideNodes": [],
       "generatedDetails": {
-        "plinthSize": [648, 36, 50],
-        "conduitSize": [36, 36, 50],
-        "conduitY": 540,
+        "runtimeContinuity": true,
         "cyanBandY": [390]
       }
     },
@@ -310,9 +308,7 @@
       ],
       "hideNodes": [],
       "generatedDetails": {
-        "plinthSize": [648, 36, 50],
-        "conduitSize": [36, 36, 50],
-        "conduitY": 1120,
+        "runtimeContinuity": true,
         "cyanBandY": [460, 910]
       }
     },

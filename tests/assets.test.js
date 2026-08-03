@@ -52,7 +52,7 @@ const MANIFEST_RECIPE_IDS = [
   'gap-edge',
 ];
 const FINAL_WORLD_ATLAS_PATHS = [...UPRIGHT_ATLAS_PATHS, 'assets/world/gap-edge.png'];
-const FINAL_RENDERER_SHA256 = 'b42e67597d54ca6aa84bc08325737e5e09c75c44ea659274ea4173768ffbcef1';
+const FINAL_RENDERER_SHA256 = 'b6c2a2cffa83831672d7bd2985fd25f449f725311b354b9e0dec3a42bab3ba6b';
 const WORLD_OUTPUT_HASHES = {
   'assets/world/drone-scout.png': 'c700f47ecdccfe5f3400f5947cf5494331442c80a347205efa1caaca71d5ba82',
   'assets/world/drone-striker.png': '774ec0bae0db51b05d2dd5ce48e4449b576c246414a6578cefb07b301b47f376',
@@ -64,8 +64,8 @@ const WORLD_OUTPUT_HASHES = {
   'assets/world/structure-bastion.png': '5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9',
   'assets/world/structure-reactor.png': 'b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa',
   'assets/world/structure-tower.png': 'ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436',
-  'assets/world/corridor-low.png': '909d33ed9f38c4b7b75cbde296daddb26dc5dabedc70e474be2d80a522c1a2d9',
-  'assets/world/corridor-medium.png': '40213dacdf2177909dffe0980a9e4ad1872dfeffcc3b1fb3bf346348d1c85968',
+  'assets/world/corridor-low.png': '28b7ffa57ccf7feadce8910cbc6f18cc603d2532a6163e3367b0081c607df661',
+  'assets/world/corridor-medium.png': '877199033c76c2fd5da5498e21c07d3e44d966408907ad423662fc2cc5166503',
   'assets/world/gap-edge.png': 'c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49',
 };
 const WORLD_DIMENSIONS_BY_PATH = new Map(Object.values(WORLD_ATLAS_MANIFEST).map((metadata) => [
@@ -312,51 +312,6 @@ function countGeneratedCyanDifference(candidate, reference, bounds) {
         && !isGeneratedCyanSample(reference.rgba, offset)) count += 1;
   }
   return count;
-}
-
-function generatedCyanComponentAttachment(candidate, reference, bounds, frameIndex) {
-  assert.equal(candidate.width, reference.width);
-  assert.equal(candidate.height, reference.height);
-  const cellX = (frameIndex % 7) * 320;
-  const cellY = Math.floor(frameIndex / 7) * 320;
-  const cellMaxX = cellX + 319;
-  const cellMaxY = cellY + 319;
-  const minX = Math.max(cellX, bounds.minX);
-  const maxX = Math.min(cellMaxX, bounds.maxX);
-  const minY = Math.max(cellY, bounds.minY);
-  const maxY = Math.min(cellMaxY, bounds.maxY);
-  const queue = [];
-  const visited = new Uint8Array(candidate.width * candidate.height);
-  for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
-    const offset = (y * candidate.width + x) * 4;
-    if (!isGeneratedCyanSample(candidate.rgba, offset)
-        || isGeneratedCyanSample(reference.rgba, offset)) continue;
-    const index = y * candidate.width + x;
-    if (!visited[index]) {
-      visited[index] = 1;
-      queue.push(index);
-    }
-  }
-  const seedCount = queue.length;
-  let touchesReference = false;
-  for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    const index = queue[cursor];
-    const x = index % candidate.width;
-    const y = Math.floor(index / candidate.width);
-    const offset = index * 4;
-    if (reference.rgba[offset + 3] >= 16) touchesReference = true;
-    for (let deltaY = -1; deltaY <= 1; deltaY += 1) for (let deltaX = -1; deltaX <= 1; deltaX += 1) {
-      if (deltaX === 0 && deltaY === 0) continue;
-      const nextX = x + deltaX;
-      const nextY = y + deltaY;
-      if (nextX < cellX || nextX > cellMaxX || nextY < cellY || nextY > cellMaxY) continue;
-      const nextIndex = nextY * candidate.width + nextX;
-      if (visited[nextIndex] || candidate.rgba[nextIndex * 4 + 3] < 16) continue;
-      visited[nextIndex] = 1;
-      queue.push(nextIndex);
-    }
-  }
-  return { seedCount, touchesReference };
 }
 
 function generatedCyanEvidence(decoded, bounds) {
@@ -946,7 +901,7 @@ test('the world manifest freezes the audited v3 layout, budgets, geometry, and t
         scale: 0.72, rotationDegrees: [0, 0, 0], translation: [0.44, 0, 0],
       }),
     ], [], {
-      plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 540, cyanBandY: [390],
+      runtimeContinuity: true, cyanBandY: [390],
     }],
     ['corridor-medium', 'kenney-modular-space-kit', 'upright', 'corridorMedium', [
       component('modular-space-kit/Models/OBJ format/room-large.obj', modularTexture, {
@@ -956,7 +911,7 @@ test('the world manifest freezes the audited v3 layout, budgets, geometry, and t
         scale: 0.7, rotationDegrees: [0, 0, 0], translation: [0, 0.72, 0],
       }),
     ], [], {
-      plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 1120, cyanBandY: [460, 910],
+      runtimeContinuity: true, cyanBandY: [460, 910],
     }],
     ['gap-edge', 'kenney-space-kit', 'roadEdge', 'gap', [
       component('space-kit/Models/OBJ format/terrain_sideCliff.obj', [], {
@@ -998,6 +953,74 @@ test('the world manifest freezes the audited v3 layout, budgets, geometry, and t
     assert.match(hash, /^[a-f0-9]{64}$/, `${sourcePath} must have an audited SHA-256`);
     assert.equal(path.posix.isAbsolute(sourcePath), false, `${sourcePath} must be relative`);
     assert.doesNotMatch(sourcePath, /(?:https?:|file:|\/Source(?:s| Edition)?\/|\.(?:blend|fbx|glb|gltf)$)/i);
+  }
+});
+
+test('corridor recipes reserve every longitudinal continuity primitive for runtime Canvas', () => {
+  const manifest = JSON.parse(read('tools/world-assets.json'));
+  const expected = new Map([
+    ['corridor-low', { runtimeContinuity: true, cyanBandY: [390] }],
+    ['corridor-medium', { runtimeContinuity: true, cyanBandY: [460, 910] }],
+  ]);
+  for (const [id, details] of expected) {
+    const asset = manifest.assets.find((candidate) => candidate.id === id);
+    assert.deepEqual(asset.generatedDetails, details, `${id} generated-only schema`);
+  }
+
+  const renderer = read('tools/render-world-assets.swift').toString('utf8');
+  assert.match(renderer, /let runtimeContinuity: Bool/);
+  assert.doesNotMatch(renderer, /details\.(?:plinthSize|conduitSize|conduitY)/,
+    'offline rendering must not bake topology-dependent plinths or conduits');
+});
+
+test('corridor atlas cyan bands sit on the normalized armor front', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'corridor-band-contract.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    fs.writeFileSync(harnessPath, `
+      import Foundation
+      import SceneKit
+
+      let armorHalfDepth = 120.1234567
+      let recipe = AssetRecipe(
+          id: "synthetic-corridor-low",
+          sourceFamily: "fixture",
+          layout: "upright",
+          category: "corridorLow",
+          components: [],
+          hideNodes: [],
+          generatedDetails: GeneratedDetails(
+              runtimeContinuity: true,
+              cyanBandY: [390]
+          )
+      )
+      let turntable = SCNNode()
+      try addUprightDetails(
+          to: turntable,
+          asset: recipe,
+          armorHalfDepth: armorHalfDepth
+      )
+      let bands = turntable.childNodes.filter {
+          abs(Double($0.position.y) - 390) < 0.000000001
+      }
+      precondition(bands.count == 1)
+      precondition(abs(Double(bands[0].position.z) - (armorHalfDepth + 3)) < 0.0001)
+    `);
+    const executablePath = path.join(temporaryRoot, 'corridor-band-contract');
+    const compile = spawnSync('swiftc', [
+      '-warnings-as-errors', rendererLibraryPath, harnessPath, '-o', executablePath,
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(compile.status, 0, compile.stderr);
+    const run = spawnSync(executablePath, [], { cwd: root, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
 
@@ -1066,8 +1089,6 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
           horizontalScale: 1
       )
       precondition(abs(syntheticDetailFrontZ - 120.1234567) < 0.000000001)
-      let syntheticConduitInset = try generatedConduitInset(worldWidth: 648, conduitWidth: 36)
-      precondition(syntheticConduitInset == 18)
       let worldBounds = WorldBoundsMetadata(
           minX: -216, maxX: 216,
           minY: 140, maxY: 500,
@@ -1926,7 +1947,7 @@ test('declared armor envelopes and pitch rows retain the approved perspective hi
   }
 });
 
-test('rendered cyan bands, corridor endpoints, and high-tier gold follow the recipe hierarchy', () => {
+test('rendered cyan bands and high-tier gold follow the recipe hierarchy', () => {
   const manifest = JSON.parse(read('tools/world-assets.json'));
   const goldOutput = [255, 255, 160, 255];
   const highIDs = new Set(['structure-reactor', 'structure-tower']);
@@ -1944,10 +1965,10 @@ test('rendered cyan bands, corridor endpoints, and high-tier gold follow the rec
   const corridorLow = manifest.assets.find(({ id }) => id === 'corridor-low').generatedDetails;
   const corridorMedium = manifest.assets.find(({ id }) => id === 'corridor-medium').generatedDetails;
   assert.deepEqual(corridorLow, {
-    plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 540, cyanBandY: [390],
+    runtimeContinuity: true, cyanBandY: [390],
   });
   assert.deepEqual(corridorMedium, {
-    plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 1120, cyanBandY: [460, 910],
+    runtimeContinuity: true, cyanBandY: [460, 910],
   });
   for (const details of [corridorLow, corridorMedium]) {
     assert.equal(Object.keys(details).some((key) => /^(?:text|label|locale|font)$/i.test(key)), false);
@@ -2003,7 +2024,7 @@ test('rendered cyan bands, corridor endpoints, and high-tier gold follow the rec
         count += countGeneratedCyanDifference(candidate, reference, projectedWorldBoxBounds(
           metadata,
           frameIndex,
-          { x: 0, y: bandY, z: metadata.worldBounds.maxZ + 3 },
+          { x: 0, y: bandY, z: metadata.detailFrontZ + 3 },
           { x: geometry.worldWidth * 0.72, y: 12, z: 6 },
         ));
       }
@@ -2012,64 +2033,6 @@ test('rendered cyan bands, corridor endpoints, and high-tier gold follow the rec
     });
     corridorEvidence.set(id, bandEvidence);
 
-    const conduitInset = Math.min(
-      geometry.worldWidth / 2 - details.conduitSize[0] / 2,
-      details.conduitSize[0] / 2,
-    );
-    const nonEdgeOnFrames = new Set([1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19]);
-    for (const side of [-1, 1]) {
-      for (const depth of [-details.conduitSize[2] / 2, 0, details.conduitSize[2] / 2]) {
-        let aggregateEvidence = 0;
-        let visibleFrames = 0;
-        let maximumNonEdgeOnEvidence = 0;
-        for (let frameIndex = 0; frameIndex < 21; frameIndex += 1) {
-          const projected = projectUprightPoint(metadata, frameIndex, {
-            x: side * conduitInset,
-            y: details.conduitY,
-            z: depth,
-          });
-          const evidence = countGeneratedCyanDifference(candidate, reference, {
-            minX: Math.round(projected.x) - 5,
-            maxX: Math.round(projected.x) + 5,
-            minY: Math.round(projected.y) - 5,
-            maxY: Math.round(projected.y) + 5,
-          });
-          aggregateEvidence += evidence;
-          if (evidence > 0) visibleFrames += 1;
-          if (nonEdgeOnFrames.has(frameIndex)) {
-            maximumNonEdgeOnEvidence = Math.max(maximumNonEdgeOnEvidence, evidence);
-          }
-        }
-        assert.ok(aggregateEvidence >= 100,
-          `${id} side ${side} depth ${depth} conduit needs aggregate turntable evidence`);
-        assert.ok(visibleFrames >= 10,
-          `${id} side ${side} depth ${depth} conduit needs broad turntable visibility`);
-        assert.ok(maximumNonEdgeOnEvidence >= 4,
-          `${id} side ${side} depth ${depth} conduit needs non-edge-on endpoint evidence`);
-      }
-    }
-    for (const side of [-1, 1]) {
-      const attachment = generatedCyanComponentAttachment(
-        candidate,
-        reference,
-        projectedWorldBoxBounds(
-          metadata,
-          10,
-          { x: side * conduitInset, y: details.conduitY, z: 0 },
-          {
-            x: details.conduitSize[0],
-            y: details.conduitSize[1],
-            z: details.conduitSize[2],
-          },
-          3,
-        ),
-        10,
-      );
-      assert.ok(attachment.seedCount >= 4,
-        `${id} side ${side} must render the supported conduit at its derived inset`);
-      assert.equal(attachment.touchesReference, true,
-        `${id} side ${side} conduit must remain alpha-connected to source armor`);
-    }
   }
   assert.equal(corridorEvidence.get('corridor-low').length, 1);
   assert.equal(corridorEvidence.get('corridor-medium').length, 2);

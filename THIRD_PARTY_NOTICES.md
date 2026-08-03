@@ -52,7 +52,7 @@ The repository's project license applies only to original project code and artwo
   - `assets/world/barrier-rail.png` — SHA-256 `28a2f5ee63b70708e593c1f1e82ac6c5094fcc9c3464023004581c310f6f879a`
   - `assets/world/structure-bastion.png` — SHA-256 `5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9`
   - `assets/world/structure-reactor.png` — SHA-256 `b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa`
-  - `assets/world/corridor-low.png` — SHA-256 `909d33ed9f38c4b7b75cbde296daddb26dc5dabedc70e474be2d80a522c1a2d9`
+  - `assets/world/corridor-low.png` — SHA-256 `28b7ffa57ccf7feadce8910cbc6f18cc603d2532a6163e3367b0081c607df661`
   - `assets/world/gap-edge.png` — SHA-256 `c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49`
 
 ## Kenney — Modular Space Kit
@@ -72,9 +72,9 @@ The repository's project license applies only to original project code and artwo
   - `assets/world/structure-pylon.png` — SHA-256 `340d52a6371b6ed19107b977f6f12c4757156599dbc383d8cdcef39e9d088da5`
   - `assets/world/structure-bastion.png` — SHA-256 `5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9`
   - `assets/world/structure-tower.png` — SHA-256 `ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436`
-  - `assets/world/corridor-medium.png` — SHA-256 `40213dacdf2177909dffe0980a9e4ad1872dfeffcc3b1fb3bf346348d1c85968`
+  - `assets/world/corridor-medium.png` — SHA-256 `877199033c76c2fd5da5498e21c07d3e44d966408907ad423662fc2cc5166503`
 
-The two Kenney kits were normalized and assembled only as declared in `tools/world-assets.json`. Twelve upright outputs are `2240 × 960` transparent atlases with 21 yaw/pitch views; `gap-edge` remains the byte-identical legacy seven-yaw atlas. The renderer uses the Orbital Defense warm-white/graphite/cool-steel/cyan palette, places base seams and status lights on each source-derived +Z armor surface, keeps corridor 50-unit depth details independent, pairs corridor conduits at their perspective-supported centerline inset, uses one low-wall cyan band, two medium/high-wall cyan bands, and wall-high-only gold beacons. Renderer SHA-256: `b42e67597d54ca6aa84bc08325737e5e09c75c44ea659274ea4173768ffbcef1`. See `docs/assets/world-art.md`.
+The two Kenney kits were normalized and assembled only as declared in `tools/world-assets.json`. Twelve upright outputs are `2240 × 960` transparent atlases with 21 yaw/pitch views; `gap-edge` remains the byte-identical legacy seven-yaw atlas. The renderer uses the Orbital Defense warm-white/graphite/cool-steel/cyan palette, places base seams and status lights on each source-derived +Z armor surface, keeps corridor atlases body-and-band-only, uses one low-wall cyan band, two medium/high-wall cyan bands, and wall-high-only gold beacons. Runtime Canvas owns corridor plinths, paired conduits, caps, and chevrons. Renderer SHA-256: `b6c2a2cffa83831672d7bd2985fd25f449f725311b354b9e0dec3a42bab3ba6b`. See `docs/assets/world-art.md`.
 
 ## Kenney — UI Pack: Sci-Fi 2.0
 

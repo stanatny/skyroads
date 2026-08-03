@@ -57,17 +57,17 @@ Both license files are exact byte-for-byte copies of the upstream **Creative Com
 | structure-bastion | wallMedium | Space Kit rocket base/sides plus Modular gate-lasers |
 | structure-reactor | wallHigh | Two complete Space Kit rocket assemblies |
 | structure-tower | wallHigh | Six stacked Modular room-large components |
-| corridor-low | corridorLow | Two Space Kit barrels_rail components plus a generated 50-unit-deep plinth, conduits, and one cyan band |
-| corridor-medium | corridorMedium | Modular room-large plus gate-lasers and a generated 50-unit-deep plinth, conduits, and two cyan bands |
+| corridor-low | corridorLow | Two Space Kit barrels_rail components plus one generated cyan band; longitudinal continuity is runtime Canvas geometry |
+| corridor-medium | corridorMedium | Modular room-large plus gate-lasers and two generated cyan bands; longitudinal continuity is runtime Canvas geometry |
 | gap-edge | gap | Two Space Kit terrain_sideCliff components; preserved legacy render |
 
-tools/render-world-assets.swift SHA-256: b42e67597d54ca6aa84bc08325737e5e09c75c44ea659274ea4173768ffbcef1.
+tools/render-world-assets.swift SHA-256: b6c2a2cffa83831672d7bd2985fd25f449f725311b354b9e0dec3a42bab3ba6b.
 
 The upright camera metadata uses the measured SceneKit orthographic half-extent, so pixels-per-world-unit equals frame height divided by twice orthographicScale. Each upright record also stores `detailFrontZ`, the six-decimal +Z armor surface derived from actual normalized source depth. Every upright frame stores its absolute alpha crop and projected world-origin anchor; src/world-art.js embeds that generated data directly and performs no runtime JSON request.
 
 Space Kit solid materials map by audited material name to warm white, graphite, and cool steel. Modular colormap textures retain PBR lighting and nearest texture filters. Textured imports are back-face culled; untextured and generated details remain double-sided. The two audited Modular OBJ files contain coincident same-winding faces, so the renderer canonicalizes only those paths: room-large goes from 21,760 source faces to 10,768 and gate-lasers from 2,920 to 2,156. Reverse windings and distinct UV/material faces are preserved. Coincident normals may differ by at most 2.5e-7 per component; a larger conflict aborts the render.
 
-Generated details use cyan #68e8ff, orange #ff8a42, and wall-high-only gold #ffd66b. Low walls have one cyan band at 34% of their height; medium and high walls have two at 34% and 68%, while high walls retain their gold beacons. Corridor low has a 648×36×50 plinth, paired 36×36×50 conduits centered at X ±18 and Y 540, and one cyan band at Y 390. Corridor medium uses the same paired centerline placement and 50-unit front/back depth, with conduits at Y 1120 and bands at Y 460 and 910. No locale-dependent text is rendered.
+Generated atlas details use cyan #68e8ff, orange #ff8a42, and wall-high-only gold #ffd66b. Low walls have one cyan band at 34% of their height; medium and high walls have two at 34% and 68%, while high walls retain their gold beacons. Corridor atlases contain only their source-derived body and generated cyan bands: low at Y 390, medium at Y 460 and 910. Their recipes declare `runtimeContinuity: true`; runtime Canvas owns the 648-unit plinth, paired conduits at X ±18 and Y 540/1120, caps, and chevron. Connected ends meet the exact shared segment boundary, while open ends inset by 6 world units. No full-depth plinth or conduit is baked into the atlas, and no locale-dependent text is rendered.
 
 ## Reproduction and determinism gate
 
@@ -238,9 +238,9 @@ NODE
 
 The gate rejects any metadata, geometry, alpha, multi-channel, report, gap, or wider difference. The complete set may differ in at most one fully opaque pixel, in one RGB channel by exactly 16. At least two runs must be byte-identical, and that majority is frozen.
 
-The frozen A/B/D metadata, reports, and all thirteen PNGs were byte-identical. An independent C attempt was rejected because one drone edge pixel changed three channels, outside the comparator's bounded one-channel allowance; the fresh D replacement matched A/B exactly, so no tolerance was exercised by the frozen three-process set.
+The frozen A/B/D metadata, reports, and all thirteen PNGs were byte-identical. Independent C landed on the previously observed `drone-striker` renderer variance, so it was excluded; no tolerance was exercised by the frozen three-process set. Against the previous repository state, all eleven non-corridor PNGs remain byte-identical and only the two corridor atlases change.
 
-All 252 upright cells are non-empty, keep transparent own-cell borders, clear RGB under alpha zero, and preserve stable origin round trips. The twelve upright files total 1,913,996 bytes; including the unchanged gap atlas, the world set totals 2,056,364 bytes.
+All 252 upright cells are non-empty, keep transparent own-cell borders, clear RGB under alpha zero, and preserve stable origin round trips. The twelve upright files total 1,911,996 bytes; including the unchanged gap atlas, the world set totals 2,054,364 bytes.
 
 ## Derived outputs
 
@@ -256,8 +256,8 @@ All 252 upright cells are non-empty, keep transparent own-cell borders, clear RG
 | assets/world/structure-bastion.png | 143230 | 5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9 |
 | assets/world/structure-reactor.png | 125535 | b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa |
 | assets/world/structure-tower.png | 174978 | ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436 |
-| assets/world/corridor-low.png | 219525 | 909d33ed9f38c4b7b75cbde296daddb26dc5dabedc70e474be2d80a522c1a2d9 |
-| assets/world/corridor-medium.png | 185001 | 40213dacdf2177909dffe0980a9e4ad1872dfeffcc3b1fb3bf346348d1c85968 |
+| assets/world/corridor-low.png | 221643 | 28b7ffa57ccf7feadce8910cbc6f18cc603d2532a6163e3367b0081c607df661 |
+| assets/world/corridor-medium.png | 180883 | 877199033c76c2fd5da5498e21c07d3e44d966408907ad423662fc2cc5166503 |
 | assets/world/gap-edge.png | 142368 | c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49 |
 
 The final majority contact sheets were inspected at original detail before freezing. All 252 upright views have complete silhouettes, coherent opposite-side yaw reveals, increasing top exposure across pitch rows, stable anchors, transparent padding, and no cull holes or clipping. Drones are directionally readable and smaller than buildings; low/medium/high and corridor silhouettes and accents remain distinct.

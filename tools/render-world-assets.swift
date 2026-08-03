@@ -146,9 +146,7 @@ struct ComponentRecipe: Decodable {
 }
 
 struct GeneratedDetails: Decodable, Equatable {
-    let plinthSize: [Double]
-    let conduitSize: [Double]
-    let conduitY: Double
+    let runtimeContinuity: Bool
     let cyanBandY: [Double]
 }
 
@@ -282,10 +280,10 @@ private let requiredRecipeContracts: [(String, String, String)] = [
 ]
 private let requiredGeneratedDetails: [String: GeneratedDetails] = [
     "corridor-low": GeneratedDetails(
-        plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 540, cyanBandY: [390]
+        runtimeContinuity: true, cyanBandY: [390]
     ),
     "corridor-medium": GeneratedDetails(
-        plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 1120, cyanBandY: [460, 910]
+        runtimeContinuity: true, cyanBandY: [460, 910]
     ),
 ]
 private let requiredFraming: [String: FramingContract] = [
@@ -436,16 +434,10 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
             throw RenderError.validation("\(asset.id) has invalid generatedDetails")
         }
         if let details = asset.generatedDetails {
-            let sizes = details.plinthSize + details.conduitSize
-            guard details.plinthSize.count == 3,
-                  details.conduitSize.count == 3,
-                  sizes.allSatisfy({ $0.isFinite && $0 > 0 }),
-                  details.conduitY.isFinite,
+            guard details.runtimeContinuity,
                   !details.cyanBandY.isEmpty,
                   details.cyanBandY.allSatisfy(\.isFinite),
                   let geometry = manifest.geometry[asset.category],
-                  details.conduitY >= geometry.baseY,
-                  details.conduitY <= geometry.baseY + geometry.worldHeight,
                   details.cyanBandY.allSatisfy({
                       $0 >= geometry.baseY && $0 <= geometry.baseY + geometry.worldHeight
                   }) else {
@@ -968,17 +960,6 @@ func normalizedArmorHalfDepth(sourceDepth: Double, horizontalScale: Double) thro
     return halfDepth
 }
 
-func generatedConduitInset(worldWidth: Double, conduitWidth: Double) throws -> Double {
-    guard worldWidth.isFinite,
-          conduitWidth.isFinite,
-          worldWidth > 0,
-          conduitWidth > 0,
-          conduitWidth < worldWidth else {
-        throw RenderError.validation("Generated conduit dimensions must be finite, positive, and narrower than the asset")
-    }
-    return min(worldWidth / 2 - conduitWidth / 2, conduitWidth / 2)
-}
-
 func addUprightDetails(
     to turntable: SCNNode,
     asset: AssetRecipe,
@@ -992,7 +973,6 @@ func addUprightDetails(
     }
     let cyan = flatMaterial(srgb(0x68, 0xe8, 0xff), emission: srgb(0x68, 0xe8, 0xff))
     let orange = flatMaterial(srgb(0xff, 0x8a, 0x42), emission: srgb(0xff, 0x8a, 0x42))
-    let steel = flatMaterial(srgb(0x64, 0x78, 0x8e))
     let seamHeight = max(6, min(dimensions.worldHeight * 0.018, 18))
     let seamDepth = 8.0
     let seamYRatios = baseCyanBandRatios(for: asset.category)
@@ -1037,31 +1017,11 @@ func addUprightDetails(
     }
 
     if let details = asset.generatedDetails {
-        addWorldBox(
-            to: turntable,
-            size: details.plinthSize,
-            position: SCNVector3(0, dimensions.baseY + details.plinthSize[1] / 2, 0),
-            material: steel,
-            chamferRadius: min(details.plinthSize[1], details.plinthSize[2]) * 0.12
-        )
-        let conduitInset = try generatedConduitInset(
-            worldWidth: dimensions.worldWidth,
-            conduitWidth: details.conduitSize[0]
-        )
-        for side in [-1.0, 1.0] {
-            addWorldBox(
-                to: turntable,
-                size: details.conduitSize,
-                position: SCNVector3(side * conduitInset, details.conduitY, 0),
-                material: cyan,
-                chamferRadius: min(details.conduitSize[0], details.conduitSize[1]) * 0.25
-            )
-        }
         for bandY in details.cyanBandY {
             addWorldBox(
                 to: turntable,
                 size: [dimensions.worldWidth * 0.72, 12, 6],
-                position: SCNVector3(0, bandY, bounds.maxZ + 3),
+                position: SCNVector3(0, bandY, armorHalfDepth + 3),
                 material: cyan,
                 chamferRadius: 6
             )
