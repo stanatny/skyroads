@@ -15,6 +15,8 @@ const CHORDS = Object.freeze({
   Am7: [45, 48, 52, 55],
   B7: [47, 51, 54, 57],
 });
+const EIGHTH_GRID = Object.freeze([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5]);
+const SIXTEENTH_PICKUPS = Object.freeze([0.75, 1.75, 2.75, 3.75]);
 
 function exactFrameCount(score) {
   return Math.round(score.bars * score.beatsPerBar * 60 / score.bpm * score.sampleRate);
@@ -99,10 +101,7 @@ function addNoiseHit(stem, sampleRate, startSeconds, durationSeconds, amplitude,
 }
 
 function normalize(stem, targetPeak) {
-  let peak = 0;
-  for (let i = 0; i < stem.left.length; i++) {
-    peak = Math.max(peak, Math.abs(stem.left[i]), Math.abs(stem.right[i]));
-  }
+  const peak = measurePeak(stem);
   const scale = peak > 0 ? targetPeak / peak : 1;
   const edgeFrames = Math.min(882, Math.floor(stem.left.length / 2));
   for (let i = 0; i < stem.left.length; i++) {
@@ -111,6 +110,60 @@ function normalize(stem, targetPeak) {
     stem.right[i] *= scale * Math.max(0, edge);
   }
   return stem;
+}
+
+function measurePeak(stem) {
+  let peak = 0;
+  for (let i = 0; i < stem.left.length; i++) {
+    peak = Math.max(peak, Math.abs(stem.left[i]), Math.abs(stem.right[i]));
+  }
+  return peak;
+}
+
+function measurePulse(stem, sampleRate, bpm) {
+  const windowFrames = Math.round(sampleRate * 0.035);
+  const halfWindow = Math.floor(windowFrames / 2);
+  const beatFrames = sampleRate * 60 / bpm;
+  const earlyFrames = Math.min(stem.left.length, Math.round(sampleRate * 2));
+  let transientSquares = 0;
+  let sustainedSquares = 0;
+  let sampleCount = 0;
+
+  for (let beatCenter = beatFrames;
+    beatCenter + beatFrames / 2 + halfWindow <= earlyFrames;
+    beatCenter += beatFrames) {
+    const transientStart = Math.round(beatCenter) - halfWindow;
+    const sustainedStart = Math.round(beatCenter + beatFrames / 2) - halfWindow;
+    for (let offset = 0; offset < windowFrames; offset++) {
+      const transientLeft = stem.left[transientStart + offset];
+      const transientRight = stem.right[transientStart + offset];
+      const sustainedLeft = stem.left[sustainedStart + offset];
+      const sustainedRight = stem.right[sustainedStart + offset];
+      transientSquares += transientLeft * transientLeft + transientRight * transientRight;
+      sustainedSquares += sustainedLeft * sustainedLeft + sustainedRight * sustainedRight;
+      sampleCount += 2;
+    }
+  }
+
+  const transientRms = sampleCount ? Math.sqrt(transientSquares / sampleCount) : 0;
+  const sustainedRms = sampleCount ? Math.sqrt(sustainedSquares / sampleCount) : 0;
+  return {
+    transientRms,
+    sustainedRms,
+    earlyPulseRatio: sustainedRms ? transientRms / sustainedRms : Infinity,
+  };
+}
+
+function measureIntenseMixPeak(stems, { atmosphere, drive, overdrive, busGain }) {
+  let peak = 0;
+  for (let i = 0; i < stems.atmosphere.left.length; i++) {
+    const left = (stems.atmosphere.left[i] * atmosphere + stems.drive.left[i] * drive
+      + stems.overdrive.left[i] * overdrive) * busGain;
+    const right = (stems.atmosphere.right[i] * atmosphere + stems.drive.right[i] * drive
+      + stems.overdrive.right[i] * overdrive) * busGain;
+    peak = Math.max(peak, Math.abs(left), Math.abs(right));
+  }
+  return peak;
 }
 
 function renderScore(score) {
@@ -131,19 +184,19 @@ function renderScore(score) {
     chord.forEach((note, index) => {
       addTone(atmosphere, sampleRate, barStart, bar * 1.02, note, 0.052, {
         pan: (index - 1.5) * 0.28,
-        attack: 0.42,
-        release: 0.65,
+        attack: 0.18,
+        release: 0.34,
         brightness: 0.12,
         detune: index % 2 === 0 ? -3 : 3,
       });
       addTone(atmosphere, sampleRate, barStart, bar * 1.02, note + 12, 0.013, {
         pan: (1.5 - index) * 0.32,
-        attack: 0.55,
-        release: 0.72,
+        attack: 0.24,
+        release: 0.40,
         detune: index % 2 === 0 ? 5 : -5,
       });
     });
-    if (barIndex % 4 === 1) {
+    if (barIndex % 2 === 1) {
       [71, 76, 79].forEach((note, index) => {
         addTone(atmosphere, sampleRate, barStart + beat * (1.5 + index * 0.55), beat * 0.62, note, 0.026, {
           pan: [-0.32, 0.08, 0.34][index], attack: 0.08, release: 0.25, brightness: 0.1,
@@ -151,26 +204,32 @@ function renderScore(score) {
       });
     }
 
-    for (let beatIndex = 0; beatIndex < score.beatsPerBar; beatIndex++) {
-      const beatStart = barStart + beatIndex * beat;
-      if (beatIndex === 0 || beatIndex === 2 || (barIndex % 4 === 3 && beatIndex === 3)) {
-        addTone(drive, sampleRate, beatStart, beat * 0.72, 40, 0.19, {
-          pan: -0.04, attack: 0.008, release: 0.18, brightness: 0.18,
-        });
-      }
-      addKick(drive, sampleRate, beatStart, beatIndex === 0 ? 0.23 : 0.16);
-      if (beatIndex === 1 || beatIndex === 3) addNoiseHit(drive, sampleRate, beatStart, 0.16, 0.13, driveRandom, 0.08);
-      addNoiseHit(drive, sampleRate, beatStart + beat / 2, 0.055, 0.055, driveRandom, beatIndex % 2 ? -0.3 : 0.3);
+    for (const beatOffset of EIGHTH_GRID) {
+      const start = barStart + beatOffset * beat;
+      const note = chord[Math.round(beatOffset * 2) % chord.length] - 12;
+      addTone(drive, sampleRate, start, beat * 0.38, note, 0.12, {
+        pan: beatOffset % 1 === 0 ? -0.08 : 0.08,
+        attack: 0.006,
+        release: 0.08,
+        brightness: 0.28,
+      });
+      if (beatOffset % 1 === 0) addKick(drive, sampleRate, start, beatOffset === 0 ? 0.24 : 0.17);
+      if (beatOffset === 1 || beatOffset === 3) addNoiseHit(drive, sampleRate, start, 0.14, 0.13, driveRandom, 0.08);
+    }
+    for (const beatOffset of SIXTEENTH_PICKUPS) {
+      addNoiseHit(drive, sampleRate, barStart + beatOffset * beat, 0.03, 0.024, driveRandom);
     }
 
-    for (let eighth = 0; eighth < score.beatsPerBar * 2; eighth++) {
-      const start = barStart + eighth * beat / 2;
-      const arpPattern = [0, 2, 1, 3, 1, 2, 0, 3];
-      const note = chord[arpPattern[eighth] % chord.length] + 12;
-      addTone(overdrive, sampleRate, start, beat * 0.42, note, 0.10, {
-        pan: eighth % 2 ? 0.34 : -0.34, attack: 0.008, release: 0.10, brightness: 0.42,
+    for (let sixteenth = 0; sixteenth < score.beatsPerBar * 4; sixteenth++) {
+      const start = barStart + sixteenth * beat / 4;
+      const arpPattern = [0, 2, 1, 3, 1, 2, 0, 3, 2, 1, 3, 1, 0, 2, 1, 3];
+      const note = chord[arpPattern[sixteenth] % chord.length] + 12;
+      addTone(overdrive, sampleRate, start, beat * 0.20, note, 0.068, {
+        pan: sixteenth % 2 ? 0.34 : -0.34, attack: 0.006, release: 0.065, brightness: 0.42,
       });
-      addNoiseHit(overdrive, sampleRate, start, 0.035, 0.032, overdriveRandom, eighth % 2 ? 0.38 : -0.38);
+      if (sixteenth % 2 === 0) {
+        addNoiseHit(overdrive, sampleRate, start, 0.028, 0.028, overdriveRandom, sixteenth % 4 ? 0.38 : -0.38);
+      }
     }
     [0, 2.5].forEach((beatOffset, index) => {
       const counterNote = chord[(barIndex + index) % chord.length] + 24;
@@ -197,9 +256,9 @@ function renderScore(score) {
   }
 
   return {
-    atmosphere: normalize(atmosphere, 0.76),
-    drive: normalize(drive, 0.74),
-    overdrive: normalize(overdrive, 0.70),
+    atmosphere: normalize(atmosphere, score.normalization.atmosphere),
+    drive: normalize(drive, score.normalization.drive),
+    overdrive: normalize(overdrive, score.normalization.overdrive),
   };
 }
 
@@ -248,5 +307,13 @@ function main() {
   process.stdout.write(`${JSON.stringify({ title: score.title, frames: exactFrameCount(score), sampleRate: score.sampleRate, outputDirectory })}\n`);
 }
 
-module.exports = { exactFrameCount, renderScore, writeStereoWav, defaultOutputDirectory };
+module.exports = {
+  exactFrameCount,
+  renderScore,
+  writeStereoWav,
+  defaultOutputDirectory,
+  measurePeak,
+  measurePulse,
+  measureIntenseMixPeak,
+};
 if (require.main === module) main();

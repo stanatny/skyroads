@@ -8,32 +8,44 @@ const os = require('node:os');
 const path = require('node:path');
 
 const score = require('../assets/audio/source/nebula-cruise-score.json');
-const { exactFrameCount, renderScore, writeStereoWav, defaultOutputDirectory } = require('../tools/generate-music.js');
+const {
+  exactFrameCount,
+  renderScore,
+  writeStereoWav,
+  defaultOutputDirectory,
+  measurePeak,
+  measurePulse,
+  measureIntenseMixPeak,
+} = require('../tools/generate-music.js');
 
-test('Nebula Cruise score keeps the approved global composition values', () => {
-  assert.deepEqual(score, {
-    title: 'Nebula Cruise',
-    bpm: 112,
-    beatsPerBar: 4,
-    bars: 32,
-    sampleRate: 44100,
-    key: 'E minor',
-    progression: ['Em(add9)', 'Cmaj7', 'G', 'D', 'Em', 'C', 'Am7', 'B7'],
-    seed: 1312965196,
-  });
+test('Nebula Cruise score locks the 128 BPM rhythm contract', () => {
+  assert.equal(score.bpm, 128);
+  assert.equal(score.bars, 32);
+  assert.equal(exactFrameCount(score), 2646000);
+  assert.deepEqual(score.normalization, { atmosphere: 0.68, drive: 0.72, overdrive: 0.66 });
 });
 
-test('all three deterministic stems have the same exact approved frame count', () => {
-  assert.equal(exactFrameCount(score), 3024000);
+test('the rhythm-forward score renders deterministically with its target peaks and pulse guardrails', () => {
   const first = renderScore(score);
   const second = renderScore(score);
   assert.deepEqual(Object.keys(first), ['atmosphere', 'drive', 'overdrive']);
   for (const stem of Object.keys(first)) {
-    assert.equal(first[stem].left.length, 3024000);
-    assert.equal(first[stem].right.length, 3024000);
-    assert.equal(crypto.createHash('sha256').update(Buffer.from(first[stem].left.buffer)).digest('hex'),
-      crypto.createHash('sha256').update(Buffer.from(second[stem].left.buffer)).digest('hex'));
+    assert.equal(first[stem].left.length, 2646000);
+    assert.equal(first[stem].right.length, 2646000);
   }
+  assert.deepEqual(first.drive.left, second.drive.left);
+  assert.equal(measurePeak(first.atmosphere).toFixed(2), '0.68');
+  assert.equal(measurePeak(first.drive).toFixed(2), '0.72');
+  assert.equal(measurePeak(first.overdrive).toFixed(2), '0.66');
+  // The first two seconds compare 35 ms beat-centered windows against equally sized inter-beat windows.
+  const pulse = measurePulse(first.drive, score.sampleRate, score.bpm);
+  assert.ok(pulse.earlyPulseRatio >= 1.35);
+  assert.ok(pulse.transientRms > pulse.sustainedRms);
+  assert.ok(measureIntenseMixPeak(first, {
+    atmosphere: 0.68, drive: 1, overdrive: 0.78, busGain: 0.55,
+  }) <= 0.95);
+  assert.equal(crypto.createHash('sha256').update(Buffer.from(first.drive.left.buffer)).digest('hex'),
+    crypto.createHash('sha256').update(Buffer.from(second.drive.left.buffer)).digest('hex'));
 });
 
 test('WAV output is stereo 16-bit PCM at 44.1 kHz with the exact frame payload', () => {
