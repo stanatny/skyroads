@@ -21,6 +21,7 @@
 - No new runtime dependency, backend, online leaderboard, storage key, permission, entitlement, asset, or build step.
 - Leaderboard schema `version: 1` and its versioned local-storage keys remain unchanged.
 - Do not create or push `v1.1.0` from the feature branch. Tag only the merged `main` commit after its Pages deployment is verified.
+- The complete tracked `.agent/skills/ship-browser-games/` package, its official validation, three successful forward tests, Git index proof, Skill commit, and temporary handoff are V1.1 prerequisites; any failure blocks the V1.1 pull request.
 
 ## File Structure
 
@@ -39,6 +40,42 @@
 - `.github/workflows/release-macos.yml` — reject release tags that do not equal `v${package.version}`.
 - `app/main.swift`, `tests/app-resources-smoke.sh`, `tests/app-wkwebview-smoke.sh` — bundled script/version diagnostics and packaged metadata checks.
 - `tests/audio.test.js`, `tests/game-audio-ui.test.js`, `tests/i18n.test.js`, `tests/presentation.test.js`, `tests/release-contracts.test.js`, `tests/static-app.test.js` — focused red-green coverage.
+
+---
+
+### Task 0: Ship the Repository Browser-Game Skill
+
+**Files:**
+- Create: `.agent/skills/ship-browser-games/SKILL.md`
+- Create: `.agent/skills/ship-browser-games/agents/openai.yaml`
+- Create: `.agent/skills/ship-browser-games/references/*.md`
+- Modify: `.gitignore`
+- Modify: this plan
+- Create outside repository: a temporary `skyroads-v1.1-handoff.md`
+
+**Interfaces:**
+- Produces: a tracked `$ship-browser-games` workflow and temporary continuation handoff.
+- Consumes: `docs/superpowers/plans/2026-08-03-ship-browser-games-skill-implementation.md`.
+
+- [ ] **Step 1: Execute the approved Skill implementation plan**
+
+Complete every task in `docs/superpowers/plans/2026-08-03-ship-browser-games-skill-implementation.md`, including the required official scaffold and all eight approved Skill files.
+
+- [ ] **Step 2: Prove validation and forward behavior**
+
+Require `quick_validate.py` to succeed and require all three minimal-context forward tests from the Skill plan to pass. A structural validation or routing failure blocks further V1.1 release work.
+
+- [ ] **Step 3: Prove tracking and commit completeness**
+
+Force-stage the Skill, verify every Skill file with `git ls-files --error-unmatch`, and create a commit that contains the complete Skill package. Confirm the commit file list includes `SKILL.md`, `agents/openai.yaml`, and all six references.
+
+- [ ] **Step 4: Create the temporary handoff**
+
+Create and validate the out-of-repository handoff required by Task 6 of the Skill implementation plan. Do not place it in the repository.
+
+- [ ] **Step 5: Enforce the release blocker**
+
+Do not open or update the V1.1 pull request as ready for merge until the Skill plan, official validation, forward tests, Git index proof, complete Skill commit, and temporary handoff have all succeeded.
 
 ---
 
