@@ -31,7 +31,7 @@ function createGameLogicHarness() {
     requestAnimationFrame() {},
   };
   vm.createContext(sandbox);
-  for (const file of ['src/input.js', 'src/presentation.js', 'src/world-art.js']) {
+  for (const file of ['src/input.js', 'src/presentation.js', 'src/world-art.js', 'src/obstacles.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
   }
   const gameSource = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');

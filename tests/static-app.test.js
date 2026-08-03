@@ -11,7 +11,9 @@ const css = fs.readFileSync(path.join(root, 'styles/game.css'), 'utf8');
 test('the static shell references loadable classic CSS and JavaScript', () => {
   assert.match(html, /<link rel="icon" href="data:,">/);
   assert.match(html, /href="\.\/styles\/game\.css"/);
+  assert.match(html, /src="\.\/src\/obstacles\.js"/);
   assert.match(html, /src="\.\/src\/game\.js"/);
+  assert.ok(html.indexOf('./src/obstacles.js') < html.indexOf('./src/game.js'));
   const urls = [
     ...html.matchAll(/<(?:script|link)\b[^>]+(?:src|href)="([^"]+)"/g),
   ].map((match) => match[1]).filter((url) => url.startsWith('./'));
@@ -73,7 +75,7 @@ test('startup exposes a locked adaptive-audio diagnostic without creating AudioC
     fetch: async () => { throw new Error('must not fetch before a gesture'); },
   };
   vm.createContext(sandbox);
-  for (const file of ['i18n.js', 'input.js', 'audio.js', 'game.js']) {
+  for (const file of ['i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
   }
 
@@ -130,7 +132,7 @@ function makeAudioDiagnosticSandbox({ fetchFails = false } = {}) {
 async function runPostGestureDiagnostics(options) {
   const sandbox = makeAudioDiagnosticSandbox(options);
   vm.createContext(sandbox);
-  for (const file of ['i18n.js', 'input.js', 'audio.js', 'game.js']) {
+  for (const file of ['i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
   }
   return vm.runInContext('startGame(); Skyroads.diagnostics.ready', sandbox);

@@ -201,7 +201,7 @@ function makeGameUiSandbox({
     Image: FakeImage,
   };
   vm.createContext(sandbox);
-  const files = ['i18n.js', 'leaderboard.js', 'presentation.js', 'world-art.js', 'input.js'];
+  const files = ['i18n.js', 'leaderboard.js', 'presentation.js', 'world-art.js', 'input.js', 'obstacles.js'];
   if (loadAdaptiveAudio) files.push('audio.js');
   files.push('game.js');
   for (const file of files) {
