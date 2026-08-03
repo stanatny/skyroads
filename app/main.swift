@@ -105,7 +105,7 @@ final class SmokeDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate
           const faces = await document.fonts.load('500 16px Orbitron');
           orbitronLoaded = faces.length > 0 && document.fonts.check('500 16px Orbitron');
         }
-        const scriptsReady = ['version', 'i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'audio', 'game']
+        const scriptsReady = ['version', 'i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'obstacles', 'audio', 'game']
           .every((name) => diagnostics.scripts && diagnostics.scripts[name] === true);
         const audioReady = diagnostics.audio && diagnostics.audio.status === 'ready'
           && diagnostics.audio.decoded === true && ['ogg', 'mp3'].includes(diagnostics.audio.format);

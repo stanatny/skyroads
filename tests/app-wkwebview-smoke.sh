@@ -26,7 +26,7 @@ if (!diagnostic || Array.isArray(diagnostic) || typeof diagnostic !== 'object') 
 }
 if (appStatus !== 0 || diagnostic.ok !== true) throw new Error(`WKWebView smoke failed (exit ${appStatus}): ${text}`);
 if (diagnostic.diagnostics?.initialized !== true) throw new Error('game did not initialize');
-for (const script of ['version', 'i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'audio', 'game']) {
+for (const script of ['version', 'i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'obstacles', 'audio', 'game']) {
   if (diagnostic.diagnostics?.scripts?.[script] !== true) throw new Error(`classic script missing: ${script}`);
 }
 if (diagnostic.diagnostics?.version?.semver !== '1.1.0') throw new Error('V1.1 product diagnostics unavailable');

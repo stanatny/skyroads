@@ -323,6 +323,7 @@ test('release diagnostics expose complete preferred world atlas readiness', asyn
   const diagnostics = await vm.runInContext('Skyroads.diagnostics.ready', sandbox);
 
   assert.equal(diagnostics.scripts.worldArt, true);
+  assert.equal(diagnostics.scripts.obstacles, true);
   assert.deepEqual(Array.from(diagnostics.visualAssets.world.loaded), [
     'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
     'barrierCrate', 'structurePylon', 'structureBastion', 'structureReactor',

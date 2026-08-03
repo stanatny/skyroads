@@ -4627,6 +4627,7 @@ function installDiagnostics() {
         presentation: Boolean(presentation),
         worldArt: Boolean(globalThis.Skyroads.worldArt),
         input: Boolean(globalThis.Skyroads.input),
+        obstacles: Boolean(globalThis.Skyroads.obstacles),
         audio: Boolean(globalThis.Skyroads.audio),
         game: true,
       }),
