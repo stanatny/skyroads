@@ -247,6 +247,97 @@ function appUiTarget(elements, tagName = 'button') {
   return target;
 }
 
+function markInsideAppUi(element) {
+  element.closest = (selector) => selector === '#app-ui' ? { id: 'app-ui' } : null;
+  return element;
+}
+
+function dispatchMissionShortcut(windowObject, target, code, repeat = false) {
+  let prevented = false;
+  windowObject.dispatch('keydown', {
+    code,
+    key: code === 'Space' ? ' ' : 'Enter',
+    target,
+    repeat,
+    defaultPrevented: false,
+    preventDefault() { prevented = true; },
+  });
+  return prevented;
+}
+
+for (const [mode, buttonName] of [['MENU', 'startButton'], ['GAMEOVER', 'restartButton']]) {
+  for (const code of ['Enter', 'Space']) {
+    test(`${mode} accepts ${code} from its focused primary button`, () => {
+      const { sandbox, windowObject } = makeGameUiSandbox();
+      vm.runInContext(`STATE.mode = '${mode}'`, sandbox);
+      const button = markInsideAppUi(vm.runInContext(`STATE.ui.${buttonName}`, sandbox));
+
+      const prevented = dispatchMissionShortcut(windowObject, button, code);
+
+      assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
+      assert.equal(prevented, true);
+    });
+  }
+}
+
+test('repeated mission shortcuts do not start a menu mission', () => {
+  const { sandbox, windowObject, elements } = makeGameUiSandbox();
+
+  const prevented = dispatchMissionShortcut(windowObject, elements.game, 'Space', true);
+
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'MENU');
+  assert.equal(prevented, false);
+});
+
+for (const [label, target] of [
+  ['input', (elements) => appUiTarget(elements, 'input')],
+  ['contenteditable', (elements) => {
+    const element = appUiTarget(elements);
+    element.setAttribute('contenteditable', 'true');
+    return element;
+  }],
+]) {
+  test(`${label} targets do not start a menu mission`, () => {
+    const { sandbox, windowObject, elements } = makeGameUiSandbox();
+
+    const prevented = dispatchMissionShortcut(windowObject, target(elements), 'Enter');
+
+    assert.equal(vm.runInContext('STATE.mode', sandbox), 'MENU');
+    assert.equal(prevented, false);
+  });
+}
+
+for (const dialogName of ['leaderboard-dialog', 'rename-dialog']) {
+  test(`an open ${dialogName} does not start a menu mission`, () => {
+    const { sandbox, windowObject, elements } = makeGameUiSandbox();
+    elements[dialogName].hidden = false;
+
+    const prevented = dispatchMissionShortcut(windowObject, elements.game, 'Space');
+
+    assert.equal(vm.runInContext('STATE.mode', sandbox), 'MENU');
+    assert.equal(prevented, false);
+  });
+}
+
+test('a non-primary app UI button does not start a menu mission or suppress native activation', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  const musicButton = markInsideAppUi(vm.runInContext('STATE.ui.musicButton', sandbox));
+
+  const prevented = dispatchMissionShortcut(windowObject, musicButton, 'Space');
+
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'MENU');
+  assert.equal(prevented, false);
+});
+
+test('a Canvas target still starts a menu mission', () => {
+  const { sandbox, windowObject, elements } = makeGameUiSandbox();
+
+  const prevented = dispatchMissionShortcut(windowObject, elements.game, 'Enter');
+
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
+  assert.equal(prevented, true);
+});
+
 test('M retains total-mute semantics when adaptive audio is unavailable', () => {
   const { sandbox, windowObject } = makeGameUiSandbox({ loadAdaptiveAudio: false });
   vm.runInContext('startGame()', sandbox);

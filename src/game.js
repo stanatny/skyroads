@@ -305,6 +305,18 @@ function targetInsideAppUi(target) {
   return !!(target && typeof target.closest === 'function' && target.closest('#app-ui'));
 }
 
+function primaryMissionActionTarget(mode = STATE.mode) {
+  if (!STATE.ui) return null;
+  if (mode === 'MENU') return STATE.ui.startButton || null;
+  if (mode === 'GAMEOVER') return STATE.ui.restartButton || null;
+  return null;
+}
+
+function acceptsMissionShortcutTarget(target, mode = STATE.mode) {
+  if (!targetInsideAppUi(target)) return true;
+  return target === primaryMissionActionTarget(mode);
+}
+
 function modalOpen() {
   return !!document.querySelector('#app-ui [role="dialog"][aria-modal="true"]:not([hidden])');
 }
@@ -356,19 +368,33 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (e.repeat || (code && KEYS[code])) return;
+
+  const missionShortcut = (code === 'Enter' || code === 'Space')
+    && (STATE.mode === 'MENU' || STATE.mode === 'GAMEOVER');
+  const modeCommand = missionShortcut && acceptsMissionShortcutTarget(e.target, STATE.mode);
+  if (modeCommand) {
+    e.preventDefault();
+    startGame();
+    return;
+  }
+  if (missionShortcut && targetInsideAppUi(e.target)) {
+    clearAllInputState();
+    return;
+  }
+
   const isRecognized = directionForCode(code) !== 0
     || ['ArrowUp', 'ArrowDown', 'Space', 'Enter', 'Escape', 'KeyW', 'KeyS', 'KeyJ', 'KeyK', 'KeyM'].includes(code);
-  // 全部游戏键都 preventDefault：macOS 对未处理的按键按住不放会发"滴滴滴"系统提示音
-  if (isRecognized && typeof e.preventDefault === 'function') e.preventDefault();
-  if (e.repeat || (code && KEYS[code])) return;
 
   // M 与结束页 Escape 是非编辑控件上的全局快捷键，应先于 app UI 焦点门禁处理。
   if (code === 'KeyM') {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
     KEYS[code] = true;
     toggleMute();
     return;
   }
   if (STATE.mode === 'GAMEOVER' && code === 'Escape') {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
     KEYS[code] = true;
     gotoMenu();
     return;
@@ -380,6 +406,8 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  // 已确认由游戏接管的按键才阻止默认行为，保留 UI 按钮的原生键盘激活。
+  if (isRecognized && typeof e.preventDefault === 'function') e.preventDefault();
   if (code) KEYS[code] = true;
   const direction = directionForCode(code);
   if (direction !== 0 && STATE.mode === 'PLAYING') {
@@ -388,14 +416,6 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (STATE.mode === 'MENU') {
-    if (code === 'Space' || code === 'Enter') startGame();
-    return;
-  }
-  if (STATE.mode === 'GAMEOVER') {
-    if (code === 'Space' || code === 'Enter') startGame();
-    return;
-  }
   if (!shouldHandleGameInput(gameInputDescriptor(e))) return;
   switch (code) {
     case 'Space':
