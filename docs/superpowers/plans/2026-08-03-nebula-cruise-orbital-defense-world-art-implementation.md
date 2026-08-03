@@ -13,7 +13,7 @@
 - Work only in '/Users/stan/Developer/GitHub/skyroads/.worktrees/stellar-command-polish' on 'feat/stellar-command-polish'; update PR #1 but never merge it.
 - Use strict red-green-refactor for every new behavior. Observe the named RED failure before editing production code.
 - Preserve all current uncommitted music and deep-gap work. Checkpoint it in isolated commits before editing shared tests; never overwrite or fold it into the Orbital Defense asset commit.
-- Preserve five lanes, 720 world units per lane, obstacle generation, safe-lane rules, collision widths/heights, score, difficulty, drone warn/move durations (0.6/0.4 seconds), leaderboard, storage, pause, keyboard shortcuts, i18n, and player rendering.
+- Preserve the existing seven lanes, 720 world units per lane, obstacle generation, safe-lane rules, collision widths/heights, score, difficulty, drone warn/move durations (0.6/0.4 seconds), leaderboard, storage, pause, keyboard shortcuts, i18n, and player rendering.
 - Use only the official free CC0 Kenney Space Kit and Modular Space Kit archives. Source archives and extracted models remain outside Git.
 - Keep the nine current runtime paths, manifest keys, seven 512×512 yaw frames, independent per-atlas fallback, transparent padding, zero RGB under alpha zero, 2 MiB per-atlas limit, and 18 MiB total limit.
 - Use warm-white armor, graphite joints, cyan energy, and restrained orange safety accents. Red/magenta remains only for the existing hostile movement warning layer.

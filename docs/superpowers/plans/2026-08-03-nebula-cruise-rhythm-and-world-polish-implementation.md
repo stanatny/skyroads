@@ -142,7 +142,7 @@ const WORLD_GEOMETRY = Object.freeze({
 });
 ```
 
-`489.6` is `0.68 * 720` lane units and `576` is `0.8 * 720`, matching the current projected bases. Drones add the existing deterministic `±40` world-unit bob to `baseY` only when decorative motion is enabled. Upright obstacles keep the existing projected `zNear/zFar` ground footprint and place the sprite at `zMid`; the footprint, not transparent artwork, communicates the collision segment.
+`489.6` is `0.68 * 720` lane units and `576` was the original/pre-Orbital-Defense width (`0.8 * 720`), matching the then-current projected bases. Drones add the existing deterministic `±40` world-unit bob to `baseY` only when decorative motion is enabled. Upright obstacles keep the existing projected `zNear/zFar` ground footprint and place the sprite at `zMid`; the footprint, not transparent artwork, communicates the collision segment.
 
 Performance budgets are part of acceptance: each compressed atlas is at most 2 MiB and all nine total at most 18 MiB; decoded RGBA memory is recorded as approximately 63 MiB; destinations below one CSS pixel or outside the viewport are culled before `drawImage`; exact yaw boundaries use one draw call; maximum-density 960x600 and 1280x800 runs must remain at or below 1.15 times the pre-change p95 Canvas render time and below 25 ms p95 over 30 seconds on the same machine.
 
