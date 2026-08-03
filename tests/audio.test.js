@@ -41,26 +41,20 @@ test('invalid decoded stem durations are rejected safely', () => {
   assert.equal(validateStemDurations([{ duration: 68.571 }, { duration: Number.NaN }, { duration: 68.571 }], 1), false);
 });
 
-test('game over keeps atmosphere and lowers action layers', () => {
-  assert.deepEqual(mixForGameState({ mode: 'GAMEOVER', speedRatio: 1, danger: true }), { atmosphere: 1, drive: 0, overdrive: 0 });
+test('adaptive music uses the frozen menu normal and intense state table', () => {
+  const cases = [
+    [{ mode: 'MENU', speedRatio: 1 }, { atmosphere: 1, drive: 0, overdrive: 0, cutoff: 4200 }],
+    [{ mode: 'PLAYING', speedRatio: 0.5 }, { atmosphere: 0.72, drive: 0.92, overdrive: 0.18, cutoff: 8000 }],
+    [{ mode: 'PLAYING', speedRatio: 0.75 }, { atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 }],
+  ];
+
+  for (const [state, expected] of cases) assert.deepEqual(mixForGameState(state), expected);
+  assert.deepEqual(mixForGameState(), { atmosphere: 1, drive: 0, overdrive: 0, cutoff: 4200 });
 });
 
-test('cruise uses atmosphere and drive without overdrive', () => {
-  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.5 }), { atmosphere: 1, drive: 0.72, overdrive: 0 });
-});
-
-test('speed ratio at the three-quarter boundary enables overdrive', () => {
-  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.75 }), { atmosphere: 1, drive: 0.72, overdrive: 0.82 });
-});
-
-test('BOOST and danger each override low speed with overdrive', () => {
-  assert.equal(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, boost: true }).overdrive, 0.82);
-  assert.equal(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, danger: true }).overdrive, 0.82);
-});
-
-test('menus and unknown states retain atmosphere only', () => {
-  assert.deepEqual(mixForGameState({ mode: 'MENU', speedRatio: 1 }), { atmosphere: 1, drive: 0, overdrive: 0 });
-  assert.deepEqual(mixForGameState(), { atmosphere: 1, drive: 0, overdrive: 0 });
+test('BOOST and danger each select the intense mix at low speed', () => {
+  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, boost: true }), { atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 });
+  assert.deepEqual(mixForGameState({ mode: 'PLAYING', speedRatio: 0.1, danger: true }), { atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 });
 });
 
 test('stem changes use a 300 millisecond transition', () => {
@@ -637,8 +631,22 @@ test('game state updates ramp every stem to its mix over exactly 300 millisecond
   controller.setGameState({ mode: 'PLAYING', speedRatio: 0.8 });
 
   assert.deepEqual(harness.calls.ramps.filter(([kind]) => kind === 'ramp').map(([, value, time]) => [value, time]), [
-    [1, 10.3], [0.72, 10.3], [0.82, 10.3],
+    [0.68, 10.3], [1, 10.3], [0.78, 10.3],
   ]);
+});
+
+test('adaptive graph starts its music bus at the shared 0.55 gain', async () => {
+  const harness = makeAudioHarness();
+  const controller = createAudioController({
+    AudioContextClass: harness.FakeAudioContext,
+    fetchImpl: harness.fetchImpl,
+    canPlayType: () => 'probably',
+    files: completeFiles,
+  });
+
+  await controller.unlock();
+
+  assert.equal(harness.calls.nodes.find((node) => node.kind === 'bus').gain.value, 0.55);
 });
 
 test('master low-pass brightens for speed danger and boost over the same 300 milliseconds', async () => {
@@ -660,7 +668,7 @@ test('master low-pass brightens for speed danger and boost over the same 300 mil
   assert.equal(harness.calls.filters.length, 1);
   assert.equal(harness.calls.filters[0].type, 'lowpass');
   assert.deepEqual(harness.calls.filterRamps, [
-    [14000, 10.3], [4200, 10.3], [14000, 10.3], [14000, 10.3],
+    [14000, 10.3], [8000, 10.3], [14000, 10.3], [14000, 10.3],
   ]);
 });
 

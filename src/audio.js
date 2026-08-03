@@ -7,7 +7,9 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const STEM_TRANSITION_SECONDS = 0.3;
+  const MUSIC_BUS_GAIN = 0.55;
+  const MIX_RAMP_SECONDS = 0.3;
+  const STEM_TRANSITION_SECONDS = MIX_RAMP_SECONDS;
   // Two complete format attempts must still settle before the native 10-second WKWebView smoke deadline.
   const DEFAULT_FORMAT_LOAD_TIMEOUT_MS = 4000;
   const STORAGE_KEYS = Object.freeze({
@@ -23,6 +25,11 @@
     overdriveMp3: './assets/audio/nebula-cruise-overdrive.mp3',
   });
   const STEM_NAMES = Object.freeze(['atmosphere', 'drive', 'overdrive']);
+  const MUSIC_MIX = Object.freeze({
+    menu: Object.freeze({ atmosphere: 1, drive: 0, overdrive: 0, cutoff: 4200 }),
+    normal: Object.freeze({ atmosphere: 0.72, drive: 0.92, overdrive: 0.18, cutoff: 8000 }),
+    intense: Object.freeze({ atmosphere: 0.68, drive: 1, overdrive: 0.78, cutoff: 14000 }),
+  });
 
   function completeSet(files, format) {
     const suffix = format === 'ogg' ? 'Ogg' : 'Mp3';
@@ -49,10 +56,10 @@
   }
 
   function mixForGameState(state = {}) {
-    if (state.mode !== 'PLAYING') return { atmosphere: 1, drive: 0, overdrive: 0 };
+    if (state.mode !== 'PLAYING') return MUSIC_MIX.menu;
     const speedRatio = Number.isFinite(Number(state.speedRatio)) ? Number(state.speedRatio) : 0;
-    const intense = speedRatio >= 0.75 || Boolean(state.boost) || Boolean(state.danger);
-    return { atmosphere: 1, drive: 0.72, overdrive: intense ? 0.82 : 0 };
+    return speedRatio >= 0.75 || Boolean(state.boost) || Boolean(state.danger)
+      ? MUSIC_MIX.intense : MUSIC_MIX.normal;
   }
 
   function keepProceduralTimelineCurrent({ muted = false, currentTime = 0, nextNoteTime = 0 } = {}) {
@@ -155,23 +162,19 @@
         try {
           parameter.cancelScheduledValues(now);
           parameter.setValueAtTime(Number(parameter.value) || 0, now);
-          parameter.linearRampToValueAtTime(target, now + STEM_TRANSITION_SECONDS);
+          parameter.linearRampToValueAtTime(target, now + MIX_RAMP_SECONDS);
         } catch (_) {
           try { parameter.value = target; } catch (_) {}
         }
       }
       if (masterFilter && masterFilter.frequency) {
-        const speedRatio = Number(gameState.speedRatio) || 0;
-        const bright = gameState.mode === 'PLAYING'
-          && (speedRatio >= 0.75 || Boolean(gameState.danger) || Boolean(gameState.boost));
-        const cutoff = bright ? 14000 : 4200;
         const parameter = masterFilter.frequency;
         try {
           parameter.cancelScheduledValues(now);
-          parameter.setValueAtTime(Number(parameter.value) || 4200, now);
-          parameter.linearRampToValueAtTime(cutoff, now + STEM_TRANSITION_SECONDS);
+          parameter.setValueAtTime(Number(parameter.value) || mix.cutoff, now);
+          parameter.linearRampToValueAtTime(mix.cutoff, now + MIX_RAMP_SECONDS);
         } catch (_) {
-          try { parameter.value = cutoff; } catch (_) {}
+          try { parameter.value = mix.cutoff; } catch (_) {}
         }
       }
     }
@@ -293,20 +296,17 @@
           }
 
           gains = {};
+          const initialMix = mixForGameState(gameState);
           masterFilter = context.createBiquadFilter();
           adaptiveNodes.push(masterFilter);
           masterFilter.type = 'lowpass';
-          const initialSpeedRatio = Number(gameState.speedRatio) || 0;
-          masterFilter.frequency.value = gameState.mode === 'PLAYING'
-            && (initialSpeedRatio >= 0.75 || Boolean(gameState.danger) || Boolean(gameState.boost))
-            ? 14000 : 4200;
+          masterFilter.frequency.value = initialMix.cutoff;
           masterFilter.connect(context.destination);
           const musicBus = context.createGain();
           adaptiveNodes.push(musicBus);
-          musicBus.gain.value = 0.72;
+          musicBus.gain.value = MUSIC_BUS_GAIN;
           musicBus.connect(masterFilter);
           const startTime = context.currentTime + 0.05;
-          const initialMix = mixForGameState(gameState);
           buffers.forEach((buffer, index) => {
             const stem = STEM_NAMES[index];
             const gain = context.createGain();

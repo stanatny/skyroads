@@ -117,21 +117,43 @@ function makeGameUiSandbox({
   };
   windowObject.matchMedia = () => motionQuery;
 
+  const audioContexts = [];
   class FakeAudioContext {
-    constructor() { this.currentTime = 10; this.state = 'running'; this.destination = {}; }
+    constructor() {
+      this.currentTime = 10;
+      this.state = 'running';
+      this.destination = {};
+      this.gains = [];
+      this.filters = [];
+      audioContexts.push(this);
+    }
     resume() { this.state = 'running'; return Promise.resolve(); }
     close() { this.state = 'closed'; return Promise.resolve(); }
     createGain() {
-      return {
-        gain: { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} },
+      const gain = {
+        gain: {
+          value: 0,
+          cancelScheduledValues() {},
+          setValueAtTime(value) { this.value = value; },
+          linearRampToValueAtTime(value) { this.value = value; },
+        },
         connect() {}, disconnect() {},
       };
+      this.gains.push(gain);
+      return gain;
     }
     createBiquadFilter() {
-      return {
-        type: '', frequency: { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} },
+      const filter = {
+        type: '', frequency: {
+          value: 0,
+          cancelScheduledValues() {},
+          setValueAtTime(value) { this.value = value; },
+          linearRampToValueAtTime(value) { this.value = value; },
+        },
         connect() {}, disconnect() {},
       };
+      this.filters.push(filter);
+      return filter;
     }
     createBufferSource() {
       return { buffer: null, loop: false, connect() {}, disconnect() {}, start() {}, stop() {} };
@@ -181,6 +203,7 @@ function makeGameUiSandbox({
     windowObject,
     documentObject,
     elements,
+    audioContexts,
     motionQuery,
     dispatchOverlayMutation() { for (const callback of observerCallbacks) callback([]); },
   };
@@ -207,6 +230,17 @@ test('M retains total-mute semantics when adaptive audio is unavailable', () => 
   assert.deepEqual({ ...state }, {
     musicMuted: true, sfxMuted: true, mirror: true, master: 0,
   });
+});
+
+test('starting a run sends the normal adaptive music mix through the shared bus', async () => {
+  const { sandbox, audioContexts } = makeGameUiSandbox();
+  const controller = vm.runInContext('STATE.audioController', sandbox);
+  vm.runInContext('startGame()', sandbox);
+  await controller.ready;
+
+  const adaptiveContext = audioContexts.at(-1);
+  assert.deepEqual(adaptiveContext.gains.map((gain) => gain.gain.value), [0.55, 0.72, 0.92, 0.18]);
+  assert.equal(adaptiveContext.filters[0].frequency.value, 8000);
 });
 
 test('a saved partial preference keeps the shared legacy bus audible for the enabled channel', () => {
