@@ -25,7 +25,6 @@ The repository's project license applies only to original project code and artwo
 - License copy: `licenses/Kenney-UI-Pack-Sci-Fi-CC0.txt` — upstream and committed SHA-256 `80e091ef18f6b88becb3b7c2306c159d16217ca620bfa21b7177582c72924221`
 - Selected upstream files and repository paths:
   - `PNG/Extra/Double/panel_glass_notches.png` — upstream and committed SHA-256 `3e8dd90c8e44f1c1729ce8d304656c64c8b467985584f9a9394f5631a204f51a` → `assets/ui/panel-frame-cyan.png`
-  - `PNG/Yellow/Double/button_square_header_notch_rectangle_screws.png` — upstream and committed SHA-256 `6504f46fe6d4616b252efc5027198e6e609e604b2d32f1faf7294ecea5fd0911` → `assets/ui/button-frame-gold.png`
   - `PNG/Blue/Double/bar_round_gloss_large.png` — upstream and committed SHA-256 `af13ccda23a736cdf18049cbe05586178e7cde8fddb5617bcf19cd5b10fcc3b9` → `assets/ui/meter-frame-cyan.png`
 - Modifications: selected PNGs were renamed semantically; their pixels and alpha dimensions are unchanged.
 

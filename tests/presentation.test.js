@@ -471,9 +471,17 @@ test('command center builds one semantic control tree and renders translated sta
   assert.deepEqual(elements.utilityControls.children, [ui.languageButton, ui.musicButton, ui.sfxButton]);
   assert.equal(elements.leaderboardDialog.children[0], ui.leaderboardPanel);
   assert.equal(elements.renameDialog.children[0], ui.renamePanel);
+  assert.match(ui.startButton.className, /mission-action/);
+  assert.equal(ui.startButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
+  assert.equal(ui.restartButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
+  assert.equal(ui.menuButton.getAttribute('aria-keyshortcuts'), 'Escape');
   const translator = {
     locale: 'en',
-    t(id, values = {}) { return `${id}${Object.keys(values).length ? `:${Object.values(values).join('|')}` : ''}`; },
+    t(id, values = {}) {
+      if (id === 'shortcut.startRestart') return 'Enter / Space';
+      if (id === 'shortcut.returnMenu') return 'Esc';
+      return `${id}${Object.keys(values).length ? `:${Object.values(values).join('|')}` : ''}`;
+    },
     formatNumber(value) { return String(value); },
     formatDate() { return '2026-08-02'; },
     countCharacters(value) { return Array.from(value).length; },
@@ -524,6 +532,10 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(elements.utilityControls.getAttribute('data-audio-format'), 'ogg');
   assert.equal(elements.utilityControls.getAttribute('data-audio-decoded'), 'true');
   assert.equal(elements.utilityControls.getAttribute('aria-label'), 'settings.label');
+  assert.equal(ui.startButton.children[1].className, 'shortcut-hint');
+  assert.equal(ui.startButton.children[1].children[0].textContent, 'Enter');
+  assert.equal(ui.startButton.children[1].children[2].textContent, 'Space');
+  assert.equal(ui.startButton.children[0].textContent, 'menu.start');
 });
 
 test('rename count uses the same grapheme segmentation as the persisted name', () => {

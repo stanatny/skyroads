@@ -26,6 +26,17 @@ function assertPng(relativePath) {
   return bytes;
 }
 
+function relativeLuminance(hex) {
+  const channels = hex.slice(1).match(/../g).map((value) => Number.parseInt(value, 16) / 255);
+  const linear = channels.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+}
+
+function contrastRatio(foreground, background) {
+  const [light, dark] = [relativeLuminance(foreground), relativeLuminance(background)].sort((a, b) => b - a);
+  return (light + 0.05) / (dark + 0.05);
+}
+
 function sipsDimensions(relativePath) {
   const absolutePath = path.join(root, relativePath);
   const output = execFileSync('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', absolutePath], { encoding: 'utf8' });
@@ -99,9 +110,18 @@ test('both player frames keep transparent zero-RGB padding on all four borders',
 test('the selected semantic UI assets are committed as nonempty PNGs', () => {
   for (const relativePath of [
     'assets/ui/panel-frame-cyan.png',
-    'assets/ui/button-frame-gold.png',
     'assets/ui/meter-frame-cyan.png',
   ]) assertPng(relativePath);
+});
+
+test('mission controls use accessible blue gradients without the retired gold frame', () => {
+  const css = read('styles/game.css').toString('utf8');
+  const notices = read('THIRD_PARTY_NOTICES.md').toString('utf8');
+  assert.match(css, /\.mission-action\s*\{[\s\S]*background:\s*linear-gradient\(110deg, #203e94, #5845b7\)/);
+  assert.ok(contrastRatio('#f5f8ff', '#203e94') >= 4.5);
+  assert.ok(contrastRatio('#f5f8ff', '#5845b7') >= 4.5);
+  assert.doesNotMatch(css, /button-frame-gold\.png/);
+  assert.doesNotMatch(notices, /button-frame-gold\.png/);
 });
 
 test('the six local icons are standalone SVGs without remote runtime resources', () => {
@@ -141,7 +161,6 @@ test('third-party notices record every exact source, license, path, hash and dow
     'Kenney',
     'https://kenney.nl/assets/ui-pack-sci-fi',
     'PNG/Extra/Double/panel_glass_notches.png',
-    'PNG/Yellow/Double/button_square_header_notch_rectangle_screws.png',
     'PNG/Blue/Double/bar_round_gloss_large.png',
     'Phosphor',
     'https://github.com/phosphor-icons/core',
@@ -176,7 +195,6 @@ test('committed license copies are byte-identical to the recorded official files
 test('byte-identical runtime assets match their exact recorded upstream hashes', () => {
   const upstreamCopies = [
     ['assets/ui/panel-frame-cyan.png', '3e8dd90c8e44f1c1729ce8d304656c64c8b467985584f9a9394f5631a204f51a'],
-    ['assets/ui/button-frame-gold.png', '6504f46fe6d4616b252efc5027198e6e609e604b2d32f1faf7294ecea5fd0911'],
     ['assets/ui/meter-frame-cyan.png', 'af13ccda23a736cdf18049cbe05586178e7cde8fddb5617bcf19cd5b10fcc3b9'],
     ['assets/icons/translate.svg', '1e49dc31f3a172c9c7c67361511ee5314598b3f5b32788219325f589487f76c5'],
     ['assets/icons/speaker-high.svg', 'caca5fc1ee8489ac19232301d2c96f6d4048802491d75d761bbb89d5c98e459d'],
@@ -247,11 +265,11 @@ test('visual preloading reports every local asset and requires both player frame
   assert.equal(result.shipFramesReady, true);
   assert.equal(result.fallbackRequired, false);
   assert.equal(result.timedOut, false);
-  assert.equal(result.loadedCount, 12);
+  assert.equal(result.loadedCount, 11);
   assert.equal(result.failedCount, 0);
   assert.equal(result.assets.ship.neutral.loaded, true);
   assert.equal(result.assets.ship.thrust.loaded, true);
-  assert.equal(Object.keys(result.assets.ui).length, 3);
+  assert.equal(Object.keys(result.assets.ui).length, 2);
   assert.equal(Object.keys(result.assets.icons).length, 6);
   assert.equal(result.assets.font.orbitron.loaded, true);
   assert.equal(addedFonts.length, 1);
@@ -293,7 +311,7 @@ test('visual preloading returns deterministic failure diagnostics on timeout', a
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 12);
+  assert.equal(result.failedCount, 11);
 });
 
 test('timeout seals image handlers so late completion cannot mutate terminal diagnostics', async () => {
@@ -320,7 +338,7 @@ test('timeout seals image handlers so late completion cannot mutate terminal dia
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(JSON.stringify(result, (key, value) => key === 'element' ? undefined : value), frozenSnapshot);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 12);
+  assert.equal(result.failedCount, 11);
 });
 
 test('visual preloading survives an Image constructor security failure', async () => {
@@ -337,7 +355,7 @@ test('visual preloading survives an Image constructor security failure', async (
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 12);
+  assert.equal(result.failedCount, 11);
 });
 
 test('player frame selection uses thrust only when both frames are ready', () => {

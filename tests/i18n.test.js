@@ -32,6 +32,11 @@ test('music and sound-effect toggles have independent bilingual labels', () => {
   assert.equal(createTranslator('zh-CN').t('settings.sfxOn'), '音效开启');
 });
 
+test('mission shortcut labels are available in both catalogs', () => {
+  assert.equal(createTranslator('en').t('shortcut.startRestart'), 'Enter / Space');
+  assert.equal(createTranslator('zh-CN').t('shortcut.returnMenu'), 'Esc');
+});
+
 test('both production catalogs have the same non-empty IDs', () => {
   assert.deepEqual(Object.keys(MESSAGES.en).sort(), Object.keys(MESSAGES['zh-CN']).sort());
   for (const catalog of Object.values(MESSAGES)) {

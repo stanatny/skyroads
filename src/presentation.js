@@ -57,7 +57,6 @@
     }),
     ui: Object.freeze({
       panel: './assets/ui/panel-frame-cyan.png',
-      button: './assets/ui/button-frame-gold.png',
       meter: './assets/ui/meter-frame-cyan.png',
     }),
     icons: Object.freeze({
@@ -567,6 +566,26 @@
     return makeElement(documentObject, 'button', { id, className, type: 'button' });
   }
 
+  function makeActionContent(documentObject, button, label, shortcut) {
+    const labelNode = makeElement(documentObject, 'span', { className: 'action-label' });
+    const hintNode = makeElement(documentObject, 'span', { className: 'shortcut-hint' });
+    const keys = String(shortcut).split(' / ');
+    labelNode.textContent = label;
+    const keycaps = [];
+    keys.forEach((key, index) => {
+      if (index > 0) {
+        const separator = makeElement(documentObject, 'span', { className: 'key-separator' });
+        separator.textContent = ' / ';
+        keycaps.push(separator);
+      }
+      const keycap = makeElement(documentObject, 'kbd', { className: 'keycap' });
+      keycap.textContent = key;
+      keycaps.push(keycap);
+    });
+    hintNode.replaceChildren(...keycaps);
+    button.replaceChildren(labelNode, hintNode);
+  }
+
   function createCommandCenter({ documentObject = root.document, elements } = {}) {
     if (!documentObject || !elements) throw new TypeError('A document and fixed command-center elements are required');
     const languageButton = makeButton(documentObject, 'language-toggle', 'utility-button');
@@ -579,7 +598,8 @@
     const profileName = makeElement(documentObject, 'p', { className: 'pilot-name' });
     const legacyBest = makeElement(documentObject, 'p', { className: 'legacy-best' });
     legacyBest.hidden = true;
-    const startButton = makeButton(documentObject, 'start-mission', 'primary-action');
+    const startButton = makeButton(documentObject, 'start-mission', 'primary-action mission-action');
+    startButton.setAttribute('aria-keyshortcuts', 'Enter Space');
     const titleLeaderboardButton = makeButton(documentObject, 'open-leaderboard', 'secondary-action');
     const titleActions = makeElement(documentObject, 'div', { className: 'panel-actions' });
     titleActions.append(startButton, titleLeaderboardButton);
@@ -596,8 +616,10 @@
     const resultRank = makeElement(documentObject, 'p', { className: 'result-rank' });
     const resultNewBest = makeElement(documentObject, 'p', { className: 'new-best' });
     resultNewBest.hidden = true;
-    const restartButton = makeButton(documentObject, 'restart-mission', 'primary-action');
+    const restartButton = makeButton(documentObject, 'restart-mission', 'primary-action mission-action');
+    restartButton.setAttribute('aria-keyshortcuts', 'Enter Space');
     const menuButton = makeButton(documentObject, 'return-menu', 'secondary-action');
+    menuButton.setAttribute('aria-keyshortcuts', 'Escape');
     const gameOverLeaderboardButton = makeButton(documentObject, 'game-over-leaderboard', 'secondary-action');
     const gameOverRenameButton = makeButton(documentObject, 'game-over-rename', 'secondary-action');
     const gameOverActions = makeElement(documentObject, 'div', { className: 'panel-actions wrap-actions' });
@@ -698,6 +720,7 @@
     audioDecoded = false,
   } = {}) {
     if (!ui || !translator || !snapshot) return;
+    const documentObject = ui.startButton && ui.startButton.ownerDocument ? ui.startButton.ownerDocument : root.document;
     setOverlayMode(ui, mode);
     if (ui.utilityControls.setAttribute) ui.utilityControls.setAttribute('aria-label', translator.t('settings.label'));
     ui.languageButton.textContent = `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`;
@@ -718,7 +741,7 @@
     ui.titleKicker.textContent = translator.t('menu.subtitle');
     ui.titleHeading.textContent = translator.t('menu.title');
     ui.profileName.textContent = `${translator.t('rename.label')}: ${snapshot.profile.name}`;
-    ui.startButton.textContent = translator.t('menu.start');
+    makeActionContent(documentObject, ui.startButton, translator.t('menu.start'), translator.t('shortcut.startRestart'));
     ui.titleLeaderboardButton.textContent = translator.t('menu.leaderboard');
     const controlIds = ['controls.move', 'controls.jump', 'controls.shoot', 'controls.touch'];
     ui.controlItems.forEach((item, index) => { item.textContent = translator.t(controlIds[index]); });
@@ -734,8 +757,8 @@
     ui.gameOverHeading.textContent = translator.t('gameover.title');
     const deathId = ['wall', 'gap', 'fuel', 'enemy'].includes(deathReason) ? `death.${deathReason}` : 'death.default';
     ui.deathReason.textContent = translator.t(deathId);
-    ui.restartButton.textContent = translator.t('result.restart');
-    ui.menuButton.textContent = translator.t('result.menu');
+    makeActionContent(documentObject, ui.restartButton, translator.t('result.restart'), translator.t('shortcut.startRestart'));
+    makeActionContent(documentObject, ui.menuButton, translator.t('result.menu'), translator.t('shortcut.returnMenu'));
     ui.gameOverLeaderboardButton.textContent = translator.t('menu.leaderboard');
     ui.gameOverRenameButton.textContent = translator.t('leaderboard.rename');
     if (finalResult) {
