@@ -4544,14 +4544,17 @@ function syncGlideAudio() {
 // ============================================================
 function loop(now) {
   if (!STATE.lastTime) STATE.lastTime = now;
-  const dt = Math.min((now - STATE.lastTime) / 1000, 0.05);
+  const dt = Math.min(Math.max(0, (now - STATE.lastTime) / 1000), 0.05);
   STATE.lastTime = now;
-  STATE.time += dt;            // 全局时钟：驱动警报灯/晶体浮动/警示脉冲等动画
+  const paused = STATE.mode === 'PAUSED';
 
-  if (STATE.mode === 'PLAYING') updatePhysics(dt);
+  if (!paused && dt > 0) {
+    STATE.time += dt;          // 全局时钟：驱动警报灯/晶体浮动/警示脉冲等动画
+    if (STATE.mode === 'PLAYING') updatePhysics(dt);
+    updateEffects(dt);
+  }
   syncAdaptiveAudio();
-  updateEffects(dt);
-  render();
+  if (!paused) render();
   requestAnimationFrame(loop);
 }
 
@@ -4796,7 +4799,22 @@ function init() {
     });
   }
   STATE.ctx = STATE.canvas.getContext('2d');
+  function capturePausedCanvasFrame() {
+    if (STATE.mode !== 'PAUSED' || !STATE.canvas || !STATE.canvas.width || !STATE.canvas.height) return null;
+    try {
+      const snapshot = document.createElement('canvas');
+      snapshot.width = STATE.canvas.width;
+      snapshot.height = STATE.canvas.height;
+      const snapshotContext = snapshot.getContext('2d');
+      if (!snapshotContext || typeof snapshotContext.drawImage !== 'function') return null;
+      snapshotContext.drawImage(STATE.canvas, 0, 0);
+      return snapshot;
+    } catch (_) {
+      return null;
+    }
+  }
   function resize() {
+    const pausedFrame = capturePausedCanvasFrame();
     const metrics = presentation
       ? presentation.canvasMetrics(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1)
       : { cssWidth: window.innerWidth, cssHeight: window.innerHeight, pixelWidth: window.innerWidth, pixelHeight: window.innerHeight, dpr: 1 };
@@ -4811,6 +4829,19 @@ function init() {
     }
     if (STATE.ctx && typeof STATE.ctx.setTransform === 'function') {
       STATE.ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+    }
+    if (pausedFrame && STATE.ctx && typeof STATE.ctx.drawImage === 'function') {
+      STATE.ctx.drawImage(
+        pausedFrame,
+        0,
+        0,
+        pausedFrame.width,
+        pausedFrame.height,
+        0,
+        0,
+        metrics.cssWidth,
+        metrics.cssHeight,
+      );
     }
   }
   window.addEventListener('resize', resize);

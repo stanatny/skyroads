@@ -74,6 +74,7 @@ function makeGameUiSandbox({
   documentObject.createElement = (tagName) => {
     const element = new FakeEventTarget(documentObject, tagName);
     if (tagName === 'audio') element.canPlayType = () => 'probably';
+    if (tagName === 'canvas') element.getContext = () => ({ drawImage() {} });
     return element;
   };
 
@@ -84,7 +85,11 @@ function makeGameUiSandbox({
   const elements = Object.fromEntries(ids.map((id) => [id, documentObject.createElement(id === 'game' ? 'canvas' : 'div')]));
   elements['leaderboard-dialog'].hidden = true;
   elements['rename-dialog'].hidden = true;
-  const drawingContext = { setTransform() {} };
+  const drawingContext = {
+    drawImageCalls: 0,
+    setTransform() {},
+    drawImage() { this.drawImageCalls += 1; },
+  };
   elements.game.getContext = () => drawingContext;
   elements.game.setAttribute('tabindex', '-1');
   documentObject.getElementById = (id) => elements[id] || null;
@@ -216,10 +221,57 @@ function makeGameUiSandbox({
     windowObject,
     documentObject,
     elements,
+    drawingContext,
     audioContexts,
     motionQuery,
     dispatchOverlayMutation() { for (const callback of observerCallbacks) callback([]); },
   };
+}
+
+function simulationSnapshot(sandbox) {
+  return vm.runInContext(`JSON.stringify({
+    mode: STATE.mode,
+    time: STATE.time,
+    position: STATE.position,
+    speed: STATE.speed,
+    movement: STATE.movement,
+    playerY: STATE.playerY,
+    playerVY: STATE.playerVY,
+    jumpsUsed: STATE.jumpsUsed,
+    jumpBurst: STATE.jumpBurst,
+    recoil: STATE.recoil,
+    boostT: STATE.boostT,
+    boostPrevSpeed: STATE.boostPrevSpeed,
+    boostWarnStage: STATE.boostWarnStage,
+    tripleT: STATE.tripleT,
+    tripleWarnStage: STATE.tripleWarnStage,
+    superFx: STATE.superFx,
+    magnetT: STATE.magnetT,
+    magnetPulls: STATE.magnetPulls,
+    gliding: STATE.gliding,
+    fuelFlash: STATE.fuelFlash,
+    chargeT: STATE.chargeT,
+    chargeStage: STATE.chargeStage,
+    shots: STATE.shots,
+    bulletCD: STATE.bulletCD,
+    fuel: STATE.fuel,
+    distanceMeters: STATE.distanceMeters,
+    enemyKills: STATE.enemyKills,
+    score: STATE.score,
+    elapsedMs: STATE.elapsedMs,
+    trackLength: STATE.track.length,
+    trackSample: STATE.track.slice(
+      Math.max(0, Math.floor(STATE.position)),
+      Math.max(0, Math.floor(STATE.position)) + 2,
+    ),
+    gen: STATE.gen,
+    flash: STATE.flash,
+    particles: STATE.particles,
+    shake: STATE.shake,
+    shockwave: STATE.shockwave,
+    trail: STATE.trail,
+    deathReason: STATE.deathReason,
+  })`, sandbox);
 }
 
 test('game wiring renders the V1.1 badge and localized pause panel without taking focus', () => {
@@ -715,6 +767,142 @@ for (const control of ['music', 'sfx']) {
     assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
   });
 }
+
+test('paused RAF freezes simulation effects timing and Canvas while still scheduling', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PAUSED';
+    STATE.lastTime = 1000;
+    STATE.time = 3;
+    STATE.position = 12;
+    STATE.speed = 18;
+    STATE.movement.heldRight = true;
+    STATE.movement.activeDirection = 1;
+    STATE.movement.segmentActive = true;
+    STATE.playerY = 240;
+    STATE.playerVY = -90;
+    STATE.jumpsUsed = 2;
+    STATE.jumpBurst = 0.2;
+    STATE.recoil = 0.7;
+    STATE.boostT = 4;
+    STATE.boostPrevSpeed = 16;
+    STATE.boostWarnStage = 1;
+    STATE.tripleT = 5;
+    STATE.tripleWarnStage = 1;
+    STATE.superFx = 0.6;
+    STATE.magnetT = 6;
+    STATE.magnetPulls = [{ x: 9, y: 10, t: 0.1, dur: 0.35 }];
+    STATE.gliding = true;
+    STATE.fuelFlash = 0.5;
+    STATE.chargeT = 2;
+    STATE.chargeStage = 2;
+    STATE.shots = [{ kind: 'bullet', seg: 14, lanePosition: 2, y: 200 }];
+    STATE.bulletCD = 0.2;
+    STATE.fuel = 72;
+    STATE.distanceMeters = 1200;
+    STATE.enemyKills = 3;
+    STATE.score = 1230;
+    STATE.elapsedMs = 2400;
+    STATE.flash = 0.8;
+    STATE.shake = 0.7;
+    STATE.trail = [{ x: 1, y: 2, vx: 3, vy: 4, life: 1, maxLife: 1 }];
+    STATE.particles = [{ x: 5, y: 6, vx: 7, vy: 8, life: 1, maxLife: 1, size: 1, color: '#fff' }];
+    STATE.shockwave = { x: 11, y: 12, r: 13, alpha: 0.9 };
+    STATE.track[12].enemies = [{
+      type: 'drone', lane: 2, fromLane: 2, toLane: 3,
+      state: 'warn', warnT: 0.4, moveT: 0, restT: 1,
+    }];
+    globalThis.__renders = 0;
+    globalThis.__rafCount = 0;
+    render = () => { globalThis.__renders += 1; };
+    requestAnimationFrame = () => { globalThis.__rafCount += 1; };
+  `, sandbox);
+
+  const before = simulationSnapshot(sandbox);
+  vm.runInContext('loop(5000); loop(9000);', sandbox);
+
+  assert.equal(simulationSnapshot(sandbox), before);
+  assert.equal(vm.runInContext('STATE.lastTime', sandbox), 9000);
+  assert.equal(vm.runInContext('globalThis.__renders', sandbox), 0);
+  assert.equal(vm.runInContext('globalThis.__rafCount', sandbox), 2);
+});
+
+test('resizing while paused preserves the static Canvas bitmap without simulating or rendering', () => {
+  const { sandbox, windowObject, elements, drawingContext } = makeGameUiSandbox();
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PAUSED';
+    STATE.time = 4;
+    STATE.position = 8;
+    STATE.flash = 0.7;
+    globalThis.__renders = 0;
+    render = () => { globalThis.__renders += 1; };
+  `, sandbox);
+  const before = simulationSnapshot(sandbox);
+
+  windowObject.innerWidth = 1280;
+  windowObject.innerHeight = 720;
+  windowObject.devicePixelRatio = 2;
+  windowObject.dispatch('resize');
+
+  assert.equal(simulationSnapshot(sandbox), before);
+  assert.equal(elements.game.width, 2560);
+  assert.equal(elements.game.height, 1440);
+  assert.equal(drawingContext.drawImageCalls, 1);
+  assert.equal(vm.runInContext('globalThis.__renders', sandbox), 0);
+});
+
+test('first resumed frame has zero delta before normal 16ms progress', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PLAYING';
+    STATE.lastTime = 0;
+    STATE.time = 7;
+    STATE.position = 0;
+    STATE.distanceMeters = 0;
+    STATE.elapsedMs = 1000;
+    STATE.speed = 8;
+    STATE.boostT = 4;
+    STATE.boostPrevSpeed = 8;
+    STATE.flash = 0.8;
+    globalThis.__renders = 0;
+    globalThis.__rafCount = 0;
+    render = () => { globalThis.__renders += 1; };
+    requestAnimationFrame = () => { globalThis.__rafCount += 1; };
+  `, sandbox);
+
+  const before = simulationSnapshot(sandbox);
+  vm.runInContext('loop(20000)', sandbox);
+  assert.equal(simulationSnapshot(sandbox), before);
+  assert.equal(vm.runInContext('STATE.lastTime', sandbox), 20000);
+  assert.equal(vm.runInContext('globalThis.__renders', sandbox), 1);
+  assert.equal(vm.runInContext('globalThis.__rafCount', sandbox), 1);
+
+  const progressed = vm.runInContext(`(() => {
+    loop(20016);
+    return ({
+      time: STATE.time,
+      elapsedMs: STATE.elapsedMs,
+      position: STATE.position,
+      distanceMeters: STATE.distanceMeters,
+      boostT: STATE.boostT,
+      flash: STATE.flash,
+      renders: globalThis.__renders,
+      rafCount: globalThis.__rafCount,
+    });
+  })()`, sandbox);
+  const closeTo = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} ~= ${expected}`);
+  closeTo(progressed.time, 7.016);
+  closeTo(progressed.elapsedMs, 1016);
+  closeTo(progressed.position, 36 * 0.016);
+  closeTo(progressed.distanceMeters, 36 * 0.016 * 10);
+  closeTo(progressed.boostT, 4 - 0.016);
+  closeTo(progressed.flash, 0.8 - 0.016 * 2.2);
+  assert.equal(progressed.renders, 2);
+  assert.equal(progressed.rafCount, 2);
+});
 
 test('M and game-over Escape work from non-editing app controls but stay suppressed in text fields and dialogs', () => {
   const { sandbox, windowObject, elements } = makeGameUiSandbox();
