@@ -43,6 +43,51 @@ test('release tag validation accepts only v plus package semver', () => {
   assert.notEqual(spawnSync(process.execPath, [script, 'v1.1']).status, 0);
 });
 
+test('the bilingual READMEs publish the same V1.1 identity and keyboard release controls', () => {
+  const english = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+  const chinese = fs.readFileSync(path.join(root, 'README.zh-CN.md'), 'utf8');
+  const playableUrl = 'https://stanatny.github.io/skyroads/';
+  const releaseUrl = 'https://github.com/stanatny/skyroads/releases/tag/v1.1.0';
+
+  assert.equal(english.split('\n', 1)[0], '[中文](README.zh-CN.md)');
+  assert.equal(chinese.split('\n', 1)[0], '[English](README.md)');
+  for (const source of [english, chinese]) {
+    assert.equal(source.split(playableUrl).length - 1, 1, 'each README must expose one canonical playable URL');
+    assert.equal(source.split(releaseUrl).length - 1, 1, 'each README must expose one exact V1.1 release URL');
+  }
+
+  assert.match(english, /^Current version: \[v1\.1\.0\]\(https:\/\/github\.com\/stanatny\/skyroads\/releases\/tag\/v1\.1\.0\)$/m);
+  assert.match(chinese, /^当前版本：\[v1\.1\.0\]\(https:\/\/github\.com\/stanatny\/skyroads\/releases\/tag\/v1\.1\.0\)$/m);
+  assert.match(english, /^\| Pause \/ resume \| `P` \| Keyboard only \|$/m);
+  assert.match(chinese, /^\| 暂停 \/ 继续 \| `P` \| 仅键盘 \|$/m);
+  assert.match(english, /^\| Start \/ fly again \| `Space` or `Enter` \|/m);
+  assert.match(chinese, /^\| 开始 \/ 再来一局 \| `Space` 或 `Enter` \|/m);
+});
+
+test('the reusable bilingual V1.1 release notes describe this release without online-data claims', () => {
+  const releasePath = path.join(root, 'docs/releases/v1.1.0.md');
+  assert.equal(fs.existsSync(releasePath), true, 'the copy-ready V1.1 release notes must exist');
+  const release = fs.readFileSync(releasePath, 'utf8');
+
+  assert.equal((release.match(/^# 星云巡航 V1\.1 \/ Nebula Cruise V1\.1$/gm) || []).length, 1);
+  assert.equal((release.match(/^## 中文$/gm) || []).length, 1);
+  assert.equal((release.match(/^## English$/gm) || []).length, 1);
+  assert.ok(release.indexOf('## 中文') < release.indexOf('## English'));
+  assert.match(release, /https:\/\/stanatny\.github\.io\/skyroads\//);
+  assert.match(release, /Nebula-Cruise-macOS-v1\.1\.0\.zip/);
+  assert.match(release, /144 BPM/);
+  assert.match(release, /Orbital Defense/);
+  assert.match(release, /轨道防线/);
+  for (const height of ['600', '1,250', '2,000']) assert.match(release, new RegExp(height));
+  for (const key of ['`Space`', '`Enter`', '`P`', 'Top 15', '.agent/skills/ship-browser-games']) {
+    assert.ok(release.includes(key), `release notes must retain ${key}`);
+  }
+  assert.match(release, /do not sync across devices/);
+  assert.match(release, /不会跨设备同步/);
+  assert.doesNotMatch(release, /online leaderboard|cloud sync|云端排行榜|云同步/i);
+  assert.doesNotMatch(release, /V1\.1 is now live|archive is now available|V1\.1 现已上线|安装包现已可下载/i);
+});
+
 test('the hidden WebKit smoke keeps its storage ephemeral without changing normal persistence', () => {
   const source = fs.readFileSync(path.join(root, 'app/main.swift'), 'utf8');
   const normalStart = source.indexOf('final class AppDelegate');

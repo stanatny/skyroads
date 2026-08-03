@@ -6,12 +6,16 @@ Nebula Cruise is a fast, polished sci-fi lane runner for the browser. Pilot a de
 
 Play online: https://stanatny.github.io/skyroads/
 
+Current version: [v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1.0)
+
 ## Highlights
 
-- Responsive held movement: hold left or right to cross multiple lanes smoothly, with immediate reversal when you change direction.
-- A bilingual interstellar command-center interface, detailed ship art, self-hosted UI assets, and the original adaptive three-stem **Nebula Cruise** soundtrack.
-- An endless, progressively faster course with guaranteed reachable routes, fuel pressure, gaps, bridges, barriers, enemies, BOOST, super form, magnet, and slowdown power-ups.
-- A reliable local Top 15 stored in this browser. Your first pilot name is chosen from a safe original sci-fi call-sign list, remembered for later missions, and can be renamed whenever you want.
+- Responsive held movement crosses multiple lanes smoothly and reverses immediately; `Space` / `Enter` starts or restarts a mission, and `P` pauses or resumes play.
+- A bilingual interstellar command center follows Chinese system languages and otherwise starts in English, with a remembered manual language switch and a compact `V1.1` identity.
+- The original 144 BPM, three-stem adaptive **Nebula Cruise** soundtrack keeps its cinematic electronic palette while adding a faster, joyful, slightly tense pulse.
+- Perspective-aware **Orbital Defense** world art gives low, medium, and high structures distinct silhouettes, connected defense corridors, and larger drones that preserve their warning and movement-direction cues.
+- A reliable local Top 15 stays in this browser. The first pilot name comes from a safe original sci-fi call-sign list, is reused automatically, and can be changed whenever you want.
+- An endless, progressively faster course keeps ordinary bypass lanes around the new advanced defenses while retaining fuel pressure, gaps, bridges, enemies, BOOST, super form, magnet, and slowdown power-ups.
 
 ## Controls
 
@@ -24,7 +28,7 @@ Play online: https://stanatny.github.io/skyroads/
 | Fire | Tap `J` | Keyboard only |
 | Charged missile | Hold `J` for 3 seconds, then release | Keyboard only |
 | Start / fly again | `Space` or `Enter` | Use the on-screen button |
-| Pause / resume | `P` | — |
+| Pause / resume | `P` | Keyboard only |
 | Return to command center (mission over) | — | Use the Command Center button |
 | Toggle all audio | `M` | Use the separate music and SFX buttons |
 
@@ -70,6 +74,8 @@ npm test
 npm run check
 ```
 
+The versioned repository Skill at [`.agent/skills/ship-browser-games`](.agent/skills/ship-browser-games/SKILL.md) captures the design, asset, testing, browser-proof, and release practices used for this game so future iterations can reuse them.
+
 ## macOS app
 
 On macOS 12 or later with Xcode command-line tools installed, build the universal Apple Silicon + Intel wrapper with:
@@ -78,7 +84,7 @@ On macOS 12 or later with Xcode command-line tools installed, build the universa
 bash app/build.sh
 ```
 
-The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. Published builds are available from [GitHub Releases](https://github.com/stanatny/skyroads/releases).
+The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. After merge and release verification, the V1.1 workflow targets the universal release asset `Nebula-Cruise-macOS-v1.1.0.zip`; releases are listed on [GitHub Releases](https://github.com/stanatny/skyroads/releases).
 
 ## Third-party assets
 
