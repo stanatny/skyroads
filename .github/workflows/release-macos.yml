@@ -30,14 +30,14 @@ jobs:
           bash tests/app-signature-smoke.sh
           bash tests/app-resources-smoke.sh
           bash tests/app-wkwebview-smoke.sh
-          plutil -lint "星云巡航 Nebula Cruise.app/Contents/Info.plist"
+          plutil -lint "Nebula Cruise.app/Contents/Info.plist"
 
       - name: Package app
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           archive="Nebula-Cruise-macOS-${RELEASE_TAG}.zip"
-          ditto -c -k --sequesterRsrc --keepParent "星云巡航 Nebula Cruise.app" "$archive"
+          ditto -c -k --sequesterRsrc --keepParent "Nebula Cruise.app" "$archive"
           shasum -a 256 "$archive"
 
       - name: Upload release asset

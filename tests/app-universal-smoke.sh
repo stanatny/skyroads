@@ -5,4 +5,4 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 bash app/build.sh
-lipo "星云巡航 Nebula Cruise.app/Contents/MacOS/SkyRoads" -verify_arch arm64 x86_64
+lipo "Nebula Cruise.app/Contents/MacOS/SkyRoads" -verify_arch arm64 x86_64

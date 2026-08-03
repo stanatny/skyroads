@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APP="星云巡航 Nebula Cruise.app"
+APP="Nebula Cruise.app"
 bash app/build.sh
 
 required=(

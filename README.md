@@ -66,7 +66,7 @@ On macOS 12 or later with Xcode command-line tools installed, build the universa
 bash app/build.sh
 ```
 
-The exact output is `星云巡航 Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. Published builds are available from [GitHub Releases](https://github.com/stanatny/skyroads/releases).
+The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. Published builds are available from [GitHub Releases](https://github.com/stanatny/skyroads/releases).
 
 ## Third-party assets
 

@@ -843,11 +843,11 @@ bash tests/app-universal-smoke.sh
 bash tests/app-signature-smoke.sh
 bash tests/app-resources-smoke.sh
 bash tests/app-wkwebview-smoke.sh
-"星云巡航 Nebula Cruise.app/Contents/MacOS/SkyRoads" --smoke-test \
+"Nebula Cruise.app/Contents/MacOS/SkyRoads" --smoke-test \
   | jq -e '.ok == true and .diagnostics.initialized == true and .diagnostics.version.semver == "1.1.0" and .diagnostics.audio.status == "ready"'
-plutil -lint "星云巡航 Nebula Cruise.app/Contents/Info.plist"
-test "$(plutil -extract CFBundleShortVersionString raw "星云巡航 Nebula Cruise.app/Contents/Info.plist")" = "1.1.0"
-test "$(plutil -extract CFBundleVersion raw "星云巡航 Nebula Cruise.app/Contents/Info.plist")" = "2"
+plutil -lint "Nebula Cruise.app/Contents/Info.plist"
+test "$(plutil -extract CFBundleShortVersionString raw "Nebula Cruise.app/Contents/Info.plist")" = "1.1.0"
+test "$(plutil -extract CFBundleVersion raw "Nebula Cruise.app/Contents/Info.plist")" = "2"
 ```
 
 Expected: all commands exit zero and the universal signed app reports V1.1 diagnostics.

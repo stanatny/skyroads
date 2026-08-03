@@ -1,11 +1,11 @@
 #!/bin/bash
 # 星云巡航 Nebula Cruise — macOS App 构建脚本
 # 用法: bash app/build.sh
-# 产物: 工作区根目录的 星云巡航 Nebula Cruise.app（WKWebView 原生壳）
+# 产物: 工作区根目录的 Nebula Cruise.app（WKWebView 原生壳）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/星云巡航 Nebula Cruise.app"
+APP="$ROOT/Nebula Cruise.app"
 BUNDLE_MACOS="$APP/Contents/MacOS"
 BUNDLE_RES="$APP/Contents/Resources"
 DEPLOYMENT_TARGET=12.0

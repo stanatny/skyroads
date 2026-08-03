@@ -66,7 +66,7 @@ npm run check
 bash app/build.sh
 ```
 
-准确的输出文件名是仓库根目录下的 `星云巡航 Nebula Cruise.app`。应用会在本地 WebKit 中运行完整游戏和全部内置素材。公开构建可从 [GitHub Releases](https://github.com/stanatny/skyroads/releases) 下载。
+准确的输出文件名是仓库根目录下的 `Nebula Cruise.app`。应用会在本地 WebKit 中运行完整游戏和全部内置素材。公开构建可从 [GitHub Releases](https://github.com/stanatny/skyroads/releases) 下载。
 
 ## 第三方素材
 

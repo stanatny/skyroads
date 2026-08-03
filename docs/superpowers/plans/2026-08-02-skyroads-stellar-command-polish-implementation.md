@@ -1104,7 +1104,7 @@ git commit -m "feat: add adaptive nebula cruise soundtrack"
 
 **Interfaces:**
 - Consumes: complete static resource graph and `Skyroads.diagnostics.ready`.
-- Produces: `星云巡航 Nebula Cruise.app`, hidden WebKit smoke mode, bilingual repository landing pages, and release CI.
+- Produces: `Nebula Cruise.app`, hidden WebKit smoke mode, bilingual repository landing pages, and release CI.
 
 - [x] **Step 1: Write the failing bundle resource smoke**
 
@@ -1136,7 +1136,7 @@ Run it and verify RED because the current build copies only index/src/styles and
 Set `CFBundleDisplayName` and `CFBundleName` to `星云巡航 Nebula Cruise`; keep bundle ID and executable unchanged. Rename the build output variable to:
 
 ```bash
-APP="$ROOT/星云巡航 Nebula Cruise.app"
+APP="$ROOT/Nebula Cruise.app"
 ```
 
 Copy `index.html`, `src/`, `styles/`, `assets/`, `THIRD_PARTY_NOTICES.md`, and `licenses/`. Update window title and the bilingual missing-file page in `main.swift`. Update both existing smoke scripts and workflow paths.
@@ -1149,7 +1149,7 @@ When launched with `--smoke-test`, `main.swift` creates a hidden WKWebView, load
 
 ```bash
 bash app/build.sh
-"星云巡航 Nebula Cruise.app/Contents/MacOS/SkyRoads" --smoke-test
+"Nebula Cruise.app/Contents/MacOS/SkyRoads" --smoke-test
 ```
 
 Run before implementation to see RED, then after implementation to see GREEN.
@@ -1171,10 +1171,10 @@ bash tests/app-universal-smoke.sh
 bash tests/app-signature-smoke.sh
 bash tests/app-resources-smoke.sh
 bash tests/app-wkwebview-smoke.sh
-plutil -lint "星云巡航 Nebula Cruise.app/Contents/Info.plist"
+plutil -lint "Nebula Cruise.app/Contents/Info.plist"
 ```
 
-Package `星云巡航 Nebula Cruise.app` into `Nebula-Cruise-macOS-${RELEASE_TAG}.zip`.
+Package `Nebula Cruise.app` into `Nebula-Cruise-macOS-${RELEASE_TAG}.zip`.
 
 - [x] **Step 6: Commit**
 

@@ -9,7 +9,7 @@ OUTPUT="$(mktemp)"
 trap 'rm -f "$OUTPUT"' EXIT
 
 set +e
-"星云巡航 Nebula Cruise.app/Contents/MacOS/SkyRoads" --smoke-test >"$OUTPUT"
+"Nebula Cruise.app/Contents/MacOS/SkyRoads" --smoke-test >"$OUTPUT"
 APP_STATUS=$?
 set -e
 

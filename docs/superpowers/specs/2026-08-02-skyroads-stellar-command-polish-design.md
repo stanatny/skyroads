@@ -112,7 +112,7 @@ Assets are loaded once during the title/loading state. Each optional visual or a
 
 The macOS build script must copy `index.html` and the complete `assets/` directory into the application resources. GitHub Pages continues to serve the same repository-relative paths.
 
-The macOS wrapper is renamed consistently to **星云巡航 Nebula Cruise** in the window title, bundle display metadata, build output, missing-file error page, application icon, and documentation. Its stable bundle identifier remains unchanged so the operating system and WebKit can continue to associate local app data with the same application.
+The macOS wrapper uses **星云巡航 Nebula Cruise** in the window title, bundle display metadata, missing-file error page, application icon, and documentation. Its filesystem build output uses the English-only directory name `Nebula Cruise.app`. Its stable bundle identifier remains unchanged so the operating system and WebKit can continue to associate local app data with the same application.
 
 ## 5. Responsive movement design
 
