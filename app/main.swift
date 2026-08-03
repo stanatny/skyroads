@@ -105,18 +105,19 @@ final class SmokeDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate
           const faces = await document.fonts.load('500 16px Orbitron');
           orbitronLoaded = faces.length > 0 && document.fonts.check('500 16px Orbitron');
         }
-        const scriptsReady = ['i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'audio', 'game']
+        const scriptsReady = ['version', 'i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'audio', 'game']
           .every((name) => diagnostics.scripts && diagnostics.scripts[name] === true);
         const audioReady = diagnostics.audio && diagnostics.audio.status === 'ready'
           && diagnostics.audio.decoded === true && ['ogg', 'mp3'].includes(diagnostics.audio.format);
         const shipReady = diagnostics.visualAssets && diagnostics.visualAssets.shipFramesReady === true;
         const world = diagnostics.visualAssets && diagnostics.visualAssets.world;
         const worldAtlases = ['droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
-          'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge'];
+          'barrierCrate', 'structurePylon', 'structureBastion', 'structureReactor', 'structureTower',
+          'corridorLow', 'corridorMedium', 'gapEdge'];
         const worldReady = world && Array.isArray(world.loaded) && world.loaded.length === worldAtlases.length
           && worldAtlases.every((atlas) => world.loaded.includes(atlas))
           && Array.isArray(world.fallback) && world.fallback.length === 0
-          && ['drone', 'turret', 'wallLow', 'wallHigh', 'gap']
+          && ['drone', 'turret', 'wallLow', 'wallMedium', 'wallHigh', 'corridorLow', 'corridorMedium', 'gap']
             .every((category) => world.categoryReady && world.categoryReady[category] === true);
         return JSON.stringify({
           ok: diagnostics.initialized === true && scriptsReady && cssLoaded && shipReady && worldReady

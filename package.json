@@ -1,5 +1,6 @@
 {
   "name": "nebula-cruise",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.js",

@@ -4552,6 +4552,7 @@ function installReducedMotionPreference() {
 
 function installDiagnostics() {
   const presentation = globalThis.Skyroads.presentation;
+  const productVersion = globalThis.Skyroads.version || null;
   const safeSnapshot = () => {
     const leaderboardSnapshot = currentLeaderboardSnapshot();
     let overlays = null;
@@ -4559,6 +4560,7 @@ function installDiagnostics() {
     return Object.freeze({
       initialized: Boolean(STATE.canvas && STATE.ctx),
       scripts: Object.freeze({
+        version: Boolean(productVersion),
         i18n: Boolean(globalThis.Skyroads.i18n),
         leaderboard: Boolean(globalThis.Skyroads.leaderboard),
         presentation: Boolean(presentation),
@@ -4567,6 +4569,11 @@ function installDiagnostics() {
         audio: Boolean(globalThis.Skyroads.audio),
         game: true,
       }),
+      version: productVersion ? Object.freeze({
+        semver: productVersion.semver,
+        display: productVersion.display,
+        tag: productVersion.tag,
+      }) : null,
       locale: STATE.translator ? STATE.translator.locale : null,
       mode: STATE.mode,
       canvas: Object.freeze({ width: STATE.width, height: STATE.height, dpr: STATE.dpr }),

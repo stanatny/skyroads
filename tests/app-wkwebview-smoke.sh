@@ -26,19 +26,21 @@ if (!diagnostic || Array.isArray(diagnostic) || typeof diagnostic !== 'object') 
 }
 if (appStatus !== 0 || diagnostic.ok !== true) throw new Error(`WKWebView smoke failed (exit ${appStatus}): ${text}`);
 if (diagnostic.diagnostics?.initialized !== true) throw new Error('game did not initialize');
-for (const script of ['i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'audio', 'game']) {
+for (const script of ['version', 'i18n', 'leaderboard', 'presentation', 'worldArt', 'input', 'audio', 'game']) {
   if (diagnostic.diagnostics?.scripts?.[script] !== true) throw new Error(`classic script missing: ${script}`);
 }
+if (diagnostic.diagnostics?.version?.semver !== '1.1.0') throw new Error('V1.1 product diagnostics unavailable');
 if (diagnostic.diagnostics?.visualAssets?.shipFramesReady !== true) throw new Error('ship frames did not load');
 const world = diagnostic.diagnostics?.visualAssets?.world;
 if (!world) throw new Error('world atlas diagnostics unavailable');
 const expectedWorldAtlases = ['droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
-  'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge'];
+  'barrierCrate', 'structurePylon', 'structureBastion', 'structureReactor', 'structureTower',
+  'corridorLow', 'corridorMedium', 'gapEdge'];
 if (world.loaded?.length !== expectedWorldAtlases.length || !expectedWorldAtlases.every((atlas) => world.loaded.includes(atlas))) {
   throw new Error('not every preferred world atlas loaded');
 }
 if (world.fallback?.length !== 0) throw new Error('world atlas fallback was unexpectedly required');
-for (const category of ['drone', 'turret', 'wallLow', 'wallHigh', 'gap']) {
+for (const category of ['drone', 'turret', 'wallLow', 'wallMedium', 'wallHigh', 'corridorLow', 'corridorMedium', 'gap']) {
   if (world.categoryReady?.[category] !== true) throw new Error(`world atlas category unavailable: ${category}`);
 }
 if (diagnostic.diagnostics?.audio?.status !== 'ready' || diagnostic.diagnostics?.audio?.decoded !== true) {

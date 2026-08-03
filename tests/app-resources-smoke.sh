@@ -9,6 +9,7 @@ bash app/build.sh
 
 required=(
   "index.html"
+  "src/version.js"
   "src/i18n.js"
   "src/input.js"
   "src/leaderboard.js"
@@ -47,6 +48,8 @@ test "$(plutil -extract CFBundleDisplayName raw "$APP/Contents/Info.plist")" = "
 test "$(plutil -extract CFBundleName raw "$APP/Contents/Info.plist")" = "星云巡航 Nebula Cruise"
 test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = "com.skyroads.jumpcar"
 test "$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist")" = "SkyRoads"
+test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "1.1.0"
+test "$(plutil -extract CFBundleVersion raw "$APP/Contents/Info.plist")" = "2"
 cmp index.html "$APP/Contents/Resources/index.html"
 diff -qr src "$APP/Contents/Resources/src"
 diff -qr styles "$APP/Contents/Resources/styles"

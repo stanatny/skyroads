@@ -4,9 +4,44 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
+const packageJson = require('../package.json');
+
+function plistString(source, key) {
+  const match = source.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`));
+  assert.ok(match, `${key} must exist`);
+  return match[1];
+}
+
+test('V1.1 metadata agrees across the static game and macOS bundle', () => {
+  const version = require('../src/version.js');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const plist = fs.readFileSync(path.join(root, 'app/Info.plist'), 'utf8');
+
+  assert.equal(packageJson.version, '1.1.0');
+  assert.deepEqual(version, {
+    semver: '1.1.0', display: 'V1.1', accessible: '1.1', tag: 'v1.1.0',
+  });
+  assert.equal(Object.isFrozen(version), true);
+  assert.match(html, /<meta name="application-version" content="1\.1\.0">/);
+  assert.equal(plistString(plist, 'CFBundleShortVersionString'), packageJson.version);
+  assert.equal(plistString(plist, 'CFBundleVersion'), '2');
+});
+
+test('release tag validation accepts only v plus package semver', () => {
+  const script = path.join(root, 'scripts/check-release-tag.js');
+  const { expectedReleaseTag, validateReleaseTag } = require(script);
+
+  assert.equal(expectedReleaseTag('1.1.0'), 'v1.1.0');
+  assert.equal(validateReleaseTag('v1.1.0', '1.1.0'), true);
+  assert.equal(validateReleaseTag('V1.1', '1.1.0'), false);
+  assert.equal(validateReleaseTag('v1.1', '1.1.0'), false);
+  assert.equal(spawnSync(process.execPath, [script, 'v1.1.0']).status, 0);
+  assert.notEqual(spawnSync(process.execPath, [script, 'V1.1']).status, 0);
+  assert.notEqual(spawnSync(process.execPath, [script, 'v1.1']).status, 0);
+});
 
 test('the hidden WebKit smoke keeps its storage ephemeral without changing normal persistence', () => {
   const source = fs.readFileSync(path.join(root, 'app/main.swift'), 'utf8');

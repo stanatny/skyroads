@@ -36,6 +36,11 @@ test('the static shell references loadable classic CSS and JavaScript', () => {
   }
 });
 
+test('the immutable version contract is the first deferred classic script', () => {
+  const scripts = [...html.matchAll(/<script defer src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+  assert.equal(scripts[0], './src/version.js');
+});
+
 test('the viewport keeps native browser zoom available', () => {
   const viewport = html.match(/<meta\s+name="viewport"\s+content="([^"]+)"/i);
   assert.ok(viewport, 'the page must declare a viewport');
@@ -140,12 +145,17 @@ test('startup exposes a locked adaptive-audio diagnostic without creating AudioC
     fetch: async () => { throw new Error('must not fetch before a gesture'); },
   };
   vm.createContext(sandbox);
-  for (const file of ['i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
+  for (const file of ['version.js', 'i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
   }
 
   const diagnostic = sandbox.Skyroads.diagnostics.snapshot();
   assert.equal(contextConstructions, 0);
+  assert.equal(diagnostic.scripts.version, true);
+  assert.equal(diagnostic.version.semver, '1.1.0');
+  assert.equal(diagnostic.version.display, 'V1.1');
+  assert.equal(diagnostic.version.tag, 'v1.1.0');
+  assert.equal(Object.isFrozen(diagnostic.version), true);
   assert.equal(diagnostic.scripts.audio, true);
   assert.equal(diagnostic.audio.status, 'locked');
   assert.equal(diagnostic.audio.decoded, false);
@@ -197,7 +207,7 @@ function makeAudioDiagnosticSandbox({ fetchFails = false } = {}) {
 async function runPostGestureDiagnostics(options) {
   const sandbox = makeAudioDiagnosticSandbox(options);
   vm.createContext(sandbox);
-  for (const file of ['i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
+  for (const file of ['version.js', 'i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
   }
   return vm.runInContext('startGame(); Skyroads.diagnostics.ready', sandbox);
