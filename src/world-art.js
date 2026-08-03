@@ -100,45 +100,55 @@
     });
   }
 
+  function hasOwn(array, index) {
+    return Object.prototype.hasOwnProperty.call(array, index);
+  }
+
+  function isFiniteNumber(value) {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
   function sameNumbers(actual, expected) {
-    return Array.isArray(actual)
-      && actual.length === expected.length
-      && actual.every((value, index) => Number(value) === expected[index]);
+    if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+    for (let index = 0; index < expected.length; index += 1) {
+      if (!hasOwn(actual, index) || actual[index] !== expected[index]) return false;
+    }
+    return true;
   }
 
   function finiteBounds(bounds) {
     return bounds
       && typeof bounds === 'object'
-      && ['minX', 'maxX', 'minY', 'maxY'].every((key) => Number.isFinite(Number(bounds[key])))
-      && Number(bounds.maxX) > Number(bounds.minX)
-      && Number(bounds.maxY) > Number(bounds.minY);
+      && ['minX', 'maxX', 'minY', 'maxY'].every((key) => isFiniteNumber(bounds[key]))
+      && bounds.maxX > bounds.minX
+      && bounds.maxY > bounds.minY;
   }
 
   function validateAtlasMetadata(metadata) {
     try {
       if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
       if (metadata.layout !== 'upright'
-        || Number(metadata.atlasWidth) !== 2240
-        || Number(metadata.atlasHeight) !== 960
+        || metadata.atlasWidth !== 2240
+        || metadata.atlasHeight !== 960
         || !sameNumbers(metadata.yawDegrees, YAW_DEGREES)
         || !sameNumbers(metadata.pitchDegrees, PITCH_DEGREES)
         || !finiteBounds(metadata.worldBounds)
-        || !Number.isFinite(Number(metadata.pixelsPerWorldUnit))
-        || Number(metadata.pixelsPerWorldUnit) <= 0
+        || !isFiniteNumber(metadata.pixelsPerWorldUnit)
+        || metadata.pixelsPerWorldUnit <= 0
         || !Array.isArray(metadata.frames)
         || metadata.frames.length !== YAW_DEGREES.length * PITCH_DEGREES.length) return false;
 
-      const atlasWidth = Number(metadata.atlasWidth);
-      const atlasHeight = Number(metadata.atlasHeight);
-      return metadata.frames.every((frame) => {
+      for (let index = 0; index < metadata.frames.length; index += 1) {
+        if (!hasOwn(metadata.frames, index)) return false;
+        const frame = metadata.frames[index];
         if (!frame || typeof frame !== 'object' || !frame.source || !frame.origin) return false;
         const { sx, sy, sw, sh } = frame.source;
-        const sourceValues = [sx, sy, sw, sh].map(Number);
-        if (!sourceValues.every(Number.isFinite)) return false;
-        if (Number(sw) <= 0 || Number(sh) <= 0 || Number(sx) < 0 || Number(sy) < 0) return false;
-        if (Number(sx) + Number(sw) > atlasWidth || Number(sy) + Number(sh) > atlasHeight) return false;
-        return Number.isFinite(Number(frame.origin.x)) && Number.isFinite(Number(frame.origin.y));
-      });
+        if (![sx, sy, sw, sh].every(Number.isInteger)) return false;
+        if (sw <= 0 || sh <= 0 || sx < 0 || sy < 0) return false;
+        if (sx + sw > metadata.atlasWidth || sy + sh > metadata.atlasHeight) return false;
+        if (!isFiniteNumber(frame.origin.x) || !isFiniteNumber(frame.origin.y)) return false;
+      }
+      return true;
     } catch (_error) {
       return false;
     }
@@ -224,6 +234,7 @@
       const yawIndex = index % YAW_DEGREES.length;
       const pitchIndex = Math.floor(index / YAW_DEGREES.length);
       const frame = atlasFrame(metadata, yawIndex, pitchIndex);
+      if (!frame) return null;
       const weight = rawWeight / totalWeight;
       const destination = Object.freeze({
         x: projectedX - (frame.origin.x - frame.source.sx) / sourceScale * runtimeScaleX,

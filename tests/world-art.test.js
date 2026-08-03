@@ -237,6 +237,62 @@ test('origin anchors ignore atlas placement padding and bounds union every froze
   }
 });
 
+test('sparse frame and angle arrays fail validation and planning without throwing', () => {
+  const valid = syntheticUpright();
+  const sparseSelectedFrame = cloneMetadata(valid);
+  delete sparseSelectedFrame.frames[3];
+  const sparseUnselectedFrame = cloneMetadata(valid);
+  delete sparseUnselectedFrame.frames[20];
+  const sparseYaw = cloneMetadata(valid);
+  delete sparseYaw.yawDegrees[0];
+  const sparsePitch = cloneMetadata(valid);
+  delete sparsePitch.pitchDegrees[0];
+
+  for (const [label, metadata] of [
+    ['selected frame', sparseSelectedFrame],
+    ['unselected frame', sparseUnselectedFrame],
+    ['yaw sample', sparseYaw],
+    ['pitch sample', sparsePitch],
+  ]) {
+    assert.equal(validateAtlasMetadata(metadata), false, `${label} hole must invalidate metadata`);
+    assert.doesNotThrow(() => buildSpriteDrawPlan(planOptions(metadata)), label);
+    assert.equal(buildSpriteDrawPlan(planOptions(metadata)), null, label);
+  }
+});
+
+test('coercible and non-integral metadata numbers fail validation and planning without throwing', () => {
+  const invalidCases = [];
+  function invalid(label, mutate) {
+    const metadata = cloneMetadata(syntheticUpright());
+    mutate(metadata);
+    invalidCases.push([label, metadata]);
+  }
+
+  invalid('string atlas width', (metadata) => { metadata.atlasWidth = '2240'; });
+  invalid('string atlas height', (metadata) => { metadata.atlasHeight = '960'; });
+  invalid('string yaw sample', (metadata) => { metadata.yawDegrees[0] = '-80'; });
+  invalid('string pitch sample', (metadata) => { metadata.pitchDegrees[0] = '20'; });
+  invalid('string world bound', (metadata) => { metadata.worldBounds.minX = '-324'; });
+  invalid('null world bound', (metadata) => { metadata.worldBounds.minY = null; });
+  invalid('string source scale', (metadata) => { metadata.pixelsPerWorldUnit = '0.1'; });
+  invalid('string source coordinate', (metadata) => { metadata.frames[0].source.sx = '0'; });
+  invalid('null source coordinate', (metadata) => { metadata.frames[0].source.sy = null; });
+  invalid('fractional source dimension', (metadata) => { metadata.frames[0].source.sw = 319.5; });
+  invalid('string source dimension', (metadata) => { metadata.frames[0].source.sh = '320'; });
+  invalid('string origin coordinate', (metadata) => { metadata.frames[0].origin.x = '140'; });
+  invalid('null origin coordinate', (metadata) => { metadata.frames[0].origin.y = null; });
+  invalid('NaN atlas dimension', (metadata) => { metadata.atlasWidth = NaN; });
+  invalid('infinite world bound', (metadata) => { metadata.worldBounds.maxY = Infinity; });
+  invalid('symbol source coordinate', (metadata) => { metadata.frames[0].source.sx = Symbol('bad'); });
+
+  for (const [label, metadata] of invalidCases) {
+    assert.doesNotThrow(() => validateAtlasMetadata(metadata), label);
+    assert.equal(validateAtlasMetadata(metadata), false, label);
+    assert.doesNotThrow(() => buildSpriteDrawPlan(planOptions(metadata)), label);
+    assert.equal(buildSpriteDrawPlan(planOptions(metadata)), null, label);
+  }
+});
+
 test('malformed upright metadata fails validation and planning without throwing', () => {
   const valid = syntheticUpright();
   const malformed = [];
