@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03
 
-**Status:** Approved in conversation; awaiting written-spec review
+**Status:** Approved
 
 **Delivery target:** Update the open `feat/stellar-command-polish` pull request against `main`
 
