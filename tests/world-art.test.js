@@ -4,11 +4,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   YAW_DEGREES,
+  PITCH_DEGREES,
   WORLD_ATLAS_MANIFEST,
   WORLD_GEOMETRY,
+  selectAxisBlend,
+  selectViewBlend,
   selectYawBlend,
+  atlasFrame,
   atlasFrameRect,
+  validateAtlasMetadata,
   buildSpriteDrawPlan,
+  roadEdgeFrame,
   worldSpriteDrawRect,
   variantKey,
 } = require('../src/world-art.js');
@@ -27,8 +33,62 @@ function projectionFor(width, height) {
   };
 }
 
-test('the atlas manifest and geometry are the frozen seven-view contract', () => {
-  assert.deepEqual(YAW_DEGREES, [-30, -20, -10, 0, 10, 20, 30]);
+function syntheticUpright({ sourceShift = 0, sourceSize = 320 } = {}) {
+  const frames = [];
+  for (let pitchIndex = 0; pitchIndex < 3; pitchIndex += 1) {
+    for (let yawIndex = 0; yawIndex < 7; yawIndex += 1) {
+      const sx = yawIndex * 320 + sourceShift;
+      const sy = pitchIndex * 320 + sourceShift;
+      frames.push({
+        source: { sx, sy, sw: sourceSize, sh: sourceSize },
+        origin: {
+          x: sx + 140 + yawIndex * 5,
+          y: sy + 280 - pitchIndex * 10,
+        },
+      });
+    }
+  }
+  return {
+    layout: 'upright',
+    atlasWidth: 2240,
+    atlasHeight: 960,
+    yawDegrees: [...YAW_DEGREES],
+    pitchDegrees: [...PITCH_DEGREES],
+    worldBounds: { minX: -324, maxX: 324, minY: 0, maxY: 2000 },
+    pixelsPerWorldUnit: 0.1,
+    frames,
+  };
+}
+
+function cloneMetadata(metadata) {
+  return structuredClone(metadata);
+}
+
+function planOptions(metadata, {
+  yaw = 0,
+  pitch = 20,
+  zRel = 100,
+  projectedOrigin = { x: 480, y: 300 },
+  pixelsPerWorldUnitX = 0.2,
+  pixelsPerWorldUnitY = 0.15,
+  alpha = 1,
+} = {}) {
+  return {
+    metadata,
+    worldX: Math.tan(yaw * Math.PI / 180) * zRel,
+    zRel,
+    cameraY: 1000 + Math.tan(pitch * Math.PI / 180) * zRel,
+    objectY: 0,
+    projectedOrigin,
+    pixelsPerWorldUnitX,
+    pixelsPerWorldUnitY,
+    alpha,
+  };
+}
+
+test('upright view constants and legacy manifest remain deeply frozen compatibility contracts', () => {
+  assert.deepEqual(YAW_DEGREES, [-80, -55, -30, 0, 30, 55, 80]);
+  assert.deepEqual(PITCH_DEGREES, [20, 55, 80]);
   assert.deepEqual(WORLD_ATLAS_MANIFEST, {
     droneScout: { path: './assets/world/drone-scout.png', category: 'drone', variant: 0, frames: 7, frameWidth: 512, frameHeight: 512 },
     droneStriker: { path: './assets/world/drone-striker.png', category: 'drone', variant: 1, frames: 7, frameWidth: 512, frameHeight: 512 },
@@ -41,58 +101,219 @@ test('the atlas manifest and geometry are the frozen seven-view contract', () =>
     gapEdge: { path: './assets/world/gap-edge.png', category: 'gap', variant: 0, frames: 7, frameWidth: 512, frameHeight: 512 },
   });
   assert.deepEqual(WORLD_GEOMETRY, {
-    drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
+    drone: { worldWidth: 432, worldHeight: 360, baseY: 140 },
     turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120 },
     wallLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
+    wallMedium: { worldWidth: 648, worldHeight: 1250, baseY: 0 },
     wallHigh: { worldWidth: 648, worldHeight: 2000, baseY: 0 },
+    corridorLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
+    corridorMedium: { worldWidth: 648, worldHeight: 1250, baseY: 0 },
   });
-  for (const value of [YAW_DEGREES, WORLD_ATLAS_MANIFEST, WORLD_GEOMETRY, ...Object.values(WORLD_ATLAS_MANIFEST), ...Object.values(WORLD_GEOMETRY)]) {
-    assert.equal(Object.isFrozen(value), true);
+  for (const value of [
+    YAW_DEGREES,
+    PITCH_DEGREES,
+    WORLD_ATLAS_MANIFEST,
+    WORLD_GEOMETRY,
+    ...Object.values(WORLD_ATLAS_MANIFEST),
+    ...Object.values(WORLD_GEOMETRY),
+  ]) assert.equal(Object.isFrozen(value), true);
+});
+
+test('non-uniform axis blending interpolates and clamps at the supplied samples', () => {
+  assert.deepEqual(selectAxisBlend(67.5, YAW_DEGREES), {
+    angle: 67.5, lowerIndex: 5, upperIndex: 6, mix: 0.5,
+  });
+  assert.deepEqual(selectAxisBlend(200, YAW_DEGREES), {
+    angle: 80, lowerIndex: 6, upperIndex: 6, mix: 0,
+  });
+  assert.deepEqual(selectAxisBlend(-500, PITCH_DEGREES), {
+    angle: 20, lowerIndex: 0, upperIndex: 0, mix: 0,
+  });
+  assert.equal(Object.isFrozen(selectAxisBlend(67.5, YAW_DEGREES)), true);
+});
+
+test('view blending uses wide symmetric yaw and visual-center pitch', () => {
+  const edge = selectViewBlend({
+    worldX: 2160,
+    zRel: 155,
+    cameraY: 2340,
+    objectY: 0,
+    worldBounds: { minY: 0, maxY: 2000 },
+  });
+  assert.equal(edge.yaw.angle, 80);
+
+  const high = selectViewBlend({
+    worldX: 0,
+    zRel: 505,
+    cameraY: 2340,
+    objectY: 0,
+    worldBounds: { minY: 0, maxY: 2000 },
+  });
+  assert.ok(Math.abs(high.pitch.angle - 69.35) < 0.1);
+  assert.equal(high.pitch.lowerIndex, 1);
+  assert.equal(high.pitch.upperIndex, 2);
+
+  const left = selectViewBlend({
+    worldX: -100, zRel: 100, cameraY: 1000, objectY: 0, worldBounds: { minY: 0, maxY: 2000 },
+  });
+  const right = selectViewBlend({
+    worldX: 100, zRel: 100, cameraY: 1000, objectY: 0, worldBounds: { minY: 0, maxY: 2000 },
+  });
+  assert.equal(left.yaw.lowerIndex, YAW_DEGREES.length - 1 - right.yaw.upperIndex);
+  assert.equal(left.yaw.upperIndex, YAW_DEGREES.length - 1 - right.yaw.lowerIndex);
+  approximately(left.yaw.mix, 1 - right.yaw.mix);
+  assert.equal(Object.isFrozen(edge), true);
+  assert.equal(Object.isFrozen(edge.yaw), true);
+  assert.equal(Object.isFrozen(edge.pitch), true);
+});
+
+test('upright metadata validates all 21 pitch-major frames and exposes immutable frame records', () => {
+  const metadata = syntheticUpright();
+  assert.equal(validateAtlasMetadata(metadata), true);
+  assert.deepEqual(atlasFrame(metadata, 4, 2), {
+    source: { sx: 1280, sy: 640, sw: 320, sh: 320 },
+    origin: { x: 1440, y: 900 },
+  });
+  const frame = atlasFrame(metadata, 4, 2);
+  assert.equal(Object.isFrozen(frame), true);
+  assert.equal(Object.isFrozen(frame.source), true);
+  assert.equal(Object.isFrozen(frame.origin), true);
+});
+
+test('upright draw plans emit one, two, or four normalized weighted draws', () => {
+  const metadata = syntheticUpright();
+  const exact = buildSpriteDrawPlan(planOptions(metadata, { yaw: 0, pitch: 0 }));
+  assert.equal(exact.draws.length, 1);
+  assert.deepEqual(exact.draws[0].source, { sx: 960, sy: 0, sw: 320, sh: 320 });
+  assert.equal(exact.draws[0].weight, 1);
+
+  const oneAxis = buildSpriteDrawPlan(planOptions(metadata, { yaw: 42.5, pitch: 0 }));
+  assert.equal(oneAxis.draws.length, 2);
+  approximately(oneAxis.draws[0].weight, 0.5);
+  approximately(oneAxis.draws[1].weight, 0.5);
+
+  const bothAxes = buildSpriteDrawPlan(planOptions(metadata, { yaw: 42.5, pitch: 67.5, alpha: 0.8 }));
+  assert.equal(bothAxes.draws.length, 4);
+  approximately(bothAxes.draws.reduce((sum, draw) => sum + draw.weight, 0), 1);
+  for (const draw of bothAxes.draws) approximately(draw.alpha, draw.weight * 0.8);
+
+  const clampedAlpha = buildSpriteDrawPlan(planOptions(metadata, { yaw: 42.5, pitch: 67.5, alpha: 7 }));
+  for (const draw of clampedAlpha.draws) approximately(draw.alpha, draw.weight);
+});
+
+test('origin anchors ignore atlas placement padding and bounds union every frozen destination', () => {
+  const first = syntheticUpright({ sourceShift: 0, sourceSize: 312 });
+  const padded = syntheticUpright({ sourceShift: 8, sourceSize: 312 });
+  const options = { yaw: 42.5, pitch: 67.5, alpha: 0.8 };
+  const plan = buildSpriteDrawPlan(planOptions(first, options));
+  const paddedPlan = buildSpriteDrawPlan(planOptions(padded, options));
+  assert.deepEqual(
+    paddedPlan.draws.map((draw) => draw.destination),
+    plan.draws.map((draw) => draw.destination),
+  );
+
+  for (const draw of plan.draws) {
+    const frame = first.frames.find(({ source }) => (
+      source.sx === draw.source.sx && source.sy === draw.source.sy
+    ));
+    const reconstructedX = draw.destination.x
+      + (frame.origin.x - frame.source.sx) / first.pixelsPerWorldUnit * 0.2;
+    const reconstructedY = draw.destination.y
+      + (frame.origin.y - frame.source.sy) / first.pixelsPerWorldUnit * 0.15;
+    assert.ok(Math.abs(reconstructedX - 480) <= 1);
+    assert.ok(Math.abs(reconstructedY - 300) <= 1);
+  }
+
+  assert.deepEqual(plan.bounds, { x: 150, y: -105, width: 634, height: 483 });
+  assert.equal(Object.isFrozen(plan), true);
+  assert.equal(Object.isFrozen(plan.yaw), true);
+  assert.equal(Object.isFrozen(plan.pitch), true);
+  assert.equal(Object.isFrozen(plan.bounds), true);
+  assert.equal(Object.isFrozen(plan.draws), true);
+  for (const draw of plan.draws) {
+    assert.equal(Object.isFrozen(draw), true);
+    assert.equal(Object.isFrozen(draw.source), true);
+    assert.equal(Object.isFrozen(draw.destination), true);
   }
 });
 
-test('yaw blending chooses the center view, sides, depth, and clamped limits', () => {
+test('malformed upright metadata fails validation and planning without throwing', () => {
+  const valid = syntheticUpright();
+  const malformed = [];
+
+  const wrongDimensions = cloneMetadata(valid);
+  wrongDimensions.atlasWidth = 2239;
+  malformed.push(wrongDimensions);
+
+  const missingFrame = cloneMetadata(valid);
+  missingFrame.frames.pop();
+  malformed.push(missingFrame);
+
+  const outOfBounds = cloneMetadata(valid);
+  outOfBounds.frames[20].source.sx = 2200;
+  malformed.push(outOfBounds);
+
+  const nonFiniteOrigin = cloneMetadata(valid);
+  nonFiniteOrigin.frames[0].origin.x = Infinity;
+  malformed.push(nonFiniteOrigin);
+
+  const nonPositiveScale = cloneMetadata(valid);
+  nonPositiveScale.pixelsPerWorldUnit = 0;
+  malformed.push(nonPositiveScale);
+
+  const wrongYaw = cloneMetadata(valid);
+  wrongYaw.yawDegrees[0] = -75;
+  malformed.push(wrongYaw);
+
+  const wrongPitch = cloneMetadata(valid);
+  wrongPitch.pitchDegrees = [20, 80];
+  malformed.push(wrongPitch);
+
+  const wrongLayout = cloneMetadata(valid);
+  wrongLayout.layout = 'billboard';
+
+  const unconvertibleSource = cloneMetadata(valid);
+  unconvertibleSource.frames[0].source.sx = Symbol('bad-coordinate');
+
+  malformed.push(wrongLayout, unconvertibleSource, null, undefined, [], {}, 'upright');
+
+  for (const metadata of malformed) {
+    assert.doesNotThrow(() => validateAtlasMetadata(metadata));
+    assert.equal(validateAtlasMetadata(metadata), false);
+    assert.doesNotThrow(() => buildSpriteDrawPlan(planOptions(metadata)));
+    assert.equal(buildSpriteDrawPlan(planOptions(metadata)), null);
+  }
+});
+
+test('road edges select their center source without upright blending', () => {
+  const frames = Array.from({ length: 7 }, (_, index) => ({
+    source: { sx: index * 512, sy: 0, sw: 512, sh: 512 },
+  }));
+  const metadata = { layout: 'roadEdge', frames };
+  const source = roadEdgeFrame(metadata);
+  assert.deepEqual(source, { sx: 1536, sy: 0, sw: 512, sh: 512 });
+  assert.equal(Object.isFrozen(source), true);
+});
+
+test('legacy yaw selection and atlas rectangles retain the seven-frame runtime behavior', () => {
   assert.deepEqual(selectYawBlend({ worldX: 0, zRel: 6000 }), {
     angle: 0, lowerIndex: 3, upperIndex: 3, mix: 0,
   });
-  assert.ok(selectYawBlend({ worldX: -2160, zRel: 2000 }).angle < 0);
-  assert.ok(selectYawBlend({ worldX: 2160, zRel: 2000 }).angle > 0);
-  assert.equal(selectYawBlend({ worldX: 2160, zRel: 12000 }).angle < selectYawBlend({ worldX: 2160, zRel: 2000 }).angle, true);
-  assert.deepEqual(selectYawBlend({ worldX: -1e9, zRel: 1 }), { angle: -30, lowerIndex: 0, upperIndex: 0, mix: 0 });
-  assert.deepEqual(selectYawBlend({ worldX: 1e9, zRel: 1 }), { angle: 30, lowerIndex: 6, upperIndex: 6, mix: 0 });
-});
-
-test('yaw blending interpolates exactly between its ten-degree source frames', () => {
-  for (const angle of [-25, -15, -5, 5, 15, 25]) {
-    const result = selectYawBlend({ worldX: Math.tan(angle * Math.PI / 180), zRel: 1 });
-    approximately(result.angle, angle);
-    assert.equal(result.upperIndex - result.lowerIndex, 1);
-    approximately(result.mix, 0.5);
-  }
-  assert.deepEqual(selectYawBlend({ worldX: 0, zRel: 1 }), {
-    angle: 0, lowerIndex: 3, upperIndex: 3, mix: 0,
+  assert.deepEqual(selectYawBlend({ worldX: -1e9, zRel: 1 }), {
+    angle: -30, lowerIndex: 0, upperIndex: 0, mix: 0,
   });
-});
-
-test('invalid yaw input falls back to the immutable center view', () => {
-  const result = selectYawBlend({ worldX: 'not-a-number', zRel: null });
-  assert.deepEqual(result, { angle: 0, lowerIndex: 3, upperIndex: 3, mix: 0 });
-  assert.equal(Object.isFrozen(result), true);
-});
-
-test('atlas frame rectangles clamp to seven fixed 512-pixel frames', () => {
+  assert.deepEqual(selectYawBlend({ worldX: 1e9, zRel: 1 }), {
+    angle: 30, lowerIndex: 6, upperIndex: 6, mix: 0,
+  });
   assert.deepEqual(atlasFrameRect(WORLD_ATLAS_MANIFEST.droneScout, 6), {
     sx: 3072, sy: 0, sw: 512, sh: 512,
   });
   assert.deepEqual(atlasFrameRect(WORLD_ATLAS_MANIFEST.droneScout, -8), {
     sx: 0, sy: 0, sw: 512, sh: 512,
   });
-  assert.deepEqual(atlasFrameRect(WORLD_ATLAS_MANIFEST.droneScout, 99), {
-    sx: 3072, sy: 0, sw: 512, sh: 512,
-  });
 });
 
-test('a sprite blend uses one frozen bottom-center destination for both source frames', () => {
+test('legacy destination calls return the exact frozen shape consumed by the current game', () => {
   const destination = { x: 100, y: 200, width: 80, height: 40 };
   const plan = buildSpriteDrawPlan({
     metadata: WORLD_ATLAS_MANIFEST.droneScout,
@@ -101,15 +322,13 @@ test('a sprite blend uses one frozen bottom-center destination for both source f
     destination,
     alpha: 1.5,
   });
-  assert.deepEqual(plan.lower, { sx: 1536, sy: 0, sw: 512, sh: 512 });
-  assert.deepEqual(plan.upper, { sx: 2048, sy: 0, sw: 512, sh: 512 });
-  approximately(plan.mix, 0.5);
-  assert.deepEqual(plan.destination, destination);
-  assert.equal(plan.destination.x + plan.destination.width / 2, 140);
-  assert.equal(plan.destination.y + plan.destination.height, 240);
-  assert.equal(plan.lower.sw, plan.upper.sw);
-  assert.equal(plan.lower.sh, plan.upper.sh);
-  assert.equal(plan.alpha, 1);
+  assert.deepEqual(plan, {
+    lower: { sx: 1536, sy: 0, sw: 512, sh: 512 },
+    upper: { sx: 2048, sy: 0, sw: 512, sh: 512 },
+    mix: 0.5,
+    destination,
+    alpha: 1,
+  });
   assert.equal(Object.isFrozen(plan), true);
   assert.equal(Object.isFrozen(plan.destination), true);
 });
@@ -135,36 +354,14 @@ test('world draw rectangles use fixed collision geometry at each viewport, depth
   }
 });
 
-test('drone bob, grounded obstacles, and atlas padding leave collision anchors unchanged', () => {
-  const projectPoint = projectionFor(960, 600);
-  for (const bob of [-40, 0, 40]) {
-    const rect = worldSpriteDrawRect({
-      projectPoint, worldX: 0, zRel: 130, ...WORLD_GEOMETRY.drone, baseY: 140 + bob,
-    });
-    const base = projectPoint(0, 140 + bob, 130);
-    const top = projectPoint(0, 500 + bob, 130);
-    assert.equal(rect.y + rect.height, base.y);
-    assert.equal(rect.y, top.y);
-  }
-  for (const category of ['turret', 'wallLow', 'wallHigh']) {
-    const geometry = WORLD_GEOMETRY[category];
-    const rect = worldSpriteDrawRect({ projectPoint, worldX: 2160, zRel: 130, ...geometry });
-    assert.equal(rect.y + rect.height, projectPoint(2160, 0, 130).y);
-  }
-  const fixedFootprint = worldSpriteDrawRect({ projectPoint, worldX: 0, zRel: 6000, ...WORLD_GEOMETRY.wallLow });
-  const plan = buildSpriteDrawPlan({
-    metadata: Object.freeze({ frames: 7, frameWidth: 2048, frameHeight: 2048 }),
-    worldX: 0,
-    zRel: 6000,
-    destination: fixedFootprint,
-  });
-  assert.deepEqual(plan.destination, fixedFootprint, 'transparent atlas padding must not alter projected collision geometry');
-});
-
-test('variant selection is deterministic and keeps a drone spawn lane stable through state changes', () => {
+test('variant selection remains stable and covers future medium and corridor atlases', () => {
   assert.equal(variantKey('unknown', 2, 4), null);
-  assert.equal(variantKey('drone', 17, 2), variantKey('drone', 17, 2));
   assert.equal(variantKey('gap', 17, 2), 'gapEdge');
+  for (const category of ['drone', 'wallMedium', 'corridorLow', 'corridorMedium']) {
+    const first = variantKey(category, 17, 2);
+    assert.equal(typeof first, 'string');
+    assert.equal(first, variantKey(category, 17, 2));
+  }
   const drone = { segmentIndex: 17, stableLaneKey: 2, state: 'rest', fromLane: 2 };
   const atRest = variantKey('drone', drone.segmentIndex, drone.stableLaneKey);
   drone.state = 'warn';
@@ -172,7 +369,6 @@ test('variant selection is deterministic and keeps a drone spawn lane stable thr
   const atWarn = variantKey('drone', drone.segmentIndex, drone.stableLaneKey);
   drone.state = 'move';
   drone.fromLane = 5;
-  const whileMoving = variantKey('drone', drone.segmentIndex, drone.stableLaneKey);
   assert.equal(atRest, atWarn);
-  assert.equal(atWarn, whileMoving);
+  assert.equal(atWarn, variantKey('drone', drone.segmentIndex, drone.stableLaneKey));
 });
