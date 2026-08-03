@@ -61,6 +61,14 @@ test('stem changes use a 300 millisecond transition', () => {
   assert.equal(STEM_TRANSITION_SECONDS, 0.3);
 });
 
+test('paused missions retain atmosphere only through the 300ms transition', () => {
+  assert.deepEqual(
+    mixForGameState({ mode: 'PAUSED', speedRatio: 1, danger: true, boost: true }),
+    { atmosphere: 1, drive: 0, overdrive: 0, cutoff: 4200 },
+  );
+  assert.equal(STEM_TRANSITION_SECONDS, 0.3);
+});
+
 test('muted procedural music advances its clock instead of accumulating past notes', () => {
   assert.equal(keepProceduralTimelineCurrent({ muted: true, currentTime: 60, nextNoteTime: 0.1 }), 60.1);
   assert.equal(keepProceduralTimelineCurrent({ muted: false, currentTime: 60, nextNoteTime: 60.08 }), 60.08);

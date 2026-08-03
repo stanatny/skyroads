@@ -528,6 +528,194 @@ test('held gameplay actions use stable codes and ignore repeated keydown events'
   });
 });
 
+test('P toggles only PLAYING and PAUSED after editing and dialog guards', () => {
+  const { sandbox, windowObject, documentObject, elements } = makeGameUiSandbox();
+  const utility = appUiTarget(elements);
+  let prevented = 0;
+  const pressPause = (target = utility, repeat = false) => windowObject.dispatch('keydown', {
+    code: 'KeyP', target, repeat, preventDefault() { prevented++; },
+  });
+
+  pressPause();
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'MENU');
+
+  vm.runInContext('startGame()', sandbox);
+  documentObject.activeElement = utility;
+  pressPause();
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+  assert.deepEqual({ ...vm.runInContext('Skyroads.diagnostics.snapshot().overlays', sandbox) }, {
+    title: false, pause: true, gameOver: false,
+  });
+  pressPause(utility, true);
+  pressPause();
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+
+  windowObject.dispatch('keyup', { code: 'KeyP', target: utility });
+  vm.runInContext('STATE.lastTime = 123', sandbox);
+  pressPause();
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
+  assert.equal(vm.runInContext('STATE.lastTime', sandbox), 0);
+  assert.equal(documentObject.activeElement, utility);
+  assert.equal(prevented, 2);
+
+  windowObject.dispatch('keyup', { code: 'KeyP', target: utility });
+  const inputTarget = appUiTarget(elements, 'input');
+  const editableTarget = appUiTarget(elements, 'div');
+  editableTarget.isContentEditable = true;
+  for (const target of [inputTarget, editableTarget]) {
+    const beforeMode = vm.runInContext('STATE.mode', sandbox);
+    pressPause(target);
+    assert.equal(vm.runInContext('STATE.mode', sandbox), beforeMode);
+  }
+
+  for (const dialogName of ['leaderboard-dialog', 'rename-dialog']) {
+    elements[dialogName].hidden = false;
+    const beforeDialogMode = vm.runInContext('STATE.mode', sandbox);
+    pressPause(utility);
+    assert.equal(vm.runInContext('STATE.mode', sandbox), beforeDialogMode);
+    elements[dialogName].hidden = true;
+  }
+
+  vm.runInContext("STATE.mode = 'GAMEOVER'", sandbox);
+  pressPause();
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'GAMEOVER');
+  assert.equal(prevented, 2);
+});
+
+test('pause clears movement glide and charge without firing', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext(`
+    startGame();
+    STATE.movement.heldRight = true;
+    STATE.movement.activeDirection = 1;
+    STATE.movement.segmentActive = true;
+    STATE.chargeT = 2;
+    STATE.chargeStage = 2;
+    STATE.gliding = true;
+    KEYS.KeyJ = true;
+  `, sandbox);
+
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  windowObject.dispatch('keyup', { code: 'KeyJ' });
+
+  const state = vm.runInContext(`({
+    mode: STATE.mode,
+    heldRight: STATE.movement.heldRight,
+    activeDirection: STATE.movement.activeDirection,
+    segmentActive: STATE.movement.segmentActive,
+    chargeT: STATE.chargeT,
+    chargeStage: STATE.chargeStage,
+    gliding: STATE.gliding,
+    shots: STATE.shots.length,
+    activeKeys: Object.keys(KEYS).filter((key) => KEYS[key]),
+  })`, sandbox);
+  assert.deepEqual({ ...state, activeKeys: [...state.activeKeys] }, {
+    mode: 'PAUSED', heldRight: false, activeDirection: 0, segmentActive: true,
+    chargeT: 0, chargeStage: 0, gliding: false, shots: 0, activeKeys: [],
+  });
+});
+
+test('paused gameplay keys are inert while global mute remains usable and focus stays put', () => {
+  const { sandbox, windowObject, documentObject, elements } = makeGameUiSandbox();
+  const utility = appUiTarget(elements);
+  vm.runInContext('startGame()', sandbox);
+  documentObject.activeElement = utility;
+  windowObject.dispatch('keydown', { code: 'KeyP', target: utility });
+  const before = vm.runInContext('JSON.stringify({ y: STATE.playerY, shots: STATE.shots, keys: KEYS })', sandbox);
+
+  for (const code of ['KeyA', 'KeyD', 'KeyJ', 'KeyK', 'Space', 'Enter']) {
+    windowObject.dispatch('keydown', { code, target: utility });
+  }
+
+  assert.equal(vm.runInContext('JSON.stringify({ y: STATE.playerY, shots: STATE.shots, keys: KEYS })', sandbox), before);
+  windowObject.dispatch('keydown', { code: 'KeyM', target: utility });
+  assert.equal(vm.runInContext('audioIsMusicMuted() && audioIsSfxMuted()', sandbox), true);
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+  assert.equal(documentObject.activeElement, utility);
+});
+
+test('blur and hidden-page cleanup release the P latch without auto-pausing', () => {
+  const { sandbox, windowObject, documentObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  windowObject.dispatch('blur');
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
+
+  documentObject.hidden = true;
+  documentObject.dispatch('visibilitychange');
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+});
+
+test('pause fades adaptive music to atmosphere and restores an audible legacy bus without rewriting preferences', async () => {
+  const { sandbox, windowObject, audioContexts } = makeGameUiSandbox();
+  const controller = vm.runInContext('STATE.audioController', sandbox);
+  vm.runInContext('startGame()', sandbox);
+  await controller.ready;
+  const adaptiveContext = audioContexts.at(-1);
+  const preferencesBefore = [
+    sandbox.localStorage.getItem('nebula-cruise.audio.music-muted'),
+    sandbox.localStorage.getItem('nebula-cruise.audio.sfx-muted'),
+  ];
+
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  assert.equal(vm.runInContext('AUDIO.master.gain.value', sandbox), 0);
+  assert.deepEqual(adaptiveContext.gains.map((gain) => gain.gain.value), [0.55, 1, 0, 0]);
+  assert.equal(adaptiveContext.filters[0].frequency.value, 4200);
+
+  windowObject.dispatch('keyup', { code: 'KeyP' });
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  assert.equal(vm.runInContext('AUDIO.master.gain.value', sandbox), 0.45);
+  assert.deepEqual(adaptiveContext.gains.map((gain) => gain.gain.value), [0.55, 0.48, 1, 0.42]);
+  assert.equal(adaptiveContext.filters[0].frequency.value, 11000);
+  assert.deepEqual([
+    sandbox.localStorage.getItem('nebula-cruise.audio.music-muted'),
+    sandbox.localStorage.getItem('nebula-cruise.audio.sfx-muted'),
+  ], preferencesBefore);
+});
+
+test('a legacy bus muted before pause stays muted after resume', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox({ musicMuted: true, sfxMuted: true });
+  vm.runInContext('startGame()', sandbox);
+  const gains = [vm.runInContext('AUDIO.master.gain.value', sandbox)];
+  const modes = [vm.runInContext('STATE.mode', sandbox)];
+
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  gains.push(vm.runInContext('AUDIO.master.gain.value', sandbox));
+  modes.push(vm.runInContext('STATE.mode', sandbox));
+  windowObject.dispatch('keyup', { code: 'KeyP' });
+  windowObject.dispatch('keydown', { code: 'KeyP' });
+  gains.push(vm.runInContext('AUDIO.master.gain.value', sandbox));
+  modes.push(vm.runInContext('STATE.mode', sandbox));
+
+  assert.deepEqual(gains, [0, 0, 0]);
+  assert.deepEqual(modes, ['PLAYING', 'PAUSED', 'PLAYING']);
+  assert.equal(sandbox.localStorage.getItem('nebula-cruise.audio.music-muted'), 'true');
+  assert.equal(sandbox.localStorage.getItem('nebula-cruise.audio.sfx-muted'), 'true');
+});
+
+for (const control of ['music', 'sfx']) {
+  test(`the ${control} utility remains live while paused without leaking legacy audio`, () => {
+    const { sandbox, windowObject } = makeGameUiSandbox();
+    vm.runInContext('startGame()', sandbox);
+    windowObject.dispatch('keydown', { code: 'KeyP' });
+
+    vm.runInContext(`STATE.ui.${control}Button.dispatch('click')`, sandbox);
+    assert.equal(vm.runInContext(`audioIs${control === 'music' ? 'Music' : 'Sfx'}Muted()`, sandbox), true);
+    assert.equal(vm.runInContext('AUDIO.master.gain.value', sandbox), 0);
+    assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+
+    vm.runInContext(`STATE.ui.${control}Button.dispatch('click')`, sandbox);
+    assert.equal(vm.runInContext(`audioIs${control === 'music' ? 'Music' : 'Sfx'}Muted()`, sandbox), false);
+    assert.equal(vm.runInContext('AUDIO.master.gain.value', sandbox), 0);
+    assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+  });
+}
+
 test('M and game-over Escape work from non-editing app controls but stay suppressed in text fields and dialogs', () => {
   const { sandbox, windowObject, elements } = makeGameUiSandbox();
   const buttonTarget = appUiTarget(elements);

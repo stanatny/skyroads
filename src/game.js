@@ -200,7 +200,7 @@ function midLane() { return Math.floor(CONFIG.LANES / 2); }
 // 2. 游戏状态 STATE
 // ============================================================
 const STATE = {
-  mode: 'MENU',                // 'MENU' | 'PLAYING' | 'GAMEOVER'
+  mode: 'MENU',                // 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER'
   canvas: null,
   ctx: null,
   width: 0,
@@ -310,6 +310,7 @@ function scrubDecorativeMotion() {
 // 3. 输入处理 Input（键盘 + 触屏）
 // ============================================================
 const KEYS = {};
+let pauseKeyHeld = false;
 
 function targetInsideAppUi(target) {
   return !!(target && typeof target.closest === 'function' && target.closest('#app-ui'));
@@ -369,6 +370,10 @@ function clearAllInputState() {
   syncGlideAudio();
 }
 
+function releasePauseKey() {
+  pauseKeyHeld = false;
+}
+
 window.addEventListener('keydown', (e) => {
   if (e.defaultPrevented) return;
   const code = keyboardCode(e);
@@ -394,13 +399,26 @@ window.addEventListener('keydown', (e) => {
   }
 
   const isRecognized = directionForCode(code) !== 0
-    || ['ArrowUp', 'ArrowDown', 'Space', 'Enter', 'Escape', 'KeyW', 'KeyS', 'KeyJ', 'KeyK', 'KeyM'].includes(code);
+    || ['ArrowUp', 'ArrowDown', 'Space', 'Enter', 'Escape', 'KeyW', 'KeyS', 'KeyJ', 'KeyK', 'KeyM', 'KeyP'].includes(code);
 
-  // M 与结束页 Escape 是非编辑控件上的全局快捷键，应先于 app UI 焦点门禁处理。
+  // M、P 与结束页 Escape 是非编辑控件上的全局快捷键，应先于 app UI 焦点门禁处理。
   if (code === 'KeyM') {
     if (typeof e.preventDefault === 'function') e.preventDefault();
     KEYS[code] = true;
     toggleMute();
+    return;
+  }
+  if (code === 'KeyP') {
+    if (e.repeat || pauseKeyHeld) return;
+    if (STATE.mode === 'PLAYING' || STATE.mode === 'PAUSED') {
+      pauseKeyHeld = true;
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      togglePause();
+    }
+    return;
+  }
+  if (STATE.mode === 'PAUSED') {
+    if (!targetInsideAppUi(e.target) && isRecognized && typeof e.preventDefault === 'function') e.preventDefault();
     return;
   }
   if (STATE.mode === 'GAMEOVER' && code === 'Escape') {
@@ -442,6 +460,10 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => {
   const code = keyboardCode(e);
+  if (code === 'KeyP') {
+    releasePauseKey();
+    return;
+  }
   if (code) delete KEYS[code];
   const direction = directionForCode(code);
   if (direction !== 0) {
@@ -459,10 +481,16 @@ window.addEventListener('keyup', (e) => {
     STATE.chargeStage = 0;
   }
 });
-window.addEventListener('blur', clearAllInputState);
+window.addEventListener('blur', () => {
+  clearAllInputState();
+  releasePauseKey();
+});
 if (typeof document.addEventListener === 'function') {
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) clearAllInputState();
+    if (document.hidden) {
+      clearAllInputState();
+      releasePauseKey();
+    }
   });
   document.addEventListener('focusin', (e) => {
     if (targetInsideAppUi(e.target)) clearAllInputState();
@@ -3724,6 +3752,18 @@ function resetGame() {
   STATE.track = buildTrack();
 }
 
+function togglePause() {
+  if (STATE.mode !== 'PLAYING' && STATE.mode !== 'PAUSED') return false;
+  const paused = STATE.mode === 'PLAYING';
+  clearAllInputState();
+  STATE.mode = paused ? 'PAUSED' : 'PLAYING';
+  if (!paused) STATE.lastTime = 0;
+  setLegacyAudioPaused(paused);
+  syncAdaptiveAudio(true);
+  refreshPresentation();
+  return true;
+}
+
 function startGame() {
   audioInit();                 // 首次有效手势：创建/resume 音效 AudioContext
   if (STATE.audioController) {
@@ -4159,6 +4199,7 @@ const AUDIO = {
   bgmTimer: null,
   bgmStep: 0,
   nextNoteTime: 0,
+  resumeLegacyAfterPause: false,
   glideNodes: null, // 滑翔喷火轰鸣节点组 { src, lfo, lfo2, gain }（非 null = 播放中）
 };
 
@@ -4200,9 +4241,25 @@ function syncLegacyAudioMuteState() {
   const current = adaptiveAudioState();
   AUDIO.muted = Boolean(current.musicMuted && current.sfxMuted);
   try {
-    if (AUDIO.master) AUDIO.master.gain.value = AUDIO.muted ? 0 : 0.45;
+    if (AUDIO.master) AUDIO.master.gain.value = STATE.mode === 'PAUSED' || AUDIO.muted ? 0 : 0.45;
   } catch (e) {}
   return AUDIO.muted;
+}
+
+function setLegacyAudioPaused(paused) {
+  const current = adaptiveAudioState();
+  const preferencesAllowAudio = !(current.musicMuted && current.sfxMuted);
+  try {
+    if (paused) {
+      AUDIO.resumeLegacyAfterPause = Boolean(AUDIO.master && AUDIO.master.gain.value > 0);
+      if (AUDIO.master) AUDIO.master.gain.value = 0;
+      return;
+    }
+    if (AUDIO.master) {
+      AUDIO.master.gain.value = AUDIO.resumeLegacyAfterPause && preferencesAllowAudio ? 0.45 : 0;
+    }
+    AUDIO.resumeLegacyAfterPause = false;
+  } catch (_) {}
 }
 
 function syncAdaptiveAudio(force = false) {
