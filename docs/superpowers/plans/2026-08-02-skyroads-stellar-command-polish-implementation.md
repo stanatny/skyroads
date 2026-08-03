@@ -1223,7 +1223,7 @@ Also build/open the `main` version first, create a legacy `skyroads_best`, quit 
 
 Review every diff against the approved design specification. Resolve all correctness, data-loss, licensing, accessibility, and packaging findings. Re-run the complete suite after every fix.
 
-- [ ] **Step 5: Confirm branch hygiene and prepare the PR**
+- [x] **Step 5: Confirm branch hygiene and prepare the PR**
 
 ```bash
 git status --short
