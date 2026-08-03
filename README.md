@@ -24,16 +24,28 @@ Play online: https://stanatny.github.io/skyroads/
 | Fire | Tap `J` | Keyboard only |
 | Charged missile | Hold `J` for 3 seconds, then release | Keyboard only |
 | Start / fly again | `Space` or `Enter` | Use the on-screen button |
+| Pause / resume | `P` | — |
 | Return to command center (mission over) | — | Use the Command Center button |
 | Toggle all audio | `M` | Use the separate music and SFX buttons |
 
 Low barriers can be jumped; tall towers require a lane change, super-form jump, or weapon. Bullets and charged missiles have different collision rules, and holding jump while falling activates fuel-consuming glide. The HUD shows fuel, jumps, score, distance, time, speed, charge, power-up timers, and audio state.
 
+## Obstacle route language
+
+Defense modules use a consistent visual language:
+
+- **1 cyan band — 600 world units:** clear it with one jump.
+- **2 cyan bands — 1,250 world units:** clear it with two jumps.
+- **Gold beacon — 2,000 world units:** clear it with the super-form third jump.
+- **Low lit corridor:** primarily uses one jump followed by hold-to-glide while descending; a well-timed second jump is also accepted.
+- **Medium lit corridor:** requires two jumps followed by hold-to-glide while descending.
+- Every newly added advanced building or corridor challenge keeps an ordinary bypass lane. The existing intentional seven-lane all-gap challenge remains unchanged.
+
 ## Language and local records
 
 The game supports Simplified/Traditional Chinese system locales and English. If any browser system language is Chinese, the first launch uses Chinese; every other system language uses English. Use the `中文 / EN` control to switch manually. Your choice is remembered in this browser.
 
-Each completed mission is ranked by score, distance, and elapsed time. The best 15 records are kept on this device only, using a recoverable local primary/backup store. The current pilot name is reused automatically; changing it is optional. Clearing browser site data also clears these records and preferences.
+Each completed mission is ranked by score, distance, and elapsed time. The local Top 15 is kept in this browser only, using a recoverable local primary/backup store. The current pilot name is reused automatically; changing it is optional. Clearing browser site data also clears these records and preferences.
 
 ## Run locally
 

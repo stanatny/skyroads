@@ -7,7 +7,8 @@
     en: Object.freeze({
       'app.documentTitle': 'Nebula Cruise', 'meta.description': 'A fast sci-fi lane runner through an endless nebula.', 'canvas.label': 'Nebula Cruise game canvas', 'language.switchToChinese': '中文', 'language.switchToEnglish': 'EN',
       'menu.title': 'NEBULA CRUISE', 'menu.subtitle': 'INTERSTELLAR COMMAND', 'menu.start': 'Start Mission', 'menu.leaderboard': 'Local Top 15', 'shortcut.startRestart': 'Enter / Space', 'shortcut.returnMenu': 'Esc',
-      'controls.move': 'Move: A / D or ← / →', 'controls.jump': 'Jump: K / Space / W / ↑', 'controls.shoot': 'Fire: tap or hold J', 'controls.touch': 'Swipe to move · tap to jump',
+      'controls.move': 'Move: A / D or ← / →', 'controls.jump': 'Jump / glide: K / Space / W / ↑ · hold while descending to glide', 'controls.shoot': 'Fire: tap or hold J', 'controls.touch': 'Swipe to move · tap to jump',
+      'guide.routes': '1 cyan band: one jump · 2 bands: two jumps · gold beacon: super-form third jump · lit corridor: jump, then hold while descending · every advanced route has an ordinary bypass lane',
       'hud.fuel': 'FUEL', 'hud.jump': 'JUMPS', 'hud.distance': 'DISTANCE', 'hud.score': 'SCORE', 'hud.speed': 'SPEED', 'hud.elapsed': 'TIME', 'hud.localBest': 'LOCAL BEST', 'hud.musicOn': 'AUDIO ON', 'hud.musicOff': 'AUDIO OFF', 'hud.shootHint': 'J: FIRE / HOLD TO CHARGE',
       'settings.label': 'Game settings', 'settings.musicOn': 'MUSIC ON', 'settings.musicOff': 'MUSIC OFF', 'settings.sfxOn': 'SFX ON', 'settings.sfxOff': 'SFX OFF',
       'status.chargeIdle': 'MISSILE CHARGE', 'status.charging': 'CHARGING {percent}%', 'status.chargeReady': 'MISSILE READY', 'status.boost': 'BOOST {seconds}s', 'status.boostWarning': 'BOOST ENDING {seconds}s', 'status.super': 'SUPER FORM {seconds}s', 'status.superWarning': 'SUPER ENDING {seconds}s', 'status.magnet': 'MAGNET {seconds}s', 'effect.superForm': '★ SUPER FORM ★',
@@ -19,7 +20,8 @@
     'zh-CN': Object.freeze({
       'app.documentTitle': '星云巡航', 'meta.description': '驾驶飞船穿越无尽星云的高速科幻跑酷游戏。', 'canvas.label': '星云巡航游戏画面', 'language.switchToChinese': '中文', 'language.switchToEnglish': 'EN',
       'menu.title': '星云巡航', 'menu.subtitle': '星际指挥中心', 'menu.start': '开始任务', 'menu.leaderboard': '本机 Top 15', 'shortcut.startRestart': 'Enter / Space', 'shortcut.returnMenu': 'Esc',
-      'controls.move': '移动：A / D 或 ← / →', 'controls.jump': '跳跃：K / 空格 / W / ↑', 'controls.shoot': '射击：点按或按住 J', 'controls.touch': '左右滑动变道 · 点按跳跃',
+      'controls.move': '移动：A / D 或 ← / →', 'controls.jump': '跳跃 / 滑翔：K / Space / W / ↑ · 下落时按住即可滑翔', 'controls.shoot': '射击：点按或按住 J', 'controls.touch': '左右滑动变道 · 点按跳跃',
+      'guide.routes': '1 条青色灯带：一段跳 · 2 条灯带：二段跳 · 金色信标：超级形态三段跳 · 发光连排：起跳后在下落时按住 · 每条进阶路线都有普通绕行车道',
       'hud.fuel': '燃料', 'hud.jump': '跳跃', 'hud.distance': '距离', 'hud.score': '得分', 'hud.speed': '速度', 'hud.elapsed': '时间', 'hud.localBest': '本机最佳', 'hud.musicOn': '声音开启', 'hud.musicOff': '声音关闭', 'hud.shootHint': 'J：射击 / 按住蓄力',
       'settings.label': '游戏设置', 'settings.musicOn': '音乐开启', 'settings.musicOff': '音乐关闭', 'settings.sfxOn': '音效开启', 'settings.sfxOff': '音效关闭',
       'status.chargeIdle': '导弹蓄力', 'status.charging': '蓄力中 {percent}%', 'status.chargeReady': '导弹就绪', 'status.boost': '超级加速 {seconds}秒', 'status.boostWarning': '加速即将结束 {seconds}秒', 'status.super': '超级形态 {seconds}秒', 'status.superWarning': '形态即将结束 {seconds}秒', 'status.magnet': '磁铁 {seconds}秒', 'effect.superForm': '★ 超级形态 ★',

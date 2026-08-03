@@ -657,7 +657,10 @@
     const controlList = makeElement(documentObject, 'ul', { className: 'control-list' });
     const controlItems = Array.from({ length: 4 }, () => makeElement(documentObject, 'li'));
     controlList.append(...controlItems);
-    elements.titleScreen.replaceChildren(titleKicker, titleHeading, profileName, legacyBest, titleActions, controlList);
+    const routeGuide = makeElement(documentObject, 'p', { className: 'route-guide' });
+    elements.titleScreen.replaceChildren(
+      titleKicker, titleHeading, profileName, legacyBest, titleActions, controlList, routeGuide,
+    );
 
     const gameOverHeading = makeElement(documentObject, 'h2');
     const deathReason = makeElement(documentObject, 'p', { className: 'death-reason' });
@@ -735,7 +738,7 @@
     return Object.freeze({
       ...elements,
       languageButton, musicButton, sfxButton,
-      titleKicker, titleHeading, profileName, legacyBest, startButton, titleLeaderboardButton, controlItems,
+      titleKicker, titleHeading, profileName, legacyBest, startButton, titleLeaderboardButton, controlItems, routeGuide,
       gameOverHeading, deathReason, resultScore, resultDistance, resultElapsed, resultRank, resultNewBest,
       restartButton, menuButton, gameOverLeaderboardButton, gameOverRenameButton,
       leaderboardPanel, leaderboardHeading, leaderboardCutoff, leaderboardEmpty, leaderboardTableWrap, leaderboardTable,
@@ -796,6 +799,7 @@
     ui.titleLeaderboardButton.textContent = translator.t('menu.leaderboard');
     const controlIds = ['controls.move', 'controls.jump', 'controls.shoot', 'controls.touch'];
     ui.controlItems.forEach((item, index) => { item.textContent = translator.t(controlIds[index]); });
+    ui.routeGuide.textContent = translator.t('guide.routes');
 
     ui.legacyBest.hidden = snapshot.legacyBest == null;
     ui.legacyBest.textContent = snapshot.legacyBest == null ? '' : translator.t('leaderboard.legacyBest', {

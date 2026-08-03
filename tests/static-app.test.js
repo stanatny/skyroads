@@ -7,6 +7,17 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'styles/game.css'), 'utf8');
+const englishReadme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+const chineseReadme = fs.readFileSync(path.join(root, 'README.zh-CN.md'), 'utf8');
+
+function markdownSection(markdown, heading) {
+  const marker = `## ${heading}`;
+  const start = markdown.indexOf(marker);
+  if (start < 0) return '';
+  const remainder = markdown.slice(start + marker.length);
+  const nextHeading = remainder.search(/\n## /);
+  return nextHeading < 0 ? remainder : remainder.slice(0, nextHeading);
+}
 
 test('the static shell references loadable classic CSS and JavaScript', () => {
   assert.match(html, /<link rel="icon" href="data:,">/);
@@ -31,6 +42,60 @@ test('the viewport keeps native browser zoom available', () => {
   assert.doesNotMatch(viewport[1], /user-scalable\s*=\s*no/i);
   assert.doesNotMatch(viewport[1], /maximum-scale\s*=\s*1(?:\.0+)?(?:\s|,|$)/i);
   assert.match(css, /#game\s*\{[^}]*touch-action:\s*pinch-zoom\s*;/s);
+});
+
+test('the route guide uses a compact centered muted layout', () => {
+  const match = css.match(/\.route-guide\s*\{([^}]*)\}/);
+  assert.ok(match, 'the route-guide rule must exist');
+  const rule = match[1];
+  assert.match(rule, /max-width:\s*62rem\s*;/);
+  assert.match(rule, /margin:\s*0\.65rem auto 0\s*;/);
+  assert.match(rule, /color:\s*var\(--muted\)\s*;/);
+  assert.match(rule, /font-size:\s*clamp\(0\.72rem,\s*1\.35vw,\s*0\.92rem\)\s*;/);
+  assert.match(rule, /line-height:\s*1\.45\s*;/);
+  assert.match(rule, /text-align:\s*center\s*;/);
+});
+
+test('English and Chinese READMEs explain equivalent obstacle routes and local play', () => {
+  assert.match(englishReadme, /^## Obstacle route language$/m);
+  assert.match(chineseReadme, /^## 障碍路线提示$/m);
+  const englishRoutes = markdownSection(englishReadme, 'Obstacle route language');
+  const chineseRoutes = markdownSection(chineseReadme, '障碍路线提示');
+
+  assert.match(englishRoutes, /1 cyan band[^\n]*600[^\n]*one jump/i);
+  assert.match(englishRoutes, /2 cyan bands[^\n]*1,250[^\n]*two jumps/i);
+  assert.match(englishRoutes, /gold beacon[^\n]*2,000[^\n]*super-form third jump/i);
+  assert.match(englishRoutes, /low lit corridor[^\n]*one jump[^\n]*glide[^\n]*second jump[^\n]*accepted/i);
+  assert.match(englishRoutes, /medium lit corridor[^\n]*requires two jumps[^\n]*glide/i);
+  assert.match(englishRoutes, /ordinary bypass lane/i);
+  assert.match(englishRoutes, /seven-lane all-gap challenge[^\n]*unchanged/i);
+
+  assert.match(chineseRoutes, /1 条青色灯带[^\n]*600[^\n]*一段跳/);
+  assert.match(chineseRoutes, /2 条青色灯带[^\n]*1,250[^\n]*二段跳/);
+  assert.match(chineseRoutes, /金色信标[^\n]*2,000[^\n]*超级形态[^\n]*三段跳/);
+  assert.match(chineseRoutes, /发光矮墙连排[^\n]*一段跳[^\n]*滑翔[^\n]*二段跳[^\n]*替代/);
+  assert.match(chineseRoutes, /发光中墙连排[^\n]*必须[^\n]*二段跳[^\n]*滑翔/);
+  assert.match(chineseRoutes, /普通绕行车道/);
+  assert.match(chineseRoutes, /七车道全缺口挑战[^\n]*保持不变/);
+
+  assert.match(englishReadme, /\| Start \/ fly again \| `Space` or `Enter`/);
+  assert.match(chineseReadme, /\| 开始 \/ 再来一局 \| `Space` 或 `Enter`/);
+  assert.match(englishReadme, /\| Pause \/ resume \| `P`/);
+  assert.match(chineseReadme, /\| 暂停 \/ 继续 \| `P`/);
+  assert.match(englishReadme, /The local Top 15 is kept in this browser only/);
+  assert.match(chineseReadme, /本机 Top 15 仅保存在当前浏览器中/);
+  assert.match(englishReadme, /\[THIRD_PARTY_NOTICES\.md\]\(THIRD_PARTY_NOTICES\.md\)/);
+  assert.match(chineseReadme, /\[THIRD_PARTY_NOTICES\.md\]\(THIRD_PARTY_NOTICES\.md\)/);
+
+  assert.match(englishReadme, /^\[中文\]\(README\.zh-CN\.md\)$/m);
+  assert.match(chineseReadme, /^\[English\]\(README\.md\)$/m);
+  for (const readme of [englishReadme, chineseReadme]) {
+    assert.match(readme, /npm test/);
+    assert.match(readme, /npm run check/);
+    assert.match(readme, /bash app\/build\.sh/);
+  }
+  assert.match(englishReadme, /^## Use and licensing$/m);
+  assert.match(chineseReadme, /^## 使用与许可$/m);
 });
 
 test('the browser namespace exists before feature modules attach', () => {

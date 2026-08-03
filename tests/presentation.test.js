@@ -679,6 +679,14 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(ui.startButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
   assert.equal(ui.restartButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
   assert.equal(ui.menuButton.getAttribute('aria-keyshortcuts'), 'Escape');
+  assert.ok(ui.routeGuide, 'the command center must expose its route-guide paragraph');
+  assert.equal(ui.routeGuide.tagName, 'P');
+  assert.equal(ui.routeGuide.className, 'route-guide');
+  assert.equal(elements.titleScreen.children.at(-1), ui.routeGuide);
+  assert.equal(
+    elements.titleScreen.children.filter((child) => child.className === 'route-guide').length,
+    1,
+  );
   const translator = {
     locale: 'en',
     t(id, values = {}) {
@@ -740,6 +748,33 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(ui.startButton.children[1].children[0].textContent, 'Enter');
   assert.equal(ui.startButton.children[1].children[2].textContent, 'Space');
   assert.equal(ui.startButton.children[0].textContent, 'menu.start');
+  assert.equal(ui.routeGuide.textContent, 'guide.routes');
+
+  const originalRouteGuide = ui.routeGuide;
+  const alternateTranslator = {
+    ...translator,
+    locale: 'zh-CN',
+    t(id, values = {}) {
+      if (id === 'guide.routes') return 'translated:guide.routes';
+      return translator.t(id, values);
+    },
+  };
+  renderCommandCenter(ui, {
+    translator: alternateTranslator,
+    mode: 'MENU',
+    snapshot: {
+      profile: { playerId: 'player-1', name: '<Nova>' },
+      entries: [],
+      legacyBest: null,
+      persistenceWarning: false,
+    },
+  });
+  assert.equal(ui.routeGuide, originalRouteGuide);
+  assert.equal(ui.routeGuide.textContent, 'translated:guide.routes');
+  assert.equal(
+    elements.titleScreen.children.filter((child) => child.className === 'route-guide').length,
+    1,
+  );
 });
 
 test('rename count uses the same grapheme segmentation as the persisted name', () => {

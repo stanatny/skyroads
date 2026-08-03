@@ -37,6 +37,21 @@ test('mission shortcut labels are available in both catalogs', () => {
   assert.equal(createTranslator('zh-CN').t('shortcut.returnMenu'), 'Esc');
 });
 
+test('jump and obstacle-route guidance uses the approved bilingual copy', () => {
+  const en = MESSAGES.en;
+  const zh = MESSAGES['zh-CN'];
+  assert.equal(en['controls.jump'], 'Jump / glide: K / Space / W / ↑ · hold while descending to glide');
+  assert.equal(zh['controls.jump'], '跳跃 / 滑翔：K / Space / W / ↑ · 下落时按住即可滑翔');
+  assert.equal(
+    en['guide.routes'],
+    '1 cyan band: one jump · 2 bands: two jumps · gold beacon: super-form third jump · lit corridor: jump, then hold while descending · every advanced route has an ordinary bypass lane',
+  );
+  assert.equal(
+    zh['guide.routes'],
+    '1 条青色灯带：一段跳 · 2 条灯带：二段跳 · 金色信标：超级形态三段跳 · 发光连排：起跳后在下落时按住 · 每条进阶路线都有普通绕行车道',
+  );
+});
+
 test('both production catalogs have the same non-empty IDs', () => {
   assert.deepEqual(Object.keys(MESSAGES.en).sort(), Object.keys(MESSAGES['zh-CN']).sort());
   for (const catalog of Object.values(MESSAGES)) {
