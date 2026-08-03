@@ -21,6 +21,12 @@ const {
   findIntersectedWallLane,
 } = globalThis.Skyroads.input;
 
+const {
+  OBSTACLE_HEIGHTS,
+  wallHeight,
+  isWallType,
+} = globalThis.Skyroads.obstacles;
+
 // ============================================================
 // 1. 常量配置 CONFIG —— 所有魔法数字集中在此，附数值推导注释
 // ============================================================
@@ -79,8 +85,9 @@ const CONFIG = {
   GRAVITY: 32000,              // 重力（世界单位/秒²）
   MAX_JUMPS: 2,                // 最大跳跃段数（落地重置）；二段跳仅为容错与技巧空间，
                                //   可解性仍按单跳推导（见生成器 airReach 注释）
-  WALL_LOW_HEIGHT: 600,        // 矮墙高度（世界单位，渲染与碰撞共用）
-  WALL_HIGH_HEIGHT: 2000,      // 高塔高度（世界单位，渲染与碰撞共用；推导见上）
+  WALL_LOW_HEIGHT: OBSTACLE_HEIGHTS.WALL_LOW,        // 矮墙高度（世界单位，渲染与碰撞共用）
+  WALL_MEDIUM_HEIGHT: OBSTACLE_HEIGHTS.WALL_MEDIUM,  // 中墙高度（世界单位，渲染与碰撞共用）
+  WALL_HIGH_HEIGHT: OBSTACLE_HEIGHTS.WALL_HIGH,      // 高塔高度（世界单位，渲染与碰撞共用；推导见上）
   GAP_SAFE_HEIGHT: 200,        // 跳跃高度 ≥ 此值可安全掠过缺口
   FUEL_BLOCK_HEIGHT: 450,      // 燃料晶体悬浮基准高度（渲染用，叠加 sin 浮动）
   FUEL_BOB_AMPLITUDE: 90,      // 燃料晶体上下浮动幅度（世界单位）
@@ -146,9 +153,9 @@ const CONFIG = {
   DOUBLEJUMP_FUEL: 3,          // 二段跳一次性扣 3 燃料（第一跳免费）—— 跃升推进器烧油
   GLIDE_GRAVITY_FACTOR: 0.08,  // 滑翔时重力 ×0.08（机翼展开 + 滑翔喷口，滞空 ≈3.5× 自由落体）
                                //   推导：自顶点 879 自由落体 t=√(2×879/32000)=0.234s；
-                               //   滑翔 t=√(2×879/(32000×0.13))≈0.65s → 滞空 ≈2.8 倍
+                               //   滑翔 t=√(2×879/(32000×0.08))≈0.83s → 滞空 ≈3.5 倍
   GLIDE_DRAIN: 9,              // 滑翔额外耗油 9/秒（维持不变：滞空变长本身就是燃料成本
-                               //   —— 0.65s 滑翔 ≈ 5.9 额外燃料，强度提升由时长买单，
+                               //   —— 0.83s 滑翔 ≈ 7.5 额外燃料，强度提升由时长买单，
                                //   不再加 drain；油尽/松键立即退出滑翔）
 
   // ---- 磁铁（第六轮新奖励；第七轮加大范围 + 飞行晶体动画）----
@@ -609,6 +616,7 @@ const LANE_TYPE = {
   ROAD: 'ROAD',
   GAP: 'GAP',
   WALL_LOW: 'WALL_LOW',     // 矮墙：红色能量屏障，跳跃可越过
+  WALL_MEDIUM: 'WALL_MEDIUM',
   WALL_HIGH: 'WALL_HIGH',   // 高塔：暗红高塔，跳不过去，必须变道
   FUEL: 'FUEL',
   // 奖励道具：只出现在 ROAD 车道上，属于"可安全碾压的路面"，
@@ -3019,7 +3027,8 @@ function advanceShots(sdt) {
     if (!hit) {
       const wallLane = findIntersectedWallLane(seg.lanes, sh.lanePosition);
       const t = wallLane === null ? null : seg.lanes[wallLane];
-      if (t === LANE_TYPE.WALL_LOW || t === LANE_TYPE.WALL_HIGH) {
+      if (isWallType(t)) {
+        const height = wallHeight(t);
         // 超级形态武器强化：
         //   导弹 → 范围清除命中段 ±SUPER_MISSILE_RADIUS × 全车道的建筑与敌人；
         //   子弹 → 任意高度直接摧毁建筑（不再湮灭、不再被高塔挡）
@@ -3029,18 +3038,18 @@ function advanceShots(sdt) {
         } else if (sh.kind === 'bullet' && STATE.tripleT > 0) {
           hit = true;
           seg.lanes[wallLane] = LANE_TYPE.ROAD;
-          buildingBurstFx(wallLane, sh.seg, t === LANE_TYPE.WALL_HIGH ? 500 : 300);
+          buildingBurstFx(wallLane, sh.seg, height);
           sfxWallDown();
         } else {
-          // 子弹高度规则：y > 矮墙 600 可越过矮墙；高塔 2000 挡一切子弹；导弹不清高度
+          // 子弹高度规则：y 高于矮/中墙可越过；高塔挡一切子弹；导弹不清高度
           const bulletBlocked = sh.kind === 'missile'
             || t === LANE_TYPE.WALL_HIGH
-            || sh.y <= CONFIG.WALL_LOW_HEIGHT;
+            || sh.y <= height;
           if (bulletBlocked) {
             hit = true;
             if (sh.kind === 'missile') {
               seg.lanes[wallLane] = LANE_TYPE.ROAD;      // 导弹清障：墙（含高塔）→ 路面
-              shotBurstFx(wallLane, sh.seg, t === LANE_TYPE.WALL_HIGH ? 420 : 260, true);
+              shotBurstFx(wallLane, sh.seg, height, true);
               sfxEnemyDown();
             } else {
               shotBurstFx(wallLane, sh.seg, 240, false); // 子弹撞墙湮灭小火花
@@ -3114,8 +3123,8 @@ function superMissileBlast(segF) {
     const s = STATE.track[i];
     if (!s) continue;
     for (let l = 0; l < CONFIG.LANES; l++) {
-      if (s.lanes[l] === LANE_TYPE.WALL_LOW || s.lanes[l] === LANE_TYPE.WALL_HIGH) {
-        const h = s.lanes[l] === LANE_TYPE.WALL_HIGH ? 500 : 300;
+      if (isWallType(s.lanes[l])) {
+        const h = wallHeight(s.lanes[l]);
         s.lanes[l] = LANE_TYPE.ROAD;
         buildingBurstFx(l, i, h);
         cleared++;
@@ -3216,12 +3225,11 @@ function checkCollisions(previousLanePosition, currentLanePosition) {
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     const type = seg.lanes[lane];
     if (!sweptIntervalsOverlap(previousLanePosition, currentLanePosition, 0.14, lane, 0.42)) continue;
-    if (type === LANE_TYPE.WALL_LOW
-      && !invincible
-      && STATE.playerY <= CONFIG.WALL_LOW_HEIGHT) { die('wall'); return; }
-    if (type === LANE_TYPE.WALL_HIGH
-      && !invincible
-      && STATE.playerY <= CONFIG.WALL_HIGH_HEIGHT) { die('wall'); return; }
+    const obstacleHeight = wallHeight(type);
+    if (obstacleHeight !== null && !invincible && STATE.playerY <= obstacleHeight) {
+      die('wall');
+      return;
+    }
   }
 
   const supportLane = laneTileContaining(currentLanePosition);

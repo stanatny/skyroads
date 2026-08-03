@@ -45,15 +45,50 @@ function createGameLogicHarness() {
       const target = STATE.track[Math.floor(segment)];
       if (!target) return;
       for (let lane = 0; lane < CONFIG.LANES; lane++) {
-        if (target.lanes[lane] === LANE_TYPE.WALL_LOW || target.lanes[lane] === LANE_TYPE.WALL_HIGH) {
+        if (Skyroads.obstacles.isWallType(target.lanes[lane])) {
           target.lanes[lane] = LANE_TYPE.ROAD;
         }
       }
     };
+    sfxJump = () => {};
+    sfxDoubleJump = () => {};
     sfxWallDown = () => {};
     sfxEnemyDown = () => {};
   `, sandbox);
   return sandbox;
+}
+
+function runAirbornePhysics(sandbox, {
+  playerY,
+  playerVY,
+  jumpHeld,
+  fuel,
+  powered = false,
+}) {
+  Object.assign(sandbox, { __playerY: playerY, __playerVY: playerVY, __jumpHeld: jumpHeld, __fuel: fuel, __powered: powered });
+  return JSON.parse(vm.runInContext(`(() => {
+    STATE.mode = 'PLAYING';
+    STATE.position = 0;
+    STATE.speed = 0;
+    STATE.playerY = __playerY;
+    STATE.playerVY = __playerVY;
+    STATE.fuel = __fuel;
+    STATE.tripleT = __powered ? 1 : 0;
+    STATE.shots = [];
+    STATE.track = [{ lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD), enemies: null }];
+    if (__jumpHeld) KEYS.KeyK = true;
+    else delete KEYS.KeyK;
+    extendTrack = () => {};
+    updateEnemies = () => {};
+    advanceShots = () => {};
+    checkCollisions = () => {};
+    const beforeVY = STATE.playerVY;
+    updatePhysics(0.01);
+    return JSON.stringify({
+      gliding: STATE.gliding,
+      gravityDelta: beforeVY - STATE.playerVY,
+    });
+  })()`, sandbox));
 }
 
 test('gameplay input is disabled while UI owns keyboard focus', () => {
@@ -249,7 +284,7 @@ test('enemy hitboxes overlap at the exact rendered-width boundaries', () => {
   assert.equal(intervalsOverlap(3, 0.14, 3.400001, 0.26), false);
 });
 
-test('hazard collision cutoffs remain exactly 600, 2000, and gap-safe 200', () => {
+test('hazard collision constants include all three approved wall heights and gap-safe 200', () => {
   const sandbox = createGameLogicHarness();
   const outcomes = JSON.parse(vm.runInContext(`(() => {
     const collide = (type, height) => {
@@ -264,7 +299,7 @@ test('hazard collision cutoffs remain exactly 600, 2000, and gap-safe 200', () =
       return __deaths[0] || null;
     };
     return JSON.stringify({
-      constants: [CONFIG.WALL_LOW_HEIGHT, CONFIG.WALL_HIGH_HEIGHT, CONFIG.GAP_SAFE_HEIGHT, CONFIG.FUEL_COLLECT_HEIGHT],
+      constants: [CONFIG.WALL_LOW_HEIGHT, CONFIG.WALL_MEDIUM_HEIGHT, CONFIG.WALL_HIGH_HEIGHT, CONFIG.GAP_SAFE_HEIGHT, CONFIG.FUEL_COLLECT_HEIGHT],
       lowAt: collide(LANE_TYPE.WALL_LOW, 600),
       lowAbove: collide(LANE_TYPE.WALL_LOW, 600 + Number.EPSILON * 4096),
       highAt: collide(LANE_TYPE.WALL_HIGH, 2000),
@@ -273,13 +308,119 @@ test('hazard collision cutoffs remain exactly 600, 2000, and gap-safe 200', () =
       gapAt: collide(LANE_TYPE.GAP, 200),
     });
   })()`, sandbox));
-  assert.deepEqual(outcomes.constants, [600, 2000, 200, 600]);
+  assert.deepEqual(outcomes.constants, [600, 1250, 2000, 200, 600]);
   assert.equal(outcomes.lowAt, 'wall');
   assert.equal(outcomes.lowAbove, null);
   assert.equal(outcomes.highAt, 'wall');
   assert.equal(outcomes.highAbove, null);
   assert.equal(outcomes.gapBelow, 'gap');
   assert.equal(outcomes.gapAt, null);
+});
+
+for (const [type, height] of [
+  ['WALL_LOW', 600],
+  ['WALL_MEDIUM', 1250],
+  ['WALL_HIGH', 2000],
+]) {
+  test(type + ' collision is strict at its approved height', () => {
+    const sandbox = createGameLogicHarness();
+    Object.assign(sandbox, { __wallType: type, __wallHeight: height });
+    vm.runInContext(`
+      STATE.track = [{ lanes: new Array(7).fill('ROAD'), enemies: null }];
+      STATE.track[0].lanes[3] = __wallType;
+      STATE.position = 0;
+      STATE.fuel = 100;
+      STATE.boostT = 0;
+      STATE.movement.lanePosition = 3;
+      STATE.playerY = __wallHeight;
+      __deaths.length = 0;
+      checkCollisions(3, 3);
+    `, sandbox);
+    assert.deepEqual(Array.from(sandbox.__deaths), ['wall']);
+    vm.runInContext(`
+      __deaths.length = 0;
+      STATE.playerY = __wallHeight + Number.EPSILON * __wallHeight;
+      checkCollisions(3, 3);
+    `, sandbox);
+    assert.deepEqual(Array.from(sandbox.__deaths), []);
+  });
+}
+
+test('ordinary flight rejects a third jump', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    STATE.playerY = 500;
+    STATE.playerVY = -100;
+    STATE.jumpsUsed = 2;
+    STATE.tripleT = 0;
+    STATE.fuel = 10;
+    tryJump();
+    return JSON.stringify({ jumpsUsed: STATE.jumpsUsed, playerVY: STATE.playerVY, fuel: STATE.fuel });
+  })()`, sandbox));
+  assert.deepEqual(result, { jumpsUsed: 2, playerVY: -100, fuel: 10 });
+});
+
+test('super flight accepts a third jump', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    STATE.playerY = 500;
+    STATE.playerVY = -100;
+    STATE.jumpsUsed = 2;
+    STATE.tripleT = 1;
+    STATE.fuel = 10;
+    tryJump();
+    return JSON.stringify({ jumpsUsed: STATE.jumpsUsed, playerVY: STATE.playerVY });
+  })()`, sandbox));
+  assert.deepEqual(result, { jumpsUsed: 3, playerVY: 7500 });
+});
+
+for (const [label, jumpsUsed, powered] of [
+  ['second', 1, false],
+  ['third', 2, true],
+]) {
+  test(label + ' jump consumes exactly 3 fuel', () => {
+    const sandbox = createGameLogicHarness();
+    Object.assign(sandbox, { __jumpsUsed: jumpsUsed, __powered: powered });
+    const fuel = vm.runInContext(`(() => {
+      STATE.playerY = 500;
+      STATE.playerVY = -100;
+      STATE.jumpsUsed = __jumpsUsed;
+      STATE.tripleT = __powered ? 1 : 0;
+      STATE.fuel = 10;
+      tryJump();
+      return STATE.fuel;
+    })()`, sandbox);
+    assert.equal(fuel, 7);
+  });
+}
+
+test('glide gravity requires airborne descent, a held jump, and positive fuel', () => {
+  const gliding = runAirbornePhysics(createGameLogicHarness(), {
+    playerY: 1000, playerVY: -100, jumpHeld: true, fuel: 50,
+  });
+  assert.equal(gliding.gliding, true);
+  assert.ok(Math.abs(gliding.gravityDelta - 25.6) <= 1e-9);
+
+  for (const conditions of [
+    { playerY: 0, playerVY: -100, jumpHeld: true, fuel: 50 },
+    { playerY: 1000, playerVY: 100, jumpHeld: true, fuel: 50 },
+    { playerY: 1000, playerVY: -100, jumpHeld: false, fuel: 50 },
+    { playerY: 1000, playerVY: -100, jumpHeld: true, fuel: 0 },
+  ]) {
+    const result = runAirbornePhysics(createGameLogicHarness(), conditions);
+    assert.equal(result.gliding, false);
+  }
+});
+
+test('ordinary and super glide gravity factors remain 0.08 and 0.045', () => {
+  const ordinary = runAirbornePhysics(createGameLogicHarness(), {
+    playerY: 1000, playerVY: -100, jumpHeld: true, fuel: 50,
+  });
+  const powered = runAirbornePhysics(createGameLogicHarness(), {
+    playerY: 1000, playerVY: -100, jumpHeld: true, fuel: 50, powered: true,
+  });
+  assert.ok(Math.abs(ordinary.gravityDelta - 32000 * 0.08 * 0.01) <= 1e-9);
+  assert.ok(Math.abs(powered.gravityDelta - 32000 * 0.045 * 0.01) <= 1e-9);
 });
 
 test('full gaps cap at three and bridge runs remain two to five segments on a reachable lane', () => {
@@ -334,7 +475,7 @@ test('full gaps cap at three and bridge runs remain two to five segments on a re
   assert.ok(result.rightLanding >= 4 && result.rightLanding <= 6);
 });
 
-test('projectile wall behavior retains low-wall clearance, high blocking, and powered destruction', () => {
+test('ordinary bullets use each wall tier strict height rule', () => {
   const sandbox = createGameLogicHarness();
   const outcomes = JSON.parse(vm.runInContext(`(() => {
     const fire = (wallType, kind, height, powered = false) => {
@@ -349,19 +490,88 @@ test('projectile wall behavior retains low-wall clearance, high blocking, and po
       advanceShots(0);
       return { shots: STATE.shots.length, tile: STATE.track[10].lanes[3] };
     };
+    return JSON.stringify([
+      fire('WALL_LOW', 'bullet', 600),
+      fire('WALL_LOW', 'bullet', 600.01),
+      fire('WALL_MEDIUM', 'bullet', 1250),
+      fire('WALL_MEDIUM', 'bullet', 1250.01),
+      fire('WALL_HIGH', 'bullet', 2500),
+    ]);
+  })()`, sandbox));
+  assert.deepEqual(outcomes.map((outcome) => outcome.shots === 0), [true, false, true, false, true]);
+});
+
+test('ordinary missile, super bullet, and super area missile destroy a medium wall', () => {
+  const sandbox = createGameLogicHarness();
+  const outcomes = JSON.parse(vm.runInContext(`(() => {
+    const fire = (kind, powered) => {
+      STATE.position = 0;
+      STATE.speed = 0;
+      STATE.tripleT = powered ? 1 : 0;
+      STATE.track = Array.from({ length: 20 }, (_, index) => ({
+        index, lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD), enemies: null,
+      }));
+      STATE.track[10].lanes[3] = 'WALL_MEDIUM';
+      STATE.shots = [{ kind, lanePosition: 3, y: 0, seg: 10.2 }];
+      advanceShots(0);
+      return STATE.track[10].lanes[3];
+    };
     return JSON.stringify({
-      lowAt: fire(LANE_TYPE.WALL_LOW, 'bullet', 600),
-      lowAbove: fire(LANE_TYPE.WALL_LOW, 'bullet', 600.001),
-      highAbove: fire(LANE_TYPE.WALL_HIGH, 'bullet', 2000.001),
-      missileLow: fire(LANE_TYPE.WALL_LOW, 'missile', 0),
-      missileHigh: fire(LANE_TYPE.WALL_HIGH, 'missile', 0),
-      poweredBullet: fire(LANE_TYPE.WALL_HIGH, 'bullet', 0, true),
+      ordinaryMissile: fire('missile', false),
+      superBullet: fire('bullet', true),
+      superAreaMissile: fire('missile', true),
     });
   })()`, sandbox));
-  assert.deepEqual(outcomes.lowAt, { shots: 0, tile: 'WALL_LOW' });
-  assert.deepEqual(outcomes.lowAbove, { shots: 1, tile: 'WALL_LOW' });
-  assert.deepEqual(outcomes.highAbove, { shots: 0, tile: 'WALL_HIGH' });
-  assert.deepEqual(outcomes.missileLow, { shots: 0, tile: 'ROAD' });
-  assert.deepEqual(outcomes.missileHigh, { shots: 0, tile: 'ROAD' });
-  assert.deepEqual(outcomes.poweredBullet, { shots: 0, tile: 'ROAD' });
+  assert.deepEqual(outcomes, {
+    ordinaryMissile: 'ROAD',
+    superBullet: 'ROAD',
+    superAreaMissile: 'ROAD',
+  });
+});
+
+test('speed-24 swept collision checks every tile in an eighteen-segment medium corridor', () => {
+  const sandbox = createGameLogicHarness();
+  const outcomes = JSON.parse(vm.runInContext(`(() => {
+    const traverse = (height, stopOnDeath) => {
+      STATE.track = Array.from({ length: 18 }, (_, index) => ({
+        index,
+        lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD),
+        enemies: null,
+      }));
+      for (const segment of STATE.track) segment.lanes[3] = LANE_TYPE.WALL_MEDIUM;
+      STATE.position = 0.1;
+      STATE.fuel = 100;
+      STATE.boostT = 0;
+      STATE.playerY = height;
+      STATE.movement.lanePosition = 3;
+      __deaths.length = 0;
+      let steps = 0;
+      let largestStep = 0;
+      while (STATE.position < 18) {
+        const stepDistance = Math.min(24 / 48, 18 - STATE.position);
+        STATE.position += stepDistance;
+        largestStep = Math.max(largestStep, stepDistance);
+        checkCollisions(3, 3);
+        steps++;
+        if (stopOnDeath && __deaths.length > 0) break;
+      }
+      return {
+        deaths: __deaths.slice(),
+        finalPosition: STATE.position,
+        largestStep,
+        steps,
+      };
+    };
+    return JSON.stringify({
+      blocked: traverse(1250, true),
+      clear: traverse(1250.01, false),
+    });
+  })()`, sandbox));
+  assert.deepEqual(outcomes.blocked.deaths, ['wall']);
+  assert.equal(outcomes.blocked.finalPosition, 0.6);
+  assert.ok(outcomes.blocked.largestStep <= 0.5);
+  assert.deepEqual(outcomes.clear.deaths, []);
+  assert.equal(outcomes.clear.finalPosition, 18);
+  assert.equal(outcomes.clear.steps, 36);
+  assert.ok(outcomes.clear.largestStep <= 0.5);
 });
