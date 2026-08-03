@@ -226,7 +226,8 @@ test('release diagnostics expose complete preferred world atlas readiness', asyn
   assert.equal(diagnostics.scripts.worldArt, true);
   assert.deepEqual(Array.from(diagnostics.visualAssets.world.loaded), [
     'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
-    'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge',
+    'barrierCrate', 'structurePylon', 'structureBastion', 'structureReactor',
+    'structureTower', 'corridorLow', 'corridorMedium', 'gapEdge',
   ]);
   assert.deepEqual(Array.from(diagnostics.visualAssets.world.fallback), []);
   assert.deepEqual({ ...diagnostics.visualAssets.world.categoryReady }, {

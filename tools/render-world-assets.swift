@@ -93,6 +93,7 @@ struct UprightAtlasMetadata: Codable, Equatable {
     let frameHeight: Int
     let yawDegrees: [Int]
     let pitchDegrees: [Int]
+    let detailFrontZ: Double
     let worldBounds: WorldBoundsMetadata
     let pixelsPerWorldUnit: Double
     let frames: [UprightFrameMetadata]
@@ -106,6 +107,11 @@ struct UprightRenderedCell {
 struct UprightAtlasProduct {
     let pixels: [UInt8]
     let metadata: UprightAtlasMetadata
+}
+
+struct UprightTurntable {
+    let node: SCNNode
+    let detailFrontZ: Double
 }
 
 let WORLD_BOUNDS: [String: WorldBoundsMetadata] = [
@@ -496,31 +502,157 @@ func applyComponentTransform(_ recipe: ComponentRecipe, to node: SCNNode) {
     node.position = vector(recipe.translation)
 }
 
+let modelsWithCoincidentFaces: Set<String> = [
+    "modular-space-kit/Models/OBJ format/room-large.obj",
+    "modular-space-kit/Models/OBJ format/gate-lasers.obj",
+]
+
+func requiresCoincidentFaceCanonicalization(_ modelPath: String) -> Bool {
+    modelsWithCoincidentFaces.contains(modelPath)
+}
+
 func filterOBJSource(
     _ source: String,
     hidingGroups: Set<String>,
     materialFilename: String,
-    label: String
+    label: String,
+    deduplicateOrientedFaces: Bool = false
 ) throws -> String {
-    guard !hidingGroups.isEmpty else { return source }
+    guard !hidingGroups.isEmpty || deduplicateOrientedFaces else { return source }
     var activeGroups = Set<String>()
+    var activeMaterial = ""
     var declaredGroups = Set<String>()
     var removedFaces = Dictionary(uniqueKeysWithValues: hidingGroups.map { ($0, 0) })
+    var positionKeys: [String] = []
+    var textureCoordinateKeys: [String] = []
+    var normalValues: [[Double]] = []
+    var emittedExactFaces = Set<String>()
+    var emittedSemanticFaces: [String: [[Double]?]] = [:]
     var output: [String] = []
     let normalizedSource = source
         .replacingOccurrences(of: "\r\n", with: "\n")
         .replacingOccurrences(of: "\r", with: "\n")
+
+    func coordinateKey(_ components: ArraySlice<String>, kind: String) throws -> (String, [Double]) {
+        let values = try components.map { component -> Double in
+            guard let value = Double(component), value.isFinite else {
+                throw RenderError.load("\(label) has an invalid \(kind) coordinate")
+            }
+            return value == 0 ? 0 : value
+        }
+        let key = values.map { String($0.bitPattern, radix: 16) }.joined(separator: ":")
+        return (key, values)
+    }
+
+    func resolvedIndex(_ component: Substring?, count: Int, kind: String) throws -> Int? {
+        guard let component, !component.isEmpty else { return nil }
+        guard let rawIndex = Int(component), rawIndex != 0 else {
+            throw RenderError.load("\(label) has an invalid \(kind) index")
+        }
+        let index = rawIndex > 0 ? rawIndex - 1 : count + rawIndex
+        guard index >= 0, index < count else {
+            throw RenderError.load("\(label) has an out-of-range \(kind) index")
+        }
+        return index
+    }
+
+    func normalsMatch(_ lhs: [[Double]?], _ rhs: [[Double]?]) -> Bool {
+        // The two audited Modular Space Kit files carry source-identical faces
+        // whose normals straddle the ideal axis by at most two Float32 ULPs.
+        let auditedFloat32ComponentTolerance = 0.00000025
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { left, right in
+            switch (left, right) {
+            case (nil, nil): return true
+            case (.some(let leftValues), .some(let rightValues)):
+                return leftValues.count == rightValues.count
+                    && zip(leftValues, rightValues).allSatisfy {
+                        abs($0 - $1) <= auditedFloat32ComponentTolerance
+                    }
+            default: return false
+            }
+        }
+    }
+
     for line in normalizedSource.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
         let tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
+        if deduplicateOrientedFaces, tokens.first == "v", tokens.count >= 4 {
+            positionKeys.append(try coordinateKey(tokens[1...3], kind: "vertex").0)
+        }
+        if deduplicateOrientedFaces, tokens.first == "vt", tokens.count >= 2 {
+            textureCoordinateKeys.append(try coordinateKey(tokens.dropFirst(), kind: "texture").0)
+        }
+        if deduplicateOrientedFaces, tokens.first == "vn", tokens.count >= 4 {
+            normalValues.append(try coordinateKey(tokens[1...3], kind: "normal").1)
+        }
         if tokens.first == "g" {
             activeGroups = Set(tokens.dropFirst())
             declaredGroups.formUnion(activeGroups.intersection(hidingGroups))
+        }
+        if tokens.first == "usemtl" {
+            activeMaterial = tokens.dropFirst().joined(separator: " ")
         }
         if tokens.first == "f" {
             let hiddenActiveGroups = activeGroups.intersection(hidingGroups)
             if !hiddenActiveGroups.isEmpty {
                 for group in hiddenActiveGroups { removedFaces[group, default: 0] += 1 }
                 continue
+            }
+            if deduplicateOrientedFaces {
+                let exactFace = activeMaterial + "\u{0}" + tokens.joined(separator: " ")
+                if !emittedExactFaces.insert(exactFace).inserted { continue }
+
+                var facePositions: [String] = []
+                var faceTextureCoordinates: [String] = []
+                var faceNormals: [[Double]?] = []
+                for token in tokens.dropFirst() {
+                    let indices = token.split(separator: "/", omittingEmptySubsequences: false)
+                    let positionIndex = try resolvedIndex(
+                        indices.first, count: positionKeys.count, kind: "vertex"
+                    )
+                    guard let positionIndex else {
+                        throw RenderError.load("\(label) has a face without a vertex index")
+                    }
+                    let textureIndex = try resolvedIndex(
+                        indices.count > 1 ? indices[1] : nil,
+                        count: textureCoordinateKeys.count,
+                        kind: "texture"
+                    )
+                    let normalIndex = try resolvedIndex(
+                        indices.count > 2 ? indices[2] : nil,
+                        count: normalValues.count,
+                        kind: "normal"
+                    )
+                    facePositions.append(positionKeys[positionIndex])
+                    faceTextureCoordinates.append(
+                        textureIndex.map { textureCoordinateKeys[$0] } ?? "-"
+                    )
+                    faceNormals.append(normalIndex.map { normalValues[$0] })
+                }
+                guard facePositions.count >= 3 else {
+                    throw RenderError.load("\(label) has a face with fewer than three vertices")
+                }
+                let positionTextures = zip(facePositions, faceTextureCoordinates).map {
+                    $0 + "\u{1}" + $1
+                }
+                let rotations = positionTextures.indices.map { index -> (String, Int) in
+                    let rotated = Array(positionTextures[index...])
+                        + Array(positionTextures[..<index])
+                    return (rotated.joined(separator: " "), index)
+                }
+                guard let canonical = rotations.min(by: { $0.0 < $1.0 }) else {
+                    throw RenderError.load("\(label) could not canonicalize a face")
+                }
+                let index = canonical.1
+                let alignedNormals = Array(faceNormals[index...]) + Array(faceNormals[..<index])
+                let semanticKey = activeMaterial + "\u{0}" + canonical.0
+                if let previousNormals = emittedSemanticFaces[semanticKey] {
+                    guard normalsMatch(previousNormals, alignedNormals) else {
+                        throw RenderError.load("\(label) has conflicting normals on a coincident face")
+                    }
+                    continue
+                }
+                emittedSemanticFaces[semanticKey] = alignedNormals
             }
         }
         if tokens.first == "mtllib" {
@@ -575,20 +707,23 @@ func styledMaterial(
 ) -> SCNMaterial {
     let result = source.copy() as? SCNMaterial ?? SCNMaterial()
     let materialName = source.name ?? "material-\(index)"
+    let diffuseFilter: SCNFilterMode
     if let texturePath = texturePaths.first, let texture = images[texturePath] {
         // Modular Space Kit carries its audited palette in colormap.png.
         result.diffuse.contents = texture
         result.multiply.contents = NSColor.white
+        diffuseFilter = .nearest
     } else {
         result.diffuse.contents = neutralMaterialColor(named: materialName)
         result.multiply.contents = NSColor.white
+        diffuseFilter = .linear
     }
     result.name = "Orbital defense \(materialName)"
     result.lightingModel = .physicallyBased
-    result.isDoubleSided = true
-    result.diffuse.magnificationFilter = .linear
-    result.diffuse.minificationFilter = .linear
-    result.diffuse.mipFilter = .linear
+    result.isDoubleSided = texturePaths.isEmpty
+    result.diffuse.magnificationFilter = diffuseFilter
+    result.diffuse.minificationFilter = diffuseFilter
+    result.diffuse.mipFilter = diffuseFilter
     result.metalness.contents = 0.24
     result.roughness.contents = 0.38
     result.emission.contents = NSColor.black
@@ -610,7 +745,8 @@ func loadComponent(
     }
     var temporaryImportDirectory: URL?
     var modelURL = sourceModelURL
-    if !asset.hideNodes.isEmpty {
+    let deduplicateOrientedFaces = requiresCoincidentFaceCanonicalization(recipe.model)
+    if !asset.hideNodes.isEmpty || deduplicateOrientedFaces {
         let source: String
         do {
             source = try String(contentsOf: sourceModelURL, encoding: .utf8)
@@ -627,7 +763,8 @@ func loadComponent(
                 source,
                 hidingGroups: Set(asset.hideNodes),
                 materialFilename: temporaryMaterialURL.lastPathComponent,
-                label: recipe.model
+                label: recipe.model,
+                deduplicateOrientedFaces: deduplicateOrientedFaces
             )
             try materialData.write(to: temporaryMaterialURL, options: .atomic)
             try Data(filtered.utf8).write(to: temporaryModelURL, options: .atomic)
@@ -810,9 +947,47 @@ func addWorldBox(
     node.addChildNode(detail)
 }
 
-func addUprightDetails(to turntable: SCNNode, asset: AssetRecipe) throws {
+func baseCyanBandRatios(for category: String) -> [Double] {
+    switch category {
+    case "drone": return [0.48]
+    case "wallMedium", "wallHigh": return [0.34, 0.68]
+    default: return [0.34]
+    }
+}
+
+func normalizedArmorHalfDepth(sourceDepth: Double, horizontalScale: Double) throws -> Double {
+    let halfDepth = sourceDepth * horizontalScale / 2
+    guard sourceDepth.isFinite,
+          horizontalScale.isFinite,
+          sourceDepth > 0,
+          horizontalScale > 0,
+          halfDepth.isFinite,
+          halfDepth > 0 else {
+        throw RenderError.validation("Upright armor depth must be finite and positive")
+    }
+    return halfDepth
+}
+
+func generatedConduitInset(worldWidth: Double, conduitWidth: Double) throws -> Double {
+    guard worldWidth.isFinite,
+          conduitWidth.isFinite,
+          worldWidth > 0,
+          conduitWidth > 0,
+          conduitWidth < worldWidth else {
+        throw RenderError.validation("Generated conduit dimensions must be finite, positive, and narrower than the asset")
+    }
+    return min(worldWidth / 2 - conduitWidth / 2, conduitWidth / 2)
+}
+
+func addUprightDetails(
+    to turntable: SCNNode,
+    asset: AssetRecipe,
+    armorHalfDepth: Double
+) throws {
     guard let dimensions = WORLD_GEOMETRY[asset.category],
-          let bounds = WORLD_BOUNDS[asset.category] else {
+          let bounds = WORLD_BOUNDS[asset.category],
+          armorHalfDepth.isFinite,
+          armorHalfDepth > 0 else {
         throw RenderError.validation("\(asset.id) has no declared upright geometry")
     }
     let cyan = flatMaterial(srgb(0x68, 0xe8, 0xff), emission: srgb(0x68, 0xe8, 0xff))
@@ -820,20 +995,23 @@ func addUprightDetails(to turntable: SCNNode, asset: AssetRecipe) throws {
     let steel = flatMaterial(srgb(0x64, 0x78, 0x8e))
     let seamHeight = max(6, min(dimensions.worldHeight * 0.018, 18))
     let seamDepth = 8.0
-    let seamYRatio = asset.category == "drone" ? 0.48 : 0.34
-    addWorldBox(
-        to: turntable,
-        size: [dimensions.worldWidth * 0.48, seamHeight, seamDepth],
-        position: SCNVector3(
-            0,
-            dimensions.baseY + dimensions.worldHeight * seamYRatio,
-            bounds.maxZ + seamDepth / 2
-        ),
-        material: cyan,
-        chamferRadius: seamHeight / 2
-    )
+    let seamYRatios = baseCyanBandRatios(for: asset.category)
+    for seamYRatio in seamYRatios {
+        addWorldBox(
+            to: turntable,
+            size: [dimensions.worldWidth * 0.48, seamHeight, seamDepth],
+            position: SCNVector3(
+                0,
+                dimensions.baseY + dimensions.worldHeight * seamYRatio,
+                armorHalfDepth + seamDepth / 2
+            ),
+            material: cyan,
+            chamferRadius: seamHeight / 2
+        )
+    }
 
     let lightRadius = max(5, min(dimensions.worldHeight * 0.018, 18))
+    let statusYRatio = seamYRatios[0]
     for (index, side) in [-1.0, 1.0].enumerated() {
         let sphere = SCNSphere(radius: CGFloat(lightRadius))
         sphere.segmentCount = 16
@@ -841,8 +1019,8 @@ func addUprightDetails(to turntable: SCNNode, asset: AssetRecipe) throws {
         let light = SCNNode(geometry: sphere)
         light.position = SCNVector3(
             side * dimensions.worldWidth * 0.22,
-            dimensions.baseY + dimensions.worldHeight * seamYRatio,
-            bounds.maxZ + lightRadius * 0.72
+            dimensions.baseY + dimensions.worldHeight * statusYRatio,
+            armorHalfDepth + lightRadius * 0.72
         )
         turntable.addChildNode(light)
     }
@@ -866,7 +1044,10 @@ func addUprightDetails(to turntable: SCNNode, asset: AssetRecipe) throws {
             material: steel,
             chamferRadius: min(details.plinthSize[1], details.plinthSize[2]) * 0.12
         )
-        let conduitInset = dimensions.worldWidth / 2 - details.conduitSize[0] / 2
+        let conduitInset = try generatedConduitInset(
+            worldWidth: dimensions.worldWidth,
+            conduitWidth: details.conduitSize[0]
+        )
         for side in [-1.0, 1.0] {
             addWorldBox(
                 to: turntable,
@@ -888,7 +1069,7 @@ func addUprightDetails(to turntable: SCNNode, asset: AssetRecipe) throws {
     }
 }
 
-func buildUprightTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
+func buildUprightTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> UprightTurntable {
     guard let dimensions = WORLD_GEOMETRY[asset.category] else {
         throw RenderError.validation("\(asset.id) has no upright geometry")
     }
@@ -917,8 +1098,12 @@ func buildUprightTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNod
 
     let turntable = SCNNode()
     turntable.addChildNode(normalizedArmor)
-    try addUprightDetails(to: turntable, asset: asset)
-    return turntable
+    let armorHalfDepth = try normalizedArmorHalfDepth(
+        sourceDepth: sourceDepth,
+        horizontalScale: scaleX
+    )
+    try addUprightDetails(to: turntable, asset: asset, armorHalfDepth: armorHalfDepth)
+    return UprightTurntable(node: turntable, detailFrontZ: armorHalfDepth)
 }
 
 func addLighting(to scene: SCNScene) {
@@ -992,7 +1177,7 @@ func addUprightCamera(
     let halfDepth = (worldBounds.maxZ - worldBounds.minZ) / 2
     let radius = sqrt(halfWidth * halfWidth + halfHeight * halfHeight + halfDepth * halfDepth)
     let orthographicScale = radius * 2 / 0.78
-    let pixelsPerWorldUnit = Double(frame.height) / orthographicScale
+    let pixelsPerWorldUnit = Double(frame.height) / (orthographicScale * 2)
     let distance = max(radius * 4, 1_000)
     guard [centerY, radius, orthographicScale, pixelsPerWorldUnit, distance]
         .allSatisfy({ $0.isFinite }), radius > 0, pixelsPerWorldUnit > 0 else {
@@ -1071,12 +1256,12 @@ func renderUprightCells(
     sourceRoot: URL,
     frame: UprightFrameContract,
     worldBounds: WorldBoundsMetadata
-) throws -> (cells: [UprightRenderedCell], pixelsPerWorldUnit: Double) {
+) throws -> (cells: [UprightRenderedCell], pixelsPerWorldUnit: Double, detailFrontZ: Double) {
     let scene = SCNScene()
     scene.background.contents = NSColor.clear
     scene.lightingEnvironment.intensity = 0
     let turntable = try buildUprightTurntable(asset: asset, sourceRoot: sourceRoot)
-    scene.rootNode.addChildNode(turntable)
+    scene.rootNode.addChildNode(turntable.node)
     addLighting(to: scene)
     let camera = try addUprightCamera(to: scene, worldBounds: worldBounds, frame: frame)
 
@@ -1101,7 +1286,7 @@ func renderUprightCells(
             camera.distance * cos(pitchRadians)
         )
         for yaw in frame.yawDegrees {
-            turntable.eulerAngles.y = CGFloat(Double(yaw) * radiansPerDegree)
+            turntable.node.eulerAngles.y = CGFloat(Double(yaw) * radiansPerDegree)
             let image = renderer.snapshot(
                 atTime: 0,
                 with: CGSize(width: renderWidth, height: renderHeight),
@@ -1120,7 +1305,7 @@ func renderUprightCells(
             ))
         }
     }
-    return (cells, camera.pixelsPerWorldUnit)
+    return (cells, camera.pixelsPerWorldUnit, turntable.detailFrontZ)
 }
 
 func rasterizedPremultipliedRGBA(_ image: CGImage) throws -> [UInt8] {
@@ -1463,6 +1648,11 @@ func validateUprightAtlasMetadata(
           metadata.worldBounds == expectedWorldBounds else {
         throw RenderError.validation("\(assetID) upright metadata has invalid world bounds")
     }
+    guard metadata.detailFrontZ.isFinite,
+          metadata.detailFrontZ > 0,
+          roundedToSixPlaces(metadata.detailFrontZ) == metadata.detailFrontZ else {
+        throw RenderError.validation("\(assetID) detailFrontZ must be finite, positive, and rounded")
+    }
     guard metadata.pixelsPerWorldUnit.isFinite,
           metadata.pixelsPerWorldUnit > 0 else {
         throw RenderError.validation("\(assetID) pixelsPerWorldUnit must be finite and positive")
@@ -1530,6 +1720,7 @@ func makeUprightAtlas(
     cells: [UprightRenderedCell],
     frame: UprightFrameContract,
     worldBounds: WorldBoundsMetadata,
+    detailFrontZ: Double,
     pixelsPerWorldUnit: Double,
     supersample: Int,
     assetID: String
@@ -1546,6 +1737,9 @@ func makeUprightAtlas(
     }
     guard pixelsPerWorldUnit.isFinite, pixelsPerWorldUnit > 0 else {
         throw RenderError.render("\(assetID) pixelsPerWorldUnit must be finite and positive")
+    }
+    guard detailFrontZ.isFinite, detailFrontZ > 0 else {
+        throw RenderError.render("\(assetID) detailFrontZ must be finite and positive")
     }
     let atlasWidth = frame.width * frame.yawDegrees.count
     let atlasHeight = frame.height * frame.pitchDegrees.count
@@ -1655,6 +1849,7 @@ func makeUprightAtlas(
         frameHeight: frame.height,
         yawDegrees: frame.yawDegrees,
         pitchDegrees: frame.pitchDegrees,
+        detailFrontZ: roundedToSixPlaces(detailFrontZ),
         worldBounds: roundedBounds,
         pixelsPerWorldUnit: roundedToSixPlaces(pixelsPerWorldUnit),
         frames: records
@@ -1933,6 +2128,7 @@ func renderAll(arguments: Arguments, manifest: WorldManifest) throws -> RenderAl
                     cells: raw.cells,
                     frame: manifest.frames.upright,
                     worldBounds: worldBounds,
+                    detailFrontZ: raw.detailFrontZ,
                     pixelsPerWorldUnit: raw.pixelsPerWorldUnit,
                     supersample: supersample,
                     assetID: asset.id

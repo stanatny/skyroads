@@ -52,9 +52,12 @@ function syntheticUpright({ sourceShift = 0, sourceSize = 320 } = {}) {
     layout: 'upright',
     atlasWidth: 2240,
     atlasHeight: 960,
+    frameWidth: 320,
+    frameHeight: 320,
     yawDegrees: [...YAW_DEGREES],
     pitchDegrees: [...PITCH_DEGREES],
-    worldBounds: { minX: -324, maxX: 324, minY: 0, maxY: 2000 },
+    detailFrontZ: 120,
+    worldBounds: { minX: -324, maxX: 324, minY: 0, maxY: 2000, minZ: -25, maxZ: 25 },
     pixelsPerWorldUnit: 0.1,
     frames,
   };
@@ -62,6 +65,38 @@ function syntheticUpright({ sourceShift = 0, sourceSize = 320 } = {}) {
 
 function cloneMetadata(metadata) {
   return structuredClone(metadata);
+}
+
+const FINAL_MANIFEST_CONTRACT = Object.freeze({
+  droneScout: ['./assets/world/drone-scout.png', 'drone', 0],
+  droneStriker: ['./assets/world/drone-striker.png', 'drone', 1],
+  turretSentry: ['./assets/world/turret-sentry.png', 'turret', 0],
+  turretHeavy: ['./assets/world/turret-heavy.png', 'turret', 1],
+  barrierRail: ['./assets/world/barrier-rail.png', 'wallLow', 0],
+  barrierCrate: ['./assets/world/barrier-crate.png', 'wallLow', 1],
+  structurePylon: ['./assets/world/structure-pylon.png', 'wallMedium', 0],
+  structureBastion: ['./assets/world/structure-bastion.png', 'wallMedium', 1],
+  structureReactor: ['./assets/world/structure-reactor.png', 'wallHigh', 0],
+  structureTower: ['./assets/world/structure-tower.png', 'wallHigh', 1],
+  corridorLow: ['./assets/world/corridor-low.png', 'corridorLow', 0],
+  corridorMedium: ['./assets/world/corridor-medium.png', 'corridorMedium', 0],
+  gapEdge: ['./assets/world/gap-edge.png', 'gap', 0],
+});
+
+const CATEGORY_WORLD_BOUNDS = Object.freeze({
+  drone: { minX: -216, maxX: 216, minY: 140, maxY: 500, minZ: -25, maxZ: 25 },
+  turret: { minX: -244.8, maxX: 244.8, minY: 0, maxY: 1900, minZ: -25, maxZ: 25 },
+  wallLow: { minX: -324, maxX: 324, minY: 0, maxY: 600, minZ: -25, maxZ: 25 },
+  wallMedium: { minX: -324, maxX: 324, minY: 0, maxY: 1250, minZ: -25, maxZ: 25 },
+  wallHigh: { minX: -324, maxX: 324, minY: 0, maxY: 2000, minZ: -25, maxZ: 25 },
+  corridorLow: { minX: -324, maxX: 324, minY: 0, maxY: 600, minZ: -25, maxZ: 25 },
+  corridorMedium: { minX: -324, maxX: 324, minY: 0, maxY: 1250, minZ: -25, maxZ: 25 },
+});
+
+function assertDeepFrozen(value) {
+  if (!value || typeof value !== 'object') return;
+  assert.equal(Object.isFrozen(value), true);
+  for (const child of Object.values(value)) assertDeepFrozen(child);
 }
 
 function planOptions(metadata, {
@@ -86,20 +121,35 @@ function planOptions(metadata, {
   };
 }
 
-test('upright view constants and legacy manifest remain deeply frozen compatibility contracts', () => {
+test('final manifest exposes thirteen real deeply frozen atlas records', () => {
   assert.deepEqual(YAW_DEGREES, [-80, -55, -30, 0, 30, 55, 80]);
   assert.deepEqual(PITCH_DEGREES, [20, 55, 80]);
-  assert.deepEqual(WORLD_ATLAS_MANIFEST, {
-    droneScout: { path: './assets/world/drone-scout.png', category: 'drone', variant: 0, frames: 7, frameWidth: 512, frameHeight: 512 },
-    droneStriker: { path: './assets/world/drone-striker.png', category: 'drone', variant: 1, frames: 7, frameWidth: 512, frameHeight: 512 },
-    turretSentry: { path: './assets/world/turret-sentry.png', category: 'turret', variant: 0, frames: 7, frameWidth: 512, frameHeight: 512 },
-    turretHeavy: { path: './assets/world/turret-heavy.png', category: 'turret', variant: 1, frames: 7, frameWidth: 512, frameHeight: 512 },
-    barrierRail: { path: './assets/world/barrier-rail.png', category: 'wallLow', variant: 0, frames: 7, frameWidth: 512, frameHeight: 512 },
-    barrierCrate: { path: './assets/world/barrier-crate.png', category: 'wallLow', variant: 1, frames: 7, frameWidth: 512, frameHeight: 512 },
-    structureReactor: { path: './assets/world/structure-reactor.png', category: 'wallHigh', variant: 0, frames: 7, frameWidth: 512, frameHeight: 512 },
-    structureTower: { path: './assets/world/structure-tower.png', category: 'wallHigh', variant: 1, frames: 7, frameWidth: 512, frameHeight: 512 },
-    gapEdge: { path: './assets/world/gap-edge.png', category: 'gap', variant: 0, frames: 7, frameWidth: 512, frameHeight: 512 },
-  });
+  assert.deepEqual(Object.keys(WORLD_ATLAS_MANIFEST), Object.keys(FINAL_MANIFEST_CONTRACT));
+  for (const [key, [path, category, variant]] of Object.entries(FINAL_MANIFEST_CONTRACT)) {
+    const metadata = WORLD_ATLAS_MANIFEST[key];
+    assert.equal(metadata.path, path, key);
+    assert.equal(metadata.category, category, key);
+    assert.equal(metadata.variant, variant, key);
+    if (key === 'gapEdge') {
+      assert.deepEqual(metadata, {
+        path, category, variant,
+        layout: 'roadEdge',
+        atlasWidth: 3584,
+        atlasHeight: 512,
+        frameWidth: 512,
+        frameHeight: 512,
+        yawDegrees: [-30, -20, -10, 0, 10, 20, 30],
+        frames: 7,
+      });
+    } else {
+      assert.equal(validateAtlasMetadata(metadata), true, key);
+      assert.deepEqual(metadata.worldBounds, CATEGORY_WORLD_BOUNDS[category], key);
+      assert.equal(metadata.frames.length, 21, key);
+      assert.ok(Number.isFinite(metadata.detailFrontZ) && metadata.detailFrontZ > 0, key);
+      assert.ok(Number.isFinite(metadata.pixelsPerWorldUnit) && metadata.pixelsPerWorldUnit > 0, key);
+    }
+    assertDeepFrozen(metadata);
+  }
   assert.deepEqual(WORLD_GEOMETRY, {
     drone: { worldWidth: 432, worldHeight: 360, baseY: 140 },
     turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120 },
@@ -109,14 +159,9 @@ test('upright view constants and legacy manifest remain deeply frozen compatibil
     corridorLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
     corridorMedium: { worldWidth: 648, worldHeight: 1250, baseY: 0 },
   });
-  for (const value of [
-    YAW_DEGREES,
-    PITCH_DEGREES,
-    WORLD_ATLAS_MANIFEST,
-    WORLD_GEOMETRY,
-    ...Object.values(WORLD_ATLAS_MANIFEST),
-    ...Object.values(WORLD_GEOMETRY),
-  ]) assert.equal(Object.isFrozen(value), true);
+  for (const value of [YAW_DEGREES, PITCH_DEGREES, WORLD_ATLAS_MANIFEST, WORLD_GEOMETRY]) {
+    assertDeepFrozen(value);
+  }
 });
 
 test('non-uniform axis blending interpolates and clamps at the supplied samples', () => {
@@ -270,10 +315,14 @@ test('coercible and non-integral metadata numbers fail validation and planning w
 
   invalid('string atlas width', (metadata) => { metadata.atlasWidth = '2240'; });
   invalid('string atlas height', (metadata) => { metadata.atlasHeight = '960'; });
+  invalid('wrong cell width', (metadata) => { metadata.frameWidth = 319; });
+  invalid('wrong cell height', (metadata) => { metadata.frameHeight = 319; });
   invalid('string yaw sample', (metadata) => { metadata.yawDegrees[0] = '-80'; });
   invalid('string pitch sample', (metadata) => { metadata.pitchDegrees[0] = '20'; });
   invalid('string world bound', (metadata) => { metadata.worldBounds.minX = '-324'; });
   invalid('null world bound', (metadata) => { metadata.worldBounds.minY = null; });
+  invalid('string detail front', (metadata) => { metadata.detailFrontZ = '120'; });
+  invalid('infinite detail front', (metadata) => { metadata.detailFrontZ = Infinity; });
   invalid('string source scale', (metadata) => { metadata.pixelsPerWorldUnit = '0.1'; });
   invalid('string source coordinate', (metadata) => { metadata.frames[0].source.sx = '0'; });
   invalid('null source coordinate', (metadata) => { metadata.frames[0].source.sy = null; });
@@ -283,6 +332,7 @@ test('coercible and non-integral metadata numbers fail validation and planning w
   invalid('null origin coordinate', (metadata) => { metadata.frames[0].origin.y = null; });
   invalid('NaN atlas dimension', (metadata) => { metadata.atlasWidth = NaN; });
   invalid('infinite world bound', (metadata) => { metadata.worldBounds.maxY = Infinity; });
+  invalid('non-finite depth bound', (metadata) => { metadata.worldBounds.minZ = NaN; });
   invalid('symbol source coordinate', (metadata) => { metadata.frames[0].source.sx = Symbol('bad'); });
 
   for (const [label, metadata] of invalidCases) {
@@ -309,6 +359,10 @@ test('malformed upright metadata fails validation and planning without throwing'
   outOfBounds.frames[20].source.sx = 2200;
   malformed.push(outOfBounds);
 
+  const outsideOwnCell = cloneMetadata(valid);
+  outsideOwnCell.frames[0].source = { sx: 319, sy: 10, sw: 2, sh: 20 };
+  malformed.push(outsideOwnCell);
+
   const nonFiniteOrigin = cloneMetadata(valid);
   nonFiniteOrigin.frames[0].origin.x = Infinity;
   malformed.push(nonFiniteOrigin);
@@ -316,6 +370,14 @@ test('malformed upright metadata fails validation and planning without throwing'
   const nonPositiveScale = cloneMetadata(valid);
   nonPositiveScale.pixelsPerWorldUnit = 0;
   malformed.push(nonPositiveScale);
+
+  const missingDetailFront = cloneMetadata(valid);
+  delete missingDetailFront.detailFrontZ;
+  malformed.push(missingDetailFront);
+
+  const nonPositiveDetailFront = cloneMetadata(valid);
+  nonPositiveDetailFront.detailFrontZ = 0;
+  malformed.push(nonPositiveDetailFront);
 
   const wrongYaw = cloneMetadata(valid);
   wrongYaw.yawDegrees[0] = -75;
@@ -352,6 +414,7 @@ test('road edges select their center source without upright blending', () => {
 });
 
 test('legacy yaw selection and atlas rectangles retain the seven-frame runtime behavior', () => {
+  const legacyMetadata = { frames: 7, frameWidth: 512, frameHeight: 512 };
   assert.deepEqual(selectYawBlend({ worldX: 0, zRel: 6000 }), {
     angle: 0, lowerIndex: 3, upperIndex: 3, mix: 0,
   });
@@ -361,32 +424,85 @@ test('legacy yaw selection and atlas rectangles retain the seven-frame runtime b
   assert.deepEqual(selectYawBlend({ worldX: 1e9, zRel: 1 }), {
     angle: 30, lowerIndex: 6, upperIndex: 6, mix: 0,
   });
-  assert.deepEqual(atlasFrameRect(WORLD_ATLAS_MANIFEST.droneScout, 6), {
+  assert.deepEqual(atlasFrameRect(legacyMetadata, 6), {
     sx: 3072, sy: 0, sw: 512, sh: 512,
   });
-  assert.deepEqual(atlasFrameRect(WORLD_ATLAS_MANIFEST.droneScout, -8), {
+  assert.deepEqual(atlasFrameRect(legacyMetadata, -8), {
     sx: 0, sy: 0, sw: 512, sh: 512,
   });
 });
 
-test('legacy destination calls return the exact frozen shape consumed by the current game', () => {
+test('destination-only upright calls bridge the current game with non-uniform yaw and center pitch crops', () => {
+  const metadata = syntheticUpright({ sourceShift: 8, sourceSize: 304 });
   const destination = { x: 100, y: 200, width: 80, height: 40 };
   const plan = buildSpriteDrawPlan({
-    metadata: WORLD_ATLAS_MANIFEST.droneScout,
-    worldX: Math.tan(5 * Math.PI / 180),
+    metadata,
+    worldX: Math.tan(42.5 * Math.PI / 180),
     zRel: 1,
     destination,
     alpha: 1.5,
   });
   assert.deepEqual(plan, {
-    lower: { sx: 1536, sy: 0, sw: 512, sh: 512 },
-    upper: { sx: 2048, sy: 0, sw: 512, sh: 512 },
+    lower: { sx: 1288, sy: 328, sw: 304, sh: 304 },
+    upper: { sx: 1608, sy: 328, sw: 304, sh: 304 },
     mix: 0.5,
     destination,
     alpha: 1,
   });
   assert.equal(Object.isFrozen(plan), true);
   assert.equal(Object.isFrozen(plan.destination), true);
+});
+
+test('the committed drone metadata supports both the temporary and final upright call shapes', () => {
+  const metadata = WORLD_ATLAS_MANIFEST.droneScout;
+  const destination = { x: 40, y: 60, width: 120, height: 80 };
+  const legacy = buildSpriteDrawPlan({
+    metadata,
+    worldX: Math.tan(42.5 * Math.PI / 180),
+    zRel: 1,
+    destination,
+    alpha: 0.75,
+  });
+  assert.deepEqual(legacy, {
+    lower: metadata.frames[11].source,
+    upper: metadata.frames[12].source,
+    mix: 0.5,
+    destination,
+    alpha: 0.75,
+  });
+
+  const depth = 1000;
+  const visualCenterY = (metadata.worldBounds.minY + metadata.worldBounds.maxY) / 2;
+  const finalPlan = buildSpriteDrawPlan({
+    metadata,
+    worldX: 0,
+    zRel: depth,
+    cameraY: visualCenterY + Math.tan(55 * Math.PI / 180) * depth,
+    projectedOrigin: { x: 500, y: 320 },
+    pixelsPerWorldUnitX: 0.2,
+    pixelsPerWorldUnitY: 0.15,
+  });
+  assert.equal(finalPlan.draws.length, 1);
+  assert.deepEqual(finalPlan.draws[0].source, metadata.frames[10].source);
+  assert.equal(finalPlan.draws[0].weight, 1);
+});
+
+test('destination-only road-edge calls preserve seven-yaw 512-frame behavior', () => {
+  const metadata = WORLD_ATLAS_MANIFEST.gapEdge;
+  const destination = { x: 20, y: 40, width: 120, height: 60 };
+  const plan = buildSpriteDrawPlan({
+    metadata,
+    worldX: Math.tan(-15 * Math.PI / 180),
+    zRel: 1,
+    destination,
+    alpha: 0.6,
+  });
+  assert.deepEqual(plan?.lower, { sx: 512, sy: 0, sw: 512, sh: 512 });
+  assert.deepEqual(plan?.upper, { sx: 1024, sy: 0, sw: 512, sh: 512 });
+  approximately(plan?.mix, 0.5);
+  assert.deepEqual(plan?.destination, destination);
+  assert.equal(plan?.alpha, 0.6);
+  assertDeepFrozen(plan);
 });
 
 test('world draw rectangles use fixed collision geometry at each viewport, depth, and lane region', () => {
@@ -410,14 +526,26 @@ test('world draw rectangles use fixed collision geometry at each viewport, depth
   }
 });
 
-test('variant selection remains stable and covers future medium and corridor atlases', () => {
+test('variant selection remains stable and covers every final category key', () => {
   assert.equal(variantKey('unknown', 2, 4), null);
   assert.equal(variantKey('gap', 17, 2), 'gapEdge');
-  for (const category of ['drone', 'wallMedium', 'corridorLow', 'corridorMedium']) {
+  assert.equal(variantKey('corridorLow', 17, 2), 'corridorLow');
+  assert.equal(variantKey('corridorMedium', 17, 2), 'corridorMedium');
+  for (const category of Object.keys(CATEGORY_WORLD_BOUNDS)) {
     const first = variantKey(category, 17, 2);
     assert.equal(typeof first, 'string');
     assert.equal(first, variantKey(category, 17, 2));
   }
+  const variants = (category) => new Set(Array.from({ length: 64 }, (_, segmentIndex) => (
+    variantKey(category, segmentIndex, 0)
+  )));
+  assert.deepEqual(variants('drone'), new Set(['droneScout', 'droneStriker']));
+  assert.deepEqual(variants('turret'), new Set(['turretSentry', 'turretHeavy']));
+  assert.deepEqual(variants('wallLow'), new Set(['barrierRail', 'barrierCrate']));
+  assert.deepEqual(variants('wallMedium'), new Set(['structurePylon', 'structureBastion']));
+  assert.deepEqual(variants('wallHigh'), new Set(['structureReactor', 'structureTower']));
+  assert.deepEqual(variants('corridorLow'), new Set(['corridorLow']));
+  assert.deepEqual(variants('corridorMedium'), new Set(['corridorMedium']));
   const drone = { segmentIndex: 17, stableLaneKey: 2, state: 'rest', fromLane: 2 };
   const atRest = variantKey('drone', drone.segmentIndex, drone.stableLaneKey);
   drone.state = 'warn';

@@ -5,9 +5,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const vm = require('node:vm');
 const { execFileSync, spawnSync } = require('node:child_process');
 const { preloadVisualAssets, resolvePlayerShipFrame } = require('../src/presentation.js');
+const {
+  WORLD_ATLAS_MANIFEST,
+  WORLD_GEOMETRY,
+  buildSpriteDrawPlan,
+  validateAtlasMetadata,
+} = require('../src/world-art.js');
 
 const root = path.resolve(__dirname, '..');
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -25,33 +32,40 @@ const UPRIGHT_ATLAS_IDS = [
   'corridor-low',
   'corridor-medium',
 ];
+const UPRIGHT_ATLAS_PATHS = UPRIGHT_ATLAS_IDS.map((id) => `assets/world/${id}.png`);
+const UPRIGHT_RUNTIME_KEYS = Object.freeze({
+  'drone-scout': 'droneScout',
+  'drone-striker': 'droneStriker',
+  'turret-sentry': 'turretSentry',
+  'turret-heavy': 'turretHeavy',
+  'barrier-rail': 'barrierRail',
+  'barrier-crate': 'barrierCrate',
+  'structure-pylon': 'structurePylon',
+  'structure-bastion': 'structureBastion',
+  'structure-reactor': 'structureReactor',
+  'structure-tower': 'structureTower',
+  'corridor-low': 'corridorLow',
+  'corridor-medium': 'corridorMedium',
+});
 const MANIFEST_RECIPE_IDS = [
   ...UPRIGHT_ATLAS_IDS,
   'gap-edge',
 ];
-const LEGACY_COMMITTED_ATLAS_IDS = [
-  'drone-scout',
-  'drone-striker',
-  'turret-sentry',
-  'turret-heavy',
-  'barrier-rail',
-  'barrier-crate',
-  'structure-reactor',
-  'structure-tower',
-  'gap-edge',
-];
-const LEGACY_COMMITTED_ATLAS_PATHS = LEGACY_COMMITTED_ATLAS_IDS
-  .map((id) => `assets/world/${id}.png`);
-const LEGACY_PROVENANCE_RENDERER_SHA256 = '5fde628296a1369259c437e380c5b32e731ddd4b9d4c0c10735af786cce409d3';
+const FINAL_WORLD_ATLAS_PATHS = [...UPRIGHT_ATLAS_PATHS, 'assets/world/gap-edge.png'];
+const FINAL_RENDERER_SHA256 = 'b42e67597d54ca6aa84bc08325737e5e09c75c44ea659274ea4173768ffbcef1';
 const WORLD_OUTPUT_HASHES = {
-  'assets/world/drone-scout.png': '9ab7c75a5eb1afe52950b064e8d453798be0df8c9bc600fdc9952e3d1106ed5d',
-  'assets/world/drone-striker.png': '8065eadf564c7b17aa301bc3738afd7591ba8c8cae695de98c96532b86c99736',
-  'assets/world/turret-sentry.png': '78ae048ac6fa37c8c46efa584de197caa09daa9d2fb99ea26d6a34e61225dc2a',
-  'assets/world/turret-heavy.png': 'ebd1950a29d6424db4fc19f3f9643c3ff133b1d630460e8848f08862028194b7',
-  'assets/world/barrier-rail.png': 'f0a8f85fdb02e5c07400e7ff06567cfd9d066051f5406ca37c591daf8285d914',
-  'assets/world/barrier-crate.png': '33b44384aae4c7cb6ea7d3f468fddf41f7918bf04b26ced88ef7e5561faf386d',
-  'assets/world/structure-reactor.png': '317a3b6dcb3fe72d4a065f4fd52d541494150681c9a068c4c6aff36b7d6db690',
-  'assets/world/structure-tower.png': '360a2fbae947d891c4b2ee9b50d141ad12186dfd894630036e9f4d953a360b3d',
+  'assets/world/drone-scout.png': 'c700f47ecdccfe5f3400f5947cf5494331442c80a347205efa1caaca71d5ba82',
+  'assets/world/drone-striker.png': '774ec0bae0db51b05d2dd5ce48e4449b576c246414a6578cefb07b301b47f376',
+  'assets/world/turret-sentry.png': 'b7688afbe1767a772abf9f397fd524e5e241a6d1ffc29ff849ce948583615fb9',
+  'assets/world/turret-heavy.png': 'bc915327eb3b8354e94d8f78a9a1e6a2f38208f30a15b55736a3126e414cb4a3',
+  'assets/world/barrier-rail.png': '28a2f5ee63b70708e593c1f1e82ac6c5094fcc9c3464023004581c310f6f879a',
+  'assets/world/barrier-crate.png': 'c0b327ffbccdc0ba3880200ac9832fd42872f1c707951188a9c1df58000394f1',
+  'assets/world/structure-pylon.png': '340d52a6371b6ed19107b977f6f12c4757156599dbc383d8cdcef39e9d088da5',
+  'assets/world/structure-bastion.png': '5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9',
+  'assets/world/structure-reactor.png': 'b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa',
+  'assets/world/structure-tower.png': 'ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436',
+  'assets/world/corridor-low.png': '909d33ed9f38c4b7b75cbde296daddb26dc5dabedc70e474be2d80a522c1a2d9',
+  'assets/world/corridor-medium.png': '40213dacdf2177909dffe0980a9e4ad1872dfeffcc3b1fb3bf346348d1c85968',
   'assets/world/gap-edge.png': 'c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49',
 };
 const WORLD_SOURCE_HASHES = {
@@ -124,102 +138,332 @@ function sipsDimensions(relativePath) {
   };
 }
 
+function paethPredictor(left, up, upperLeft) {
+  const estimate = left + up - upperLeft;
+  const leftDistance = Math.abs(estimate - left);
+  const upDistance = Math.abs(estimate - up);
+  const upperLeftDistance = Math.abs(estimate - upperLeft);
+  if (leftDistance <= upDistance && leftDistance <= upperLeftDistance) return left;
+  if (upDistance <= upperLeftDistance) return up;
+  return upperLeft;
+}
+
+function decodePngRgba(relativePath) {
+  const bytes = assertPng(relativePath);
+  let offset = PNG_SIGNATURE.length;
+  let header = null;
+  const compressed = [];
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString('ascii', offset + 4, offset + 8);
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') {
+      header = {
+        width: data.readUInt32BE(0),
+        height: data.readUInt32BE(4),
+        bitDepth: data[8],
+        colorType: data[9],
+        compression: data[10],
+        filter: data[11],
+        interlace: data[12],
+      };
+    } else if (type === 'IDAT') compressed.push(data);
+    offset += length + 12;
+    if (type === 'IEND') break;
+  }
+  assert.ok(header, `${relativePath} must have an IHDR chunk`);
+  assert.deepEqual(
+    [header.bitDepth, header.colorType, header.compression, header.filter, header.interlace],
+    [8, 6, 0, 0, 0],
+    `${relativePath} must be non-interlaced 8-bit RGBA`,
+  );
+  const stride = header.width * 4;
+  const filtered = zlib.inflateSync(Buffer.concat(compressed));
+  assert.equal(filtered.length, (stride + 1) * header.height, relativePath);
+  const rgba = Buffer.alloc(stride * header.height);
+  let sourceOffset = 0;
+  for (let y = 0; y < header.height; y += 1) {
+    const filter = filtered[sourceOffset];
+    sourceOffset += 1;
+    for (let x = 0; x < stride; x += 1) {
+      const raw = filtered[sourceOffset + x];
+      const destination = y * stride + x;
+      const left = x >= 4 ? rgba[destination - 4] : 0;
+      const up = y > 0 ? rgba[destination - stride] : 0;
+      const upperLeft = y > 0 && x >= 4 ? rgba[destination - stride - 4] : 0;
+      let value;
+      if (filter === 0) value = raw;
+      else if (filter === 1) value = raw + left;
+      else if (filter === 2) value = raw + up;
+      else if (filter === 3) value = raw + Math.floor((left + up) / 2);
+      else if (filter === 4) value = raw + paethPredictor(left, up, upperLeft);
+      else assert.fail(`${relativePath} uses unsupported PNG filter ${filter}`);
+      rgba[destination] = value & 0xff;
+    }
+    sourceOffset += stride;
+  }
+  return { ...header, rgba };
+}
+
+function measureCenterArmorWidth(decoded, metadata) {
+  const frameIndex = 3;
+  const cellX = (frameIndex % 7) * metadata.frameWidth;
+  const cellY = Math.floor(frameIndex / 7) * metadata.frameHeight;
+  const maxAlphaByColumn = [];
+  for (let x = cellX; x < cellX + metadata.frameWidth; x += 1) {
+    let maximum = 0;
+    for (let y = cellY; y < cellY + metadata.frameHeight; y += 1) {
+      maximum = Math.max(maximum, decoded.rgba[(y * decoded.width + x) * 4 + 3]);
+    }
+    maxAlphaByColumn.push(maximum);
+  }
+  const visibleColumns = maxAlphaByColumn
+    .map((alpha, index) => ({ alpha, x: cellX + index }))
+    .filter(({ alpha }) => alpha >= 16);
+  assert.ok(visibleColumns.length > 2, `${metadata.path} needs a measurable center silhouette`);
+  const leftColumn = visibleColumns[0].x;
+  const rightColumn = visibleColumns.at(-1).x;
+
+  const modalPartialAlpha = (x) => {
+    const counts = new Map();
+    for (let y = cellY; y < cellY + metadata.frameHeight; y += 1) {
+      const alpha = decoded.rgba[(y * decoded.width + x) * 4 + 3];
+      if (alpha >= 16 && alpha < 255) counts.set(alpha, (counts.get(alpha) || 0) + 1);
+    }
+    assert.ok(counts.size > 0, `${metadata.path} edge column ${x} needs subpixel alpha coverage`);
+    return [...counts].sort(([alphaA, countA], [alphaB, countB]) => (
+      countB - countA || alphaA - alphaB
+    ))[0][0];
+  };
+
+  // The modal partial-alpha sample estimates the subpixel coverage of the
+  // normalized silhouette edge while ignoring rare corners/overdraw. Using
+  // the conservative symmetric half-span prevents coincident faces on one
+  // side from inflating the measured armor envelope.
+  const leftEdge = leftColumn + 1 - modalPartialAlpha(leftColumn) / 255;
+  const rightEdge = rightColumn + modalPartialAlpha(rightColumn) / 255;
+  const leftHalfWorld = (metadata.frames[frameIndex].origin.x - leftEdge)
+    / metadata.pixelsPerWorldUnit;
+  const rightHalfWorld = (rightEdge - metadata.frames[frameIndex].origin.x)
+    / metadata.pixelsPerWorldUnit;
+  assert.ok(leftHalfWorld > 0 && rightHalfWorld > 0, `${metadata.path} must straddle its world origin`);
+  assert.ok(Math.abs(leftHalfWorld - rightHalfWorld) <= 3,
+    `${metadata.path} center silhouette must remain symmetric after raster edge recovery`);
+  return 2 * Math.min(leftHalfWorld, rightHalfWorld);
+}
+
+function projectUprightPoint(metadata, frameIndex, point) {
+  const yaw = metadata.yawDegrees[frameIndex % 7] * Math.PI / 180;
+  const pitch = metadata.pitchDegrees[Math.floor(frameIndex / 7)] * Math.PI / 180;
+  const rotatedX = point.x * Math.cos(yaw) + point.z * Math.sin(yaw);
+  const rotatedZ = -point.x * Math.sin(yaw) + point.z * Math.cos(yaw);
+  const origin = metadata.frames[frameIndex].origin;
+  return {
+    x: origin.x + rotatedX * metadata.pixelsPerWorldUnit,
+    y: origin.y - (point.y * Math.cos(pitch) - rotatedZ * Math.sin(pitch))
+      * metadata.pixelsPerWorldUnit,
+  };
+}
+
+function projectedWorldBoxBounds(metadata, frameIndex, center, size, padding = 2) {
+  const points = [];
+  for (const x of [-0.5, 0.5]) for (const y of [-0.5, 0.5]) for (const z of [-0.5, 0.5]) {
+    points.push(projectUprightPoint(metadata, frameIndex, {
+      x: center.x + x * size.x,
+      y: center.y + y * size.y,
+      z: center.z + z * size.z,
+    }));
+  }
+  return {
+    minX: Math.floor(Math.min(...points.map(({ x }) => x))) - padding,
+    maxX: Math.ceil(Math.max(...points.map(({ x }) => x))) + padding,
+    minY: Math.floor(Math.min(...points.map(({ y }) => y))) - padding,
+    maxY: Math.ceil(Math.max(...points.map(({ y }) => y))) + padding,
+  };
+}
+
+function isGeneratedCyanSample(rgba, offset) {
+  const [red, green, blue, alpha] = rgba.subarray(offset, offset + 4);
+  return alpha >= 48 && red >= 112 && green >= 224 && blue >= 224
+    && Math.abs(green - blue) <= 24;
+}
+
+function countGeneratedCyanDifference(candidate, reference, bounds) {
+  assert.equal(candidate.width, reference.width);
+  assert.equal(candidate.height, reference.height);
+  let count = 0;
+  const minX = Math.max(0, bounds.minX);
+  const maxX = Math.min(candidate.width - 1, bounds.maxX);
+  const minY = Math.max(0, bounds.minY);
+  const maxY = Math.min(candidate.height - 1, bounds.maxY);
+  for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
+    const offset = (y * candidate.width + x) * 4;
+    if (isGeneratedCyanSample(candidate.rgba, offset)
+        && !isGeneratedCyanSample(reference.rgba, offset)) count += 1;
+  }
+  return count;
+}
+
+function generatedCyanComponentAttachment(candidate, reference, bounds, frameIndex) {
+  assert.equal(candidate.width, reference.width);
+  assert.equal(candidate.height, reference.height);
+  const cellX = (frameIndex % 7) * 320;
+  const cellY = Math.floor(frameIndex / 7) * 320;
+  const cellMaxX = cellX + 319;
+  const cellMaxY = cellY + 319;
+  const minX = Math.max(cellX, bounds.minX);
+  const maxX = Math.min(cellMaxX, bounds.maxX);
+  const minY = Math.max(cellY, bounds.minY);
+  const maxY = Math.min(cellMaxY, bounds.maxY);
+  const queue = [];
+  const visited = new Uint8Array(candidate.width * candidate.height);
+  for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
+    const offset = (y * candidate.width + x) * 4;
+    if (!isGeneratedCyanSample(candidate.rgba, offset)
+        || isGeneratedCyanSample(reference.rgba, offset)) continue;
+    const index = y * candidate.width + x;
+    if (!visited[index]) {
+      visited[index] = 1;
+      queue.push(index);
+    }
+  }
+  const seedCount = queue.length;
+  let touchesReference = false;
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const index = queue[cursor];
+    const x = index % candidate.width;
+    const y = Math.floor(index / candidate.width);
+    const offset = index * 4;
+    if (reference.rgba[offset + 3] >= 16) touchesReference = true;
+    for (let deltaY = -1; deltaY <= 1; deltaY += 1) for (let deltaX = -1; deltaX <= 1; deltaX += 1) {
+      if (deltaX === 0 && deltaY === 0) continue;
+      const nextX = x + deltaX;
+      const nextY = y + deltaY;
+      if (nextX < cellX || nextX > cellMaxX || nextY < cellY || nextY > cellMaxY) continue;
+      const nextIndex = nextY * candidate.width + nextX;
+      if (visited[nextIndex] || candidate.rgba[nextIndex * 4 + 3] < 16) continue;
+      visited[nextIndex] = 1;
+      queue.push(nextIndex);
+    }
+  }
+  return { seedCount, touchesReference };
+}
+
+function generatedCyanEvidence(decoded, bounds) {
+  let count = 0;
+  let maxHorizontalRun = 0;
+  const minX = Math.max(0, bounds.minX);
+  const maxX = Math.min(decoded.width - 1, bounds.maxX);
+  const minY = Math.max(0, bounds.minY);
+  const maxY = Math.min(decoded.height - 1, bounds.maxY);
+  for (let y = minY; y <= maxY; y += 1) {
+    let run = 0;
+    for (let x = minX; x <= maxX; x += 1) {
+      const offset = (y * decoded.width + x) * 4;
+      if (isGeneratedCyanSample(decoded.rgba, offset)) {
+        count += 1;
+        run += 1;
+        maxHorizontalRun = Math.max(maxHorizontalRun, run);
+      } else run = 0;
+    }
+  }
+  return { count, maxHorizontalRun };
+}
+
 function pngAlphaStats(relativePaths) {
-  const source = `
-    import AppKit
-    import Foundation
-    for path in CommandLine.arguments.dropFirst() {
-      guard let image = NSImage(contentsOfFile: path),
-            let data = image.tiffRepresentation,
-            let bitmap = NSBitmapImageRep(data: data) else { exit(2) }
-      var borders = ["top": 0, "right": 0, "bottom": 0, "left": 0]
-      var frameLeftBorders = [Int](repeating: 0, count: 7)
-      var frameRightBorders = [Int](repeating: 0, count: 7)
-      var frameBounds = (0..<7).map { _ in [
-        "minX": Int.max,
-        "maxX": Int.min,
-        "minY": Int.max,
-        "maxY": Int.min,
-      ] }
-      var transparentPixels = 0
-      var hiddenRgbPixels = 0
-      var opaqueColorPixels = 0
-      var orangePixels = 0
-      var redPurplePixels = 0
-      for y in 0..<bitmap.pixelsHigh {
-        for x in 0..<bitmap.pixelsWide {
-          guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { exit(3) }
-          if color.alphaComponent == 0 {
-            transparentPixels += 1
-            if color.redComponent != 0 || color.greenComponent != 0 || color.blueComponent != 0 {
-              hiddenRgbPixels += 1
-            }
-          }
-          if color.alphaComponent > 0 {
-            if y == 0 { borders["top"]! += 1 }
-            if x == bitmap.pixelsWide - 1 { borders["right"]! += 1 }
-            if y == bitmap.pixelsHigh - 1 { borders["bottom"]! += 1 }
-            if x == 0 { borders["left"]! += 1 }
-            if x % 512 == 0 { frameLeftBorders[x / 512] += 1 }
-            if x % 512 == 511 { frameRightBorders[x / 512] += 1 }
-          }
-          if color.alphaComponent >= (16.0 / 255.0) {
-            opaqueColorPixels += 1
-            var hue: CGFloat = 0
-            var saturation: CGFloat = 0
-            var brightness: CGFloat = 0
-            var alpha: CGFloat = 0
-            color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-            if saturation >= 0.35 && hue >= 0.04 && hue <= 0.14 { orangePixels += 1 }
-            if saturation >= 0.35 && (hue < 0.04 || hue >= 0.78) { redPurplePixels += 1 }
-            let frameIndex = x / 512
-            let frameX = x % 512
-            frameBounds[frameIndex]["minX"] = min(frameBounds[frameIndex]["minX"]!, frameX)
-            frameBounds[frameIndex]["maxX"] = max(frameBounds[frameIndex]["maxX"]!, frameX)
-            frameBounds[frameIndex]["minY"] = min(frameBounds[frameIndex]["minY"]!, y)
-            frameBounds[frameIndex]["maxY"] = max(frameBounds[frameIndex]["maxY"]!, y)
-          }
+  return relativePaths.map((relativePath) => {
+    const { width, height, rgba } = decodePngRgba(relativePath);
+    const borders = { top: 0, right: 0, bottom: 0, left: 0 };
+    let transparentPixels = 0;
+    let hiddenRgbPixels = 0;
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const [red, green, blue, alpha] = rgba.subarray(offset, offset + 4);
+      if (alpha === 0) {
+        transparentPixels += 1;
+        if (red !== 0 || green !== 0 || blue !== 0) hiddenRgbPixels += 1;
+      }
+      if (alpha > 0) {
+        if (y === 0) borders.top += 1;
+        if (x === width - 1) borders.right += 1;
+        if (y === height - 1) borders.bottom += 1;
+        if (x === 0) borders.left += 1;
+      }
+    }
+    return { path: relativePath, width, height, borders, transparentPixels, hiddenRgbPixels };
+  });
+}
+
+function compareBoundedUprightRenderSets(referenceAtlases, candidateAtlases) {
+  if (referenceAtlases.length !== candidateAtlases.length) {
+    return { matches: false, differingPixels: 0 };
+  }
+  let differingPixels = 0;
+  for (let atlasIndex = 0; atlasIndex < referenceAtlases.length; atlasIndex += 1) {
+    const reference = referenceAtlases[atlasIndex];
+    const candidate = candidateAtlases[atlasIndex];
+    if (reference.id !== candidate.id
+        || reference.width !== candidate.width
+        || reference.height !== candidate.height
+        || reference.rgba.length !== candidate.rgba.length) {
+      return { matches: false, differingPixels };
+    }
+    for (let offset = 0; offset < reference.rgba.length; offset += 4) {
+      const changedChannels = [];
+      for (let channel = 0; channel < 4; channel += 1) {
+        if (reference.rgba[offset + channel] !== candidate.rgba[offset + channel]) {
+          changedChannels.push(channel);
         }
       }
-      let frameBorders = (0..<7).map { [
-        "left": frameLeftBorders[$0],
-        "right": frameRightBorders[$0],
-      ] }
-      let opaqueBounds = frameBounds.map { bounds -> [String: Int] in
-        let minX = bounds["minX"]!
-        let maxX = bounds["maxX"]!
-        let minY = bounds["minY"]!
-        let maxY = bounds["maxY"]!
-        return [
-          "minX": minX,
-          "maxX": maxX,
-          "minY": minY,
-          "maxY": maxY,
-          "opaqueWidth": maxX >= minX ? maxX - minX + 1 : 0,
-          "opaqueHeight": maxY >= minY ? maxY - minY + 1 : 0,
-        ]
+      if (changedChannels.length === 0) continue;
+      differingPixels += 1;
+      const channel = changedChannels[0];
+      if (differingPixels > 1
+          || changedChannels.length !== 1
+          || channel >= 3
+          || reference.rgba[offset + 3] !== 255
+          || candidate.rgba[offset + 3] !== 255
+          || Math.abs(reference.rgba[offset + channel] - candidate.rgba[offset + channel]) !== 16) {
+        return { matches: false, differingPixels };
       }
-      let result: [String: Any] = [
-        "path": path,
-        "width": bitmap.pixelsWide,
-        "height": bitmap.pixelsHigh,
-        "borders": borders,
-        "frameBorders": frameBorders,
-        "opaqueBounds": opaqueBounds,
-        "transparentPixels": transparentPixels,
-        "hiddenRgbPixels": hiddenRgbPixels,
-        "opaqueColorPixels": opaqueColorPixels,
-        "orangePixels": orangePixels,
-        "redPurplePixels": redPurplePixels,
-      ]
-      let encoded = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
-      print(String(data: encoded, encoding: .utf8)!)
     }
-  `;
-  const absolutePaths = relativePaths.map((relativePath) => path.join(root, relativePath));
-  return execFileSync('swift', ['-e', source, ...absolutePaths], { encoding: 'utf8' })
-    .trim().split('\n').map((line) => JSON.parse(line));
+  }
+  return { matches: true, differingPixels };
 }
+
+test('the fresh-render comparator permits only one bounded opaque color sample globally', () => {
+  const atlas = (id, pixels) => ({ id, width: 2, height: 1, rgba: Buffer.from(pixels) });
+  const baseline = [
+    atlas('first', [16, 32, 48, 255, 64, 80, 96, 255]),
+    atlas('second', [112, 128, 144, 255, 160, 176, 192, 255]),
+  ];
+  const candidate = baseline.map(({ id, width, height, rgba }) => ({
+    id, width, height, rgba: Buffer.from(rgba),
+  }));
+  candidate[1].rgba[4] += 16;
+  assert.deepEqual(compareBoundedUprightRenderSets(baseline, candidate), {
+    matches: true, differingPixels: 1,
+  });
+
+  const secondPixel = candidate.map(({ id, width, height, rgba }) => ({
+    id, width, height, rgba: Buffer.from(rgba),
+  }));
+  secondPixel[0].rgba[1] += 16;
+  assert.equal(compareBoundedUprightRenderSets(baseline, secondPixel).matches, false);
+
+  for (const mutation of [
+    (rgba) => { rgba[4] -= 1; },
+    (rgba) => { rgba[5] += 16; },
+    (rgba) => { rgba[7] = 254; },
+  ]) {
+    const invalid = baseline.map(({ id, width, height, rgba }) => ({
+      id, width, height, rgba: Buffer.from(rgba),
+    }));
+    invalid[1].rgba[4] += 16;
+    mutation(invalid[1].rgba);
+    assert.equal(compareBoundedUprightRenderSets(baseline, invalid).matches, false);
+  }
+});
 
 test('both player frames are decodable 512 by 384 transparent PNGs', () => {
   for (const relativePath of ['assets/ship/player-neutral.png', 'assets/ship/player-thrust.png']) {
@@ -412,6 +656,108 @@ test('the world renderer maps source material names to an orange-free neutral hi
       precondition(rgb("unexpected-orange-source") == [0xe9, 0xef, 0xf6])
     `);
     const executablePath = path.join(temporaryRoot, 'material-palette-test');
+    const compile = spawnSync('swiftc', [rendererLibraryPath, harnessPath, '-o', executablePath], {
+      cwd: root, encoding: 'utf8',
+    });
+    assert.equal(compile.status, 0, compile.stderr);
+    const run = spawnSync(executablePath, [], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('the world renderer samples audited colormap texels without interpolated GPU drift', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-texture-filter.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    fs.writeFileSync(harnessPath, `
+      import AppKit
+      import Foundation
+      import SceneKit
+
+      let source = SCNMaterial()
+      let texturePath = "fixture-colormap.png"
+      let texture = NSImage(size: NSSize(width: 2, height: 2))
+      let textured = styledMaterial(
+          source: source, index: 0,
+          texturePaths: [texturePath], images: [texturePath: texture]
+      )
+      precondition(textured.diffuse.magnificationFilter == .nearest)
+      precondition(textured.diffuse.minificationFilter == .nearest)
+      precondition(textured.diffuse.mipFilter == .nearest)
+      precondition(textured.isDoubleSided == false)
+
+      let untextured = styledMaterial(source: source, index: 0, texturePaths: [], images: [:])
+      precondition(untextured.diffuse.magnificationFilter == .linear)
+      precondition(untextured.diffuse.minificationFilter == .linear)
+      precondition(untextured.diffuse.mipFilter == .linear)
+      precondition(untextured.isDoubleSided == true)
+    `);
+    const executablePath = path.join(temporaryRoot, 'texture-filter-test');
+    const compile = spawnSync('swiftc', [rendererLibraryPath, harnessPath, '-o', executablePath], {
+      cwd: root, encoding: 'utf8',
+    });
+    assert.equal(compile.status, 0, compile.stderr);
+    const run = spawnSync(executablePath, [], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('upright camera metadata scale matches the measured SceneKit projection', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-camera-scale.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    fs.writeFileSync(harnessPath, `
+      import AppKit
+      import Foundation
+      import SceneKit
+
+      let frame = UprightFrameContract(
+          width: 320, height: 320,
+          yawDegrees: [-80, -55, -30, 0, 30, 55, 80],
+          pitchDegrees: [20, 55, 80]
+      )
+      let sampleScale = 2
+      let bounds = WORLD_BOUNDS["wallLow"]!
+      let scene = SCNScene()
+      let setup = try addUprightCamera(to: scene, worldBounds: bounds, frame: frame)
+      let pitch = Double(frame.pitchDegrees[0]) * Double.pi / 180
+      setup.cameraNode.position = SCNVector3(
+          0,
+          setup.target.position.y + setup.distance * sin(pitch),
+          setup.distance * cos(pitch)
+      )
+      let renderer = SCNRenderer(device: nil, options: nil)
+      renderer.scene = scene
+      renderer.pointOfView = setup.cameraNode
+      _ = renderer.snapshot(
+          atTime: 0,
+          with: CGSize(width: frame.width * sampleScale, height: frame.height * sampleScale),
+          antialiasingMode: .none
+      )
+      let centerY = (bounds.minY + bounds.maxY) / 2
+      let left = renderer.projectPoint(SCNVector3(bounds.minX, centerY, 0))
+      let right = renderer.projectPoint(SCNVector3(bounds.maxX, centerY, 0))
+      let measuredPixelsPerWorldUnit = Double(right.x - left.x)
+          / Double(sampleScale) / (bounds.maxX - bounds.minX)
+      precondition(abs(measuredPixelsPerWorldUnit - setup.pixelsPerWorldUnit) < 0.000001)
+    `);
+    const executablePath = path.join(temporaryRoot, 'camera-scale-test');
     const compile = spawnSync('swiftc', [rendererLibraryPath, harnessPath, '-o', executablePath], {
       cwd: root, encoding: 'utf8',
     });
@@ -673,6 +1019,7 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
           _ source: UprightAtlasMetadata,
           atlasWidth: Int? = nil,
           atlasHeight: Int? = nil,
+          detailFrontZ: Double? = nil,
           pixelsPerWorldUnit: Double? = nil,
           frames: [UprightFrameMetadata]? = nil
       ) -> UprightAtlasMetadata {
@@ -684,6 +1031,7 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
               frameHeight: source.frameHeight,
               yawDegrees: source.yawDegrees,
               pitchDegrees: source.pitchDegrees,
+              detailFrontZ: detailFrontZ ?? source.detailFrontZ,
               worldBounds: source.worldBounds,
               pixelsPerWorldUnit: pixelsPerWorldUnit ?? source.pixelsPerWorldUnit,
               frames: frames ?? source.frames
@@ -696,6 +1044,20 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
           yawDegrees: [-80, -55, -30, 0, 30, 55, 80],
           pitchDegrees: [20, 55, 80]
       )
+      precondition(baseCyanBandRatios(for: "drone") == [0.48])
+      precondition(baseCyanBandRatios(for: "turret") == [0.34])
+      precondition(baseCyanBandRatios(for: "wallLow") == [0.34])
+      precondition(baseCyanBandRatios(for: "wallMedium") == [0.34, 0.68])
+      precondition(baseCyanBandRatios(for: "wallHigh") == [0.34, 0.68])
+      precondition(baseCyanBandRatios(for: "corridorLow") == [0.34])
+      precondition(baseCyanBandRatios(for: "corridorMedium") == [0.34])
+      let syntheticDetailFrontZ = try normalizedArmorHalfDepth(
+          sourceDepth: 240.2469134,
+          horizontalScale: 1
+      )
+      precondition(abs(syntheticDetailFrontZ - 120.1234567) < 0.000000001)
+      let syntheticConduitInset = try generatedConduitInset(worldWidth: 648, conduitWidth: 36)
+      precondition(syntheticConduitInset == 18)
       let worldBounds = WorldBoundsMetadata(
           minX: -216, maxX: 216,
           minY: 140, maxY: 500,
@@ -718,6 +1080,18 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
                       pixels[offset + 3] = 255
                   }
               }
+              if pitchIndex == 0 && yawIndex == 0 {
+                  let invalidPremultipliedOffset = ((minY + 2) * 320 + minX + 2) * 4
+                  pixels[invalidPremultipliedOffset] = 250
+                  pixels[invalidPremultipliedOffset + 1] = 200
+                  pixels[invalidPremultipliedOffset + 2] = 100
+                  pixels[invalidPremultipliedOffset + 3] = 70
+                  let validPremultipliedOffset = ((minY + 2) * 320 + minX + 3) * 4
+                  pixels[validPremultipliedOffset] = 16
+                  pixels[validPremultipliedOffset + 1] = 32
+                  pixels[validPremultipliedOffset + 2] = 48
+                  pixels[validPremultipliedOffset + 3] = 64
+              }
               let alphaOneOffset = (minY * 320 + minX) * 4
               pixels[alphaOneOffset] = 1
               pixels[alphaOneOffset + 1] = 1
@@ -739,6 +1113,7 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
           cells: cells,
           frame: contract,
           worldBounds: worldBounds,
+          detailFrontZ: syntheticDetailFrontZ,
           pixelsPerWorldUnit: 2.3456789,
           supersample: 2,
           assetID: "drone-scout"
@@ -748,8 +1123,13 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
       precondition(metadata.atlasHeight == 960)
       precondition(product.pixels.count == 2240 * 960 * 4)
       precondition(metadata.frames.count == 21)
+      precondition(metadata.detailFrontZ == 120.123457)
       precondition(metadata.pixelsPerWorldUnit == 2.345679)
       precondition(metadata.frames[0].origin == PixelPoint(x: 40.123457, y: 210.765432))
+      let repairedPremultipliedOffset = (12 * 2_240 + 10) * 4
+      precondition(Array(product.pixels[repairedPremultipliedOffset..<(repairedPremultipliedOffset + 4)]) == [70, 70, 70, 70])
+      let preservedPremultipliedOffset = (12 * 2_240 + 11) * 4
+      precondition(Array(product.pixels[preservedPremultipliedOffset..<(preservedPremultipliedOffset + 4)]) == [16, 32, 48, 64])
 
       for pitchIndex in 0..<3 {
           for yawIndex in 0..<7 {
@@ -786,6 +1166,7 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
       expectRenderFailure("21") {
           _ = try makeUprightAtlas(
               cells: Array(cells.dropLast()), frame: contract, worldBounds: worldBounds,
+              detailFrontZ: syntheticDetailFrontZ,
               pixelsPerWorldUnit: 2, supersample: 2, assetID: "short"
           )
       }
@@ -797,6 +1178,7 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
       expectRenderFailure("alpha") {
           _ = try makeUprightAtlas(
               cells: emptyCells, frame: contract, worldBounds: worldBounds,
+              detailFrontZ: syntheticDetailFrontZ,
               pixelsPerWorldUnit: 2, supersample: 2, assetID: "empty"
           )
       }
@@ -844,6 +1226,18 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
           try validateUprightAtlasMetadata(
               replacing(metadata, pixelsPerWorldUnit: 0),
               expectedWorldBounds: worldBounds, assetID: "zero-scale"
+          )
+      }
+      expectRenderFailure("detailFrontZ") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, detailFrontZ: 0),
+              expectedWorldBounds: worldBounds, assetID: "zero-detail-front"
+          )
+      }
+      expectRenderFailure("detailFrontZ") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, detailFrontZ: Double.nan),
+              expectedWorldBounds: worldBounds, assetID: "nan-detail-front"
           )
       }
       expectRenderFailure("2240x960") {
@@ -905,6 +1299,7 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
     assert.deepEqual(Object.keys(report.uprightAtlases).sort(), [...UPRIGHT_ATLAS_IDS].sort());
     assert.equal(report.uprightAtlases['drone-scout'].atlasWidth, 2240);
     assert.equal(report.uprightAtlases['drone-scout'].atlasHeight, 960);
+    assert.equal(report.uprightAtlases['drone-scout'].detailFrontZ, 120.123457);
     assert.equal(report.uprightAtlases['drone-scout'].frames.length, 21);
     assert.deepEqual(Object.keys(report).sort(), [
       'outputHashes', 'rendererSha256', 'sourceHashes', 'uprightAtlases',
@@ -920,6 +1315,7 @@ test('the upright renderer assembles deterministic pitch-major metadata from syn
     }
     const generated = vm.runInNewContext(`${metadataSource}\nGENERATED_UPRIGHT_ATLAS_DATA`, Object.create(null));
     assert.deepEqual(Object.keys(generated), UPRIGHT_ATLAS_IDS);
+    assert.equal(generated['drone-scout'].detailFrontZ, 120.123457);
     assert.equal(JSON.stringify(generated), JSON.stringify(Object.fromEntries(
       UPRIGHT_ATLAS_IDS.map((id) => [id, report.uprightAtlases[id]]),
     )));
@@ -1312,6 +1708,82 @@ test('the world renderer filters only exact hidden OBJ groups and rejects missin
       } catch let error as RenderError {
           precondition(error.description.contains("missing"))
       }
+
+      let coincidentFixture = """
+      mtllib original.mtl
+      v 0 0 0
+      v 1 0 0
+      v 0 1 0
+      v -0.0 0 0
+      v 1.0 0 0
+      v 0 1.0 0
+      vt 0 0
+      vt 1 0
+      vt 0 1
+      vt -0.0 0
+      vt 1.0 0
+      vt 0 1.0
+      vn 0 0 1
+      vn 0 0 0.99999976
+      usemtl shell
+      f 1/1/1 2/2/1 3/3/1
+      f 1/1/1 2/2/1 3/3/1
+      f 5/5/2 6/6/2 4/4/2
+      f 1/1/1 3/3/1 2/2/1
+      f 1/2/1 2/3/1 3/1/1
+      usemtl accent
+      f 1/1/1 2/2/1 3/3/1
+      """
+      let canonical = try filterOBJSource(
+          coincidentFixture,
+          hidingGroups: [],
+          materialFilename: "orbital-source.mtl",
+          label: "coincident.obj",
+          deduplicateOrientedFaces: true
+      )
+      let canonicalFaces = canonical.split(separator: "\\n").filter { $0.hasPrefix("f ") }
+      precondition(canonicalFaces.count == 4)
+      precondition(canonical.contains("f 1/1/1 2/2/1 3/3/1"))
+      precondition(!canonical.contains("f 5/5/2 6/6/2 4/4/2"))
+      precondition(canonical.contains("f 1/1/1 3/3/1 2/2/1"))
+      precondition(canonical.contains("f 1/2/1 2/3/1 3/1/1"))
+      precondition(canonical.contains("usemtl accent\\nf 1/1/1 2/2/1 3/3/1"))
+
+      precondition(requiresCoincidentFaceCanonicalization(
+          "modular-space-kit/Models/OBJ format/room-large.obj"
+      ))
+      precondition(requiresCoincidentFaceCanonicalization(
+          "modular-space-kit/Models/OBJ format/gate-lasers.obj"
+      ))
+      precondition(!requiresCoincidentFaceCanonicalization(
+          "space-kit/Models/OBJ format/craft_speederA.obj"
+      ))
+
+      let conflictingNormals = """
+      v 0 0 0
+      v 1 0 0
+      v 0 1 0
+      vt 0 0
+      vt 1 0
+      vt 0 1
+      vn 0 0 1
+      vn 0 0 0.99999974
+      usemtl shell
+      f 1/1/1 2/2/1 3/3/1
+      f 1/1/2 2/2/2 3/3/2
+      """
+      do {
+          _ = try filterOBJSource(
+              conflictingNormals,
+              hidingGroups: [],
+              materialFilename: "orbital-source.mtl",
+              label: "conflicting.obj",
+              deduplicateOrientedFaces: true
+          )
+          preconditionFailure("normal deltas above 2.5e-7 must be rejected")
+      } catch let error as RenderError {
+          precondition(error.description.contains("conflicting normals"))
+      }
     `;
     const harnessPath = path.join(temporaryRoot, 'main.swift');
     const executablePath = path.join(temporaryRoot, 'obj-filter-test');
@@ -1327,78 +1799,279 @@ test('the world renderer filters only exact hidden OBJ groups and rejects missin
   }
 });
 
-test('the nine committed world atlases are bounded transparent 3584 by 512 PNGs', () => {
+test('the committed world inventory contains the twelve upright atlases and preserved road edge', () => {
+  const actual = fs.readdirSync(path.join(root, 'assets/world'))
+    .filter((name) => name.endsWith('.png'))
+    .map((name) => `assets/world/${name}`)
+    .sort();
+  assert.deepEqual(actual, [...FINAL_WORLD_ATLAS_PATHS].sort());
+});
+
+test('the twelve upright atlases freeze exact 2240 by 960 outputs within v3 budgets', () => {
+  const manifest = JSON.parse(read('tools/world-assets.json'));
   let totalBytes = 0;
-  for (const relativePath of LEGACY_COMMITTED_ATLAS_PATHS) {
+  for (const relativePath of UPRIGHT_ATLAS_PATHS) {
     const bytes = assertPng(relativePath);
     totalBytes += bytes.length;
-    assert.equal(sha256(relativePath), WORLD_OUTPUT_HASHES[relativePath], `${relativePath} must match its frozen render`);
-    assert.ok(bytes.length <= 2 * 1024 * 1024, `${relativePath} must not exceed 2 MiB`);
-    assert.deepEqual(sipsDimensions(relativePath), { width: 3584, height: 512 });
+    assert.match(WORLD_OUTPUT_HASHES[relativePath], /^[a-f0-9]{64}$/,
+      `${relativePath} requires a frozen final SHA-256`);
+    assert.equal(sha256(relativePath), WORLD_OUTPUT_HASHES[relativePath],
+      `${relativePath} must match its frozen final render`);
+    assert.ok(bytes.length <= manifest.budgets.upright.maxFileBytes,
+      `${relativePath} must stay within the upright file budget`);
+    assert.deepEqual(sipsDimensions(relativePath), { width: 2240, height: 960 });
   }
-  assert.ok(totalBytes <= 18 * 1024 * 1024, 'world atlases must not exceed 18 MiB in total');
-  const minimumOpaqueExtent = {
-    drone: { width: 280, height: 140 },
-    turret: { width: 260, height: 240 },
-    wallLow: { width: 392, height: 140 },
-    wallHigh: { width: 240, height: 360 },
-    gap: { width: 330, height: 120 },
-  };
-  const categories = ['drone', 'drone', 'turret', 'turret', 'wallLow', 'wallLow', 'wallHigh', 'wallHigh', 'gap'];
-  for (const [atlasIndex, stats] of pngAlphaStats(LEGACY_COMMITTED_ATLAS_PATHS).entries()) {
-    assert.deepEqual(stats.borders, { bottom: 0, left: 0, right: 0, top: 0 }, stats.path);
-    assert.deepEqual(stats.frameBorders, Array.from({ length: 7 }, () => ({ left: 0, right: 0 })), stats.path);
-    assert.ok(stats.transparentPixels > 0, `${stats.path} must retain transparent padding`);
-    assert.equal(stats.hiddenRgbPixels, 0, `${stats.path} must clear RGB under zero alpha`);
-    const minimum = minimumOpaqueExtent[categories[atlasIndex]];
-    const orangeCoverage = stats.orangePixels / stats.opaqueColorPixels;
-    const redPurpleCoverage = stats.redPurplePixels / stats.opaqueColorPixels;
-    assert.ok(orangeCoverage <= 0.20,
-      `${stats.path} orange coverage ${(orangeCoverage * 100).toFixed(3)}% must stay at or below 20%`);
-    assert.ok(redPurpleCoverage <= 0.05,
-      `${stats.path} red/purple coverage ${(redPurpleCoverage * 100).toFixed(3)}% must stay at or below 5%`);
-    for (const [frameIndex, bounds] of stats.opaqueBounds.entries()) {
-      assert.ok(bounds.minX >= 12, `${stats.path} frame ${frameIndex} must keep 12 transparent pixels on the left`);
-      assert.ok(bounds.maxX <= 499, `${stats.path} frame ${frameIndex} must keep 12 transparent pixels on the right`);
-      assert.ok(bounds.minY >= 12, `${stats.path} frame ${frameIndex} must keep 12 transparent pixels on top`);
-      assert.ok(bounds.maxY >= 440 && bounds.maxY <= 488, `${stats.path} frame ${frameIndex} must keep its bottom anchor`);
-      assert.ok(bounds.opaqueWidth >= minimum.width, `${stats.path} frame ${frameIndex} must fill the canonical width`);
-      assert.ok(bounds.opaqueHeight >= minimum.height, `${stats.path} frame ${frameIndex} must fill the canonical height`);
-      if (categories[atlasIndex] === 'gap') {
-        assert.ok(bounds.minX >= 24, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on the left`);
-        assert.ok(bounds.maxX <= 487, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on the right`);
-        assert.ok(bounds.minY >= 24, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on top`);
-        assert.ok(bounds.maxY <= 487, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on the bottom`);
+  assert.ok(totalBytes <= manifest.budgets.upright.maxCombinedBytes);
+  assert.equal(UPRIGHT_ATLAS_PATHS.length * 2240 * 960 * 4, 103219200);
+  assert.ok(UPRIGHT_ATLAS_PATHS.length * 2240 * 960 * 4 <= manifest.budgets.upright.maxDecodedBytes);
+});
+
+test('generated metadata exactly describes every rendered alpha crop and world-origin anchor', () => {
+  const alphaStats = new Map(pngAlphaStats(UPRIGHT_ATLAS_PATHS).map((stats) => [stats.path, stats]));
+  for (const id of UPRIGHT_ATLAS_IDS) {
+    const relativePath = `assets/world/${id}.png`;
+    const decoded = decodePngRgba(relativePath);
+    const metadata = WORLD_ATLAS_MANIFEST[UPRIGHT_RUNTIME_KEYS[id]];
+    assert.equal(validateAtlasMetadata(metadata), true, id);
+    assert.deepEqual(alphaStats.get(relativePath).borders, { top: 0, right: 0, bottom: 0, left: 0 }, id);
+    assert.equal(alphaStats.get(relativePath).hiddenRgbPixels, 0, id);
+
+    for (let frameIndex = 0; frameIndex < metadata.frames.length; frameIndex += 1) {
+      const column = frameIndex % 7;
+      const row = Math.floor(frameIndex / 7);
+      const cellX = column * 320;
+      const cellY = row * 320;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -1;
+      let maxY = -1;
+      let visiblePixels = 0;
+      for (let y = cellY; y < cellY + 320; y += 1) for (let x = cellX; x < cellX + 320; x += 1) {
+        const offset = (y * decoded.width + x) * 4;
+        if (decoded.rgba[offset + 3] === 0) continue;
+        visiblePixels += 1;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
       }
+      assert.ok(visiblePixels > 0, `${id} frame ${frameIndex} must contain visible armor`);
+      assert.deepEqual(metadata.frames[frameIndex].source, {
+        sx: minX, sy: minY, sw: maxX - minX + 1, sh: maxY - minY + 1,
+      }, `${id} frame ${frameIndex}`);
+      assert.ok(minX > cellX && maxX < cellX + 319 && minY > cellY && maxY < cellY + 319,
+        `${id} frame ${frameIndex} must retain a transparent own-cell border`);
+      assert.ok(Number.isFinite(metadata.frames[frameIndex].origin.x));
+      assert.ok(Number.isFinite(metadata.frames[frameIndex].origin.y));
+
+      const depth = 1000;
+      const yaw = metadata.yawDegrees[column] * Math.PI / 180;
+      const pitch = metadata.pitchDegrees[row] * Math.PI / 180;
+      const visualCenterY = (metadata.worldBounds.minY + metadata.worldBounds.maxY) / 2;
+      const projectedOrigin = { x: 500, y: 300 };
+      const plan = buildSpriteDrawPlan({
+        metadata,
+        worldX: Math.tan(yaw) * depth,
+        zRel: depth,
+        cameraY: visualCenterY + Math.tan(pitch) * depth,
+        projectedOrigin,
+        pixelsPerWorldUnitX: metadata.pixelsPerWorldUnit,
+        pixelsPerWorldUnitY: metadata.pixelsPerWorldUnit,
+      });
+      assert.ok(plan.draws.length >= 1 && plan.draws.length <= 4, `${id} frame ${frameIndex}`);
+      const draw = plan.draws.find(({ source }) => ['sx', 'sy', 'sw', 'sh']
+        .every((key) => source[key] === metadata.frames[frameIndex].source[key]));
+      assert.ok(draw && draw.weight > 0.999999999, `${id} frame ${frameIndex} exact sample weight`);
+      assert.ok(Math.abs(draw.destination.x
+        + metadata.frames[frameIndex].origin.x - draw.source.sx - projectedOrigin.x) < 1e-9);
+      assert.ok(Math.abs(draw.destination.y
+        + metadata.frames[frameIndex].origin.y - draw.source.sy - projectedOrigin.y) < 1e-9);
     }
   }
 });
 
-test('all fourteen turret views overlap the independent weapon mount without changing collision height', () => {
-  const manifest = JSON.parse(read('tools/world-assets.json'));
-  const { worldHeight, weaponMountHeight } = manifest.geometry.turret;
-  assert.equal(worldHeight, 1900, 'turret collision height must remain unchanged');
-  assert.equal(weaponMountHeight, 1120);
-  const viewportHeight = 600;
-  const horizon = viewportHeight * 0.42;
-  const cameraHeight = 2340;
-  const cameraDepth = 0.05;
-  const zNear = 300;
-  const zMid = 325;
-  const projectY = (worldY, zRel) => horizon
-    + cameraDepth / zRel * (cameraHeight - worldY) * (viewportHeight / 2);
-  const destinationTop = projectY(worldHeight, zMid);
-  const destinationHeight = projectY(0, zMid) - destinationTop;
-  const mountY = projectY(weaponMountHeight, zNear);
-  const turretPaths = ['assets/world/turret-sentry.png', 'assets/world/turret-heavy.png'];
-  for (const stats of pngAlphaStats(turretPaths)) {
-    for (const [frameIndex, bounds] of stats.opaqueBounds.entries()) {
-      const bodyTopY = destinationTop + bounds.minY / manifest.frames.roadEdge.height * destinationHeight;
-      const overlap = mountY - bodyTopY;
-      assert.ok(overlap >= 5 && overlap <= 7,
-        `${stats.path} frame ${frameIndex} projected mount overlap ${overlap.toFixed(3)}px must stay slight`);
+test('declared armor envelopes and pitch rows retain the approved perspective hierarchy', () => {
+  for (const id of UPRIGHT_ATLAS_IDS) {
+    const metadata = WORLD_ATLAS_MANIFEST[UPRIGHT_RUNTIME_KEYS[id]];
+    const geometry = WORLD_GEOMETRY[metadata.category];
+    const decoded = decodePngRgba(`assets/world/${id}.png`);
+    const centerLowPitch = metadata.frames[3];
+    const measuredArmorWidth = measureCenterArmorWidth(decoded, metadata);
+    assert.ok(Math.abs(measuredArmorWidth - geometry.worldWidth) <= 2, id);
+    assert.ok(centerLowPitch.source.sh > 0, `${id} must keep a nonzero projected Y envelope`);
+    if (metadata.category !== 'drone') {
+      const centerPitchHeights = [3, 10, 17].map((index) => metadata.frames[index].source.sh);
+      assert.ok(centerPitchHeights[0] > centerPitchHeights[1]
+        && centerPitchHeights[1] > centerPitchHeights[2],
+      `${id} must shorten vertically as pitch exposes more of its top`);
     }
   }
+  assert.equal(WORLD_GEOMETRY.drone.worldWidth, 432);
+  for (const id of ['drone-scout', 'drone-striker']) {
+    const measuredDroneWidth = measureCenterArmorWidth(
+      decodePngRgba(`assets/world/${id}.png`),
+      WORLD_ATLAS_MANIFEST[UPRIGHT_RUNTIME_KEYS[id]],
+    );
+    assert.ok(measuredDroneWidth > 380 && measuredDroneWidth < 648, id);
+  }
+});
+
+test('rendered cyan bands, corridor endpoints, and high-tier gold follow the recipe hierarchy', () => {
+  const manifest = JSON.parse(read('tools/world-assets.json'));
+  const goldOutput = [255, 255, 160, 255];
+  const highIDs = new Set(['structure-reactor', 'structure-tower']);
+  for (const id of UPRIGHT_ATLAS_IDS) {
+    const { width, height, rgba } = decodePngRgba(`assets/world/${id}.png`);
+    let goldPixels = 0;
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const [red, green, blue, alpha] = rgba.subarray(offset, offset + 4);
+      if (red === goldOutput[0] && green === goldOutput[1]
+        && blue === goldOutput[2] && alpha === goldOutput[3]) goldPixels += 1;
+    }
+    assert.equal(goldPixels > 0, highIDs.has(id), `${id} gold-beacon evidence`);
+  }
+  const corridorLow = manifest.assets.find(({ id }) => id === 'corridor-low').generatedDetails;
+  const corridorMedium = manifest.assets.find(({ id }) => id === 'corridor-medium').generatedDetails;
+  assert.deepEqual(corridorLow, {
+    plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 540, cyanBandY: [390],
+  });
+  assert.deepEqual(corridorMedium, {
+    plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 1120, cyanBandY: [460, 910],
+  });
+  for (const details of [corridorLow, corridorMedium]) {
+    assert.equal(Object.keys(details).some((key) => /^(?:text|label|locale|font)$/i.test(key)), false);
+  }
+
+  for (const { id, runtimeKey, ratios } of [
+    { id: 'barrier-rail', runtimeKey: 'barrierRail', ratios: [0.34] },
+    { id: 'barrier-crate', runtimeKey: 'barrierCrate', ratios: [0.34] },
+    { id: 'structure-pylon', runtimeKey: 'structurePylon', ratios: [0.34, 0.68] },
+    { id: 'structure-bastion', runtimeKey: 'structureBastion', ratios: [0.34, 0.68] },
+    { id: 'structure-reactor', runtimeKey: 'structureReactor', ratios: [0.34, 0.68] },
+    { id: 'structure-tower', runtimeKey: 'structureTower', ratios: [0.34, 0.68] },
+  ]) {
+    const decoded = decodePngRgba(`assets/world/${id}.png`);
+    const metadata = WORLD_ATLAS_MANIFEST[runtimeKey];
+    const geometry = WORLD_GEOMETRY[metadata.category];
+    const seamHeight = Math.max(6, Math.min(geometry.worldHeight * 0.018, 18));
+    for (const ratio of ratios) {
+      let count = 0;
+      let maxHorizontalRun = 0;
+        for (let frameIndex = 0; frameIndex < 21; frameIndex += 1) {
+        const evidence = generatedCyanEvidence(decoded, projectedWorldBoxBounds(
+          metadata,
+          frameIndex,
+          {
+            x: 0,
+            y: geometry.baseY + geometry.worldHeight * ratio,
+            z: metadata.detailFrontZ + 4,
+          },
+          { x: geometry.worldWidth * 0.48, y: seamHeight, z: 8 },
+        ));
+        count += evidence.count;
+        maxHorizontalRun = Math.max(maxHorizontalRun, evidence.maxHorizontalRun);
+      }
+      assert.ok(count >= 40, `${id} ${ratio} generated seam needs projected pixel evidence`);
+      assert.ok(maxHorizontalRun >= 8,
+        `${id} ${ratio} generated seam needs contiguous evidence, not incidental colormap cyan`);
+    }
+  }
+
+  const corridorEvidence = new Map();
+  for (const { id, referenceID, runtimeKey, details } of [
+    { id: 'corridor-low', referenceID: 'barrier-rail', runtimeKey: 'corridorLow', details: corridorLow },
+    { id: 'corridor-medium', referenceID: 'structure-pylon', runtimeKey: 'corridorMedium', details: corridorMedium },
+  ]) {
+    const candidate = decodePngRgba(`assets/world/${id}.png`);
+    const reference = decodePngRgba(`assets/world/${referenceID}.png`);
+    const metadata = WORLD_ATLAS_MANIFEST[runtimeKey];
+    const geometry = WORLD_GEOMETRY[metadata.category];
+    const bandEvidence = details.cyanBandY.map((bandY) => {
+      let count = 0;
+      for (let frameIndex = 0; frameIndex < 21; frameIndex += 1) {
+        count += countGeneratedCyanDifference(candidate, reference, projectedWorldBoxBounds(
+          metadata,
+          frameIndex,
+          { x: 0, y: bandY, z: metadata.worldBounds.maxZ + 3 },
+          { x: geometry.worldWidth * 0.72, y: 12, z: 6 },
+        ));
+      }
+      assert.ok(count >= 100, `${id} generated band Y=${bandY} needs projected raster evidence`);
+      return count;
+    });
+    corridorEvidence.set(id, bandEvidence);
+
+    const conduitInset = Math.min(
+      geometry.worldWidth / 2 - details.conduitSize[0] / 2,
+      details.conduitSize[0] / 2,
+    );
+    const nonEdgeOnFrames = new Set([1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19]);
+    for (const side of [-1, 1]) {
+      for (const depth of [-details.conduitSize[2] / 2, 0, details.conduitSize[2] / 2]) {
+        let aggregateEvidence = 0;
+        let visibleFrames = 0;
+        let maximumNonEdgeOnEvidence = 0;
+        for (let frameIndex = 0; frameIndex < 21; frameIndex += 1) {
+          const projected = projectUprightPoint(metadata, frameIndex, {
+            x: side * conduitInset,
+            y: details.conduitY,
+            z: depth,
+          });
+          const evidence = countGeneratedCyanDifference(candidate, reference, {
+            minX: Math.round(projected.x) - 5,
+            maxX: Math.round(projected.x) + 5,
+            minY: Math.round(projected.y) - 5,
+            maxY: Math.round(projected.y) + 5,
+          });
+          aggregateEvidence += evidence;
+          if (evidence > 0) visibleFrames += 1;
+          if (nonEdgeOnFrames.has(frameIndex)) {
+            maximumNonEdgeOnEvidence = Math.max(maximumNonEdgeOnEvidence, evidence);
+          }
+        }
+        assert.ok(aggregateEvidence >= 100,
+          `${id} side ${side} depth ${depth} conduit needs aggregate turntable evidence`);
+        assert.ok(visibleFrames >= 10,
+          `${id} side ${side} depth ${depth} conduit needs broad turntable visibility`);
+        assert.ok(maximumNonEdgeOnEvidence >= 4,
+          `${id} side ${side} depth ${depth} conduit needs non-edge-on endpoint evidence`);
+      }
+    }
+    for (const side of [-1, 1]) {
+      const attachment = generatedCyanComponentAttachment(
+        candidate,
+        reference,
+        projectedWorldBoxBounds(
+          metadata,
+          10,
+          { x: side * conduitInset, y: details.conduitY, z: 0 },
+          {
+            x: details.conduitSize[0],
+            y: details.conduitSize[1],
+            z: details.conduitSize[2],
+          },
+          3,
+        ),
+        10,
+      );
+      assert.ok(attachment.seedCount >= 4,
+        `${id} side ${side} must render the supported conduit at its derived inset`);
+      assert.equal(attachment.touchesReference, true,
+        `${id} side ${side} conduit must remain alpha-connected to source armor`);
+    }
+  }
+  assert.equal(corridorEvidence.get('corridor-low').length, 1);
+  assert.equal(corridorEvidence.get('corridor-medium').length, 2);
+  const renderer = read('tools/render-world-assets.swift').toString('utf8');
+  assert.match(renderer, /let gold = flatMaterial\(srgb\(0xff, 0xd6, 0x6b\)/);
+});
+
+test('gap-edge remains the byte-identical legacy 3584 by 512 road-edge atlas', () => {
+  const relativePath = 'assets/world/gap-edge.png';
+  assertPng(relativePath);
+  assert.deepEqual(sipsDimensions(relativePath), { width: 3584, height: 512 });
+  assert.equal(sha256(relativePath), 'c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49');
 });
 
 test('world-art provenance pins official free archives, CC0 licenses, and reproduction command', () => {
@@ -1412,12 +2085,12 @@ test('world-art provenance pins official free archives, CC0 licenses, and reprod
     'd5d7cdf2635ed5a43a9187deaf409b6f47484e402321128341d3c3698e9ef4d9',
     'f394f7fd9eaf29c9de7e090e55b69926f699841af33b0b116f5cc0088de8a4dc',
     'CC0',
-    '[-30, -20, -10, 0, 10, 20, 30]',
-    'swift tools/render-world-assets.swift --manifest tools/world-assets.json --source-root "$WORLD_WORK_DIR/extracted" --output "$WORLD_WORK_DIR/render-a"',
+    '[-80, -55, -30, 0, 30, 55, 80]',
+    '[20, 55, 80]',
+    '--metadata-js "$WORLD_WORK_DIR/world-art-a.js"',
   ]) assert.match(provenance, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   for (const document of [provenance, notices]) {
-    assert.ok(document.includes(LEGACY_PROVENANCE_RENDERER_SHA256),
-      'the old renderer hash must remain as legacy nine-atlas provenance until Task 7');
+    assert.ok(document.includes(FINAL_RENDERER_SHA256), 'the final renderer hash must be frozen');
     for (const [sourcePath, expectedHash] of Object.entries(WORLD_SOURCE_HASHES)) {
       assert.ok(document.includes(sourcePath) && document.includes(expectedHash), `${sourcePath} provenance must be frozen`);
     }
@@ -1425,6 +2098,9 @@ test('world-art provenance pins official free archives, CC0 licenses, and reprod
       assert.ok(document.includes(relativePath) && document.includes(expectedHash), `${relativePath} output hash must be frozen`);
     }
   }
+  const runtime = read('src/world-art.js').toString('utf8');
+  assert.match(runtime, /GENERATED_UPRIGHT_ATLAS_DATA/);
+  assert.doesNotMatch(runtime, /(?:\/var\/tmp\/|\/private\/var\/|runtime JSON|fetch\s*\()/i);
 });
 
 test('Nebula Cruise committed codecs match the documented 144 BPM render contract', () => {
@@ -1497,26 +2173,31 @@ test('visual preloading reports every local asset and requires both player frame
   assert.equal(result.shipFramesReady, true);
   assert.equal(result.fallbackRequired, false);
   assert.equal(result.timedOut, false);
-  assert.equal(result.loadedCount, 20);
+  assert.equal(result.loadedCount, 24);
   assert.equal(result.failedCount, 0);
   assert.equal(result.assets.ship.neutral.loaded, true);
   assert.equal(result.assets.ship.thrust.loaded, true);
   assert.equal(Object.keys(result.assets.ui).length, 2);
   assert.equal(Object.keys(result.assets.icons).length, 6);
-  assert.deepEqual(queuedPaths.slice(-9), [
+  assert.deepEqual(queuedPaths.slice(-13), [
     './assets/world/drone-scout.png',
     './assets/world/drone-striker.png',
     './assets/world/turret-sentry.png',
     './assets/world/turret-heavy.png',
     './assets/world/barrier-rail.png',
     './assets/world/barrier-crate.png',
+    './assets/world/structure-pylon.png',
+    './assets/world/structure-bastion.png',
     './assets/world/structure-reactor.png',
     './assets/world/structure-tower.png',
+    './assets/world/corridor-low.png',
+    './assets/world/corridor-medium.png',
     './assets/world/gap-edge.png',
   ]);
   assert.deepEqual(result.world.loaded, [
     'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
-    'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge',
+    'barrierCrate', 'structurePylon', 'structureBastion', 'structureReactor',
+    'structureTower', 'corridorLow', 'corridorMedium', 'gapEdge',
   ]);
   assert.deepEqual(result.world.fallback, []);
   assert.deepEqual(result.world.categoryReady, {
@@ -1593,7 +2274,8 @@ test('all world atlas failures do not require the procedural player fallback', a
   assert.equal(result.world.loaded.length, 0);
   assert.deepEqual(result.world.fallback, [
     'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
-    'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge',
+    'barrierCrate', 'structurePylon', 'structureBastion', 'structureReactor',
+    'structureTower', 'corridorLow', 'corridorMedium', 'gapEdge',
   ]);
   assert.deepEqual(result.world.categoryReady, {
     drone: false, turret: false, wallLow: false, wallHigh: false, gap: false,
@@ -1636,7 +2318,7 @@ test('visual preloading returns deterministic failure diagnostics on timeout', a
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 20);
+  assert.equal(result.failedCount, 24);
 });
 
 test('timeout seals image handlers so late completion cannot mutate terminal diagnostics', async () => {
@@ -1663,7 +2345,7 @@ test('timeout seals image handlers so late completion cannot mutate terminal dia
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(JSON.stringify(result, (key, value) => key === 'element' ? undefined : value), frozenSnapshot);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 20);
+  assert.equal(result.failedCount, 24);
 });
 
 test('visual preloading survives an Image constructor security failure', async () => {
@@ -1680,7 +2362,7 @@ test('visual preloading survives an Image constructor security failure', async (
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 20);
+  assert.equal(result.failedCount, 24);
 });
 
 test('player frame selection uses thrust only when both frames are ready', () => {

@@ -45,12 +45,14 @@ The repository's project license applies only to original project code and artwo
   - `space-kit/Models/OBJ format/turret_single.mtl` — upstream SHA-256 `762ff003991e23328663179e8246dbe450f15f2467cc1947ff144c0ff1f49c8b`
   - `space-kit/Models/OBJ format/turret_single.obj` — upstream SHA-256 `2b3492cde9c9496d73963669d8d59e9f5ebccb9dcbf15dbf5336e7ca630c6a89`
 - Repository outputs:
-  - `assets/world/drone-scout.png` — SHA-256 `9ab7c75a5eb1afe52950b064e8d453798be0df8c9bc600fdc9952e3d1106ed5d`
-  - `assets/world/drone-striker.png` — SHA-256 `8065eadf564c7b17aa301bc3738afd7591ba8c8cae695de98c96532b86c99736`
-  - `assets/world/turret-sentry.png` — SHA-256 `78ae048ac6fa37c8c46efa584de197caa09daa9d2fb99ea26d6a34e61225dc2a`
-  - `assets/world/turret-heavy.png` — SHA-256 `ebd1950a29d6424db4fc19f3f9643c3ff133b1d630460e8848f08862028194b7`
-  - `assets/world/barrier-rail.png` — SHA-256 `f0a8f85fdb02e5c07400e7ff06567cfd9d066051f5406ca37c591daf8285d914`
-  - `assets/world/structure-reactor.png` — SHA-256 `317a3b6dcb3fe72d4a065f4fd52d541494150681c9a068c4c6aff36b7d6db690`
+  - `assets/world/drone-scout.png` — SHA-256 `c700f47ecdccfe5f3400f5947cf5494331442c80a347205efa1caaca71d5ba82`
+  - `assets/world/drone-striker.png` — SHA-256 `774ec0bae0db51b05d2dd5ce48e4449b576c246414a6578cefb07b301b47f376`
+  - `assets/world/turret-sentry.png` — SHA-256 `b7688afbe1767a772abf9f397fd524e5e241a6d1ffc29ff849ce948583615fb9`
+  - `assets/world/turret-heavy.png` — SHA-256 `bc915327eb3b8354e94d8f78a9a1e6a2f38208f30a15b55736a3126e414cb4a3`
+  - `assets/world/barrier-rail.png` — SHA-256 `28a2f5ee63b70708e593c1f1e82ac6c5094fcc9c3464023004581c310f6f879a`
+  - `assets/world/structure-bastion.png` — SHA-256 `5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9`
+  - `assets/world/structure-reactor.png` — SHA-256 `b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa`
+  - `assets/world/corridor-low.png` — SHA-256 `909d33ed9f38c4b7b75cbde296daddb26dc5dabedc70e474be2d80a522c1a2d9`
   - `assets/world/gap-edge.png` — SHA-256 `c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49`
 
 ## Kenney — Modular Space Kit
@@ -66,10 +68,13 @@ The repository's project license applies only to original project code and artwo
   - `modular-space-kit/Models/OBJ format/room-large.mtl` — upstream SHA-256 `45a6736aa344a0c7e286b9c43c6a48f25b6a2f78d8c5949e430c3b4a93b4e060`
   - `modular-space-kit/Models/OBJ format/room-large.obj` — upstream SHA-256 `3ef1dc4b366e76b2bdd1ad44e5ad7a3e78c55e7d0fb067625dbaa6c38390b31e`
 - Repository outputs:
-  - `assets/world/barrier-crate.png` — SHA-256 `33b44384aae4c7cb6ea7d3f468fddf41f7918bf04b26ced88ef7e5561faf386d`
-  - `assets/world/structure-tower.png` — SHA-256 `360a2fbae947d891c4b2ee9b50d141ad12186dfd894630036e9f4d953a360b3d`
+  - `assets/world/barrier-crate.png` — SHA-256 `c0b327ffbccdc0ba3880200ac9832fd42872f1c707951188a9c1df58000394f1`
+  - `assets/world/structure-pylon.png` — SHA-256 `340d52a6371b6ed19107b977f6f12c4757156599dbc383d8cdcef39e9d088da5`
+  - `assets/world/structure-bastion.png` — SHA-256 `5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9`
+  - `assets/world/structure-tower.png` — SHA-256 `ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436`
+  - `assets/world/corridor-medium.png` — SHA-256 `40213dacdf2177909dffe0980a9e4ad1872dfeffcc3b1fb3bf346348d1c85968`
 
-The two Kenney kits were normalized, assembled only as declared in `tools/world-assets.json`, styled with the Orbital Defense warm-white/graphite/cool-steel/cyan palette plus small generated orange status lights, and rendered to seven-view transparent atlases. Renderer SHA-256: `5fde628296a1369259c437e380c5b32e731ddd4b9d4c0c10735af786cce409d3`. See `docs/assets/world-art.md`.
+The two Kenney kits were normalized and assembled only as declared in `tools/world-assets.json`. Twelve upright outputs are `2240 × 960` transparent atlases with 21 yaw/pitch views; `gap-edge` remains the byte-identical legacy seven-yaw atlas. The renderer uses the Orbital Defense warm-white/graphite/cool-steel/cyan palette, places base seams and status lights on each source-derived +Z armor surface, keeps corridor 50-unit depth details independent, pairs corridor conduits at their perspective-supported centerline inset, uses one low-wall cyan band, two medium/high-wall cyan bands, and wall-high-only gold beacons. Renderer SHA-256: `b42e67597d54ca6aa84bc08325737e5e09c75c44ea659274ea4173768ffbcef1`. See `docs/assets/world-art.md`.
 
 ## Kenney — UI Pack: Sci-Fi 2.0
 

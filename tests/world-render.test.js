@@ -7,6 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
+const worldArt = require('../src/world-art.js');
 
 function makeRecordingContext() {
   const gradient = { addColorStop() {} };
@@ -230,22 +231,32 @@ function bottomCenter(call) {
   return { x: dx + width / 2, y: dy + height };
 }
 
-test('loaded enemy atlases select yaw frames and preserve projected bottom-center geometry', () => {
+function sourceTuple(metadata, frameIndex) {
+  const { sx, sy, sw, sh } = metadata.frames[frameIndex].source;
+  return [sx, sy, sw, sh];
+}
+
+test('loaded enemy atlases use real center-pitch crops and preserve projected bottom-center geometry', () => {
   const harness = createHarness();
   const cases = [
-    { lane: 2, expectedSourceX: 0 },
-    { lane: 3, expectedSourceX: 3 * 512 },
-    { lane: 4, expectedSourceX: 6 * 512 },
+    { lane: 2, frameIndices: [8, 9] },
+    { lane: 3, frameIndices: [10] },
+    { lane: 4, frameIndices: [11, 12] },
   ];
-  for (const { lane, expectedSourceX } of cases) {
+  const metadata = worldArt.WORLD_ATLAS_MANIFEST.droneScout;
+  for (const { lane, frameIndices } of cases) {
     const enemy = { type: 'drone', lane, fromLane: lane, toLane: lane, state: 'rest', phase: 0, visualVariant: 'droneScout' };
     const calls = imageCalls(drawEnemy(harness, enemy));
-    assert.equal(calls.length, 1, `lane ${lane} should use one exact yaw frame`);
-    assert.equal(calls[0].image, 'droneScout');
-    assert.equal(calls[0].args[0], expectedSourceX);
-    assert.deepEqual(calls[0].args.slice(1, 4), [0, 512, 512]);
-    assert.ok(calls[0].args[6] >= 1);
-    assert.ok(calls[0].args[7] >= 1);
+    assert.equal(calls.length, frameIndices.length, `lane ${lane} bridge draw count`);
+    assert.deepEqual(calls.map((call) => call.image), frameIndices.map(() => 'droneScout'));
+    assert.deepEqual(calls.map((call) => call.args.slice(0, 4)),
+      frameIndices.map((index) => sourceTuple(metadata, index)));
+    assert.ok(Math.abs(calls.reduce((sum, call) => sum + call.alpha, 0) - 1) < 1e-12);
+    for (const call of calls) {
+      assert.ok(call.args[6] >= 1);
+      assert.ok(call.args[7] >= 1);
+      assert.deepEqual(bottomCenter(call), bottomCenter(calls[0]));
+    }
   }
 
   const near = imageCalls(drawEnemy(harness, {
@@ -430,32 +441,41 @@ test('atlas renderer clamps alpha, skips exact-yaw blends, restores state, and c
   const calls = imageCalls(harness.context.events);
   assert.equal(calls.length, 3);
   assert.equal(calls[0].alpha, 1);
-  assert.equal(calls[2].args[0] - calls[1].args[0], 512);
+  const metadata = worldArt.WORLD_ATLAS_MANIFEST.droneScout;
+  assert.deepEqual(calls.map((call) => call.args.slice(0, 4)), [
+    sourceTuple(metadata, 10),
+    sourceTuple(metadata, 10),
+    sourceTuple(metadata, 11),
+  ]);
   assert.ok(Math.abs(calls[1].alpha + calls[2].alpha - 0.8) < 1e-12);
   assert.equal(harness.context.globalAlpha, 1);
 });
 
-test('loaded low and high wall variants use exact perspective geometry and deterministic yaw frames', () => {
+test('loaded low and high wall variants use exact perspective geometry and real bridge crops', () => {
   const harness = createHarness();
   const cases = [
-    ['wallLow', 2, 10, 'barrierCrate', 0, 600],
-    ['wallLow', 3, 10, 'barrierRail', 3 * 512, 600],
-    ['wallLow', 4, 10, 'barrierCrate', 6 * 512, 600],
-    ['wallHigh', 2, 10, 'structureReactor', 0, 2000],
-    ['wallHigh', 3, 10, 'structureTower', 3 * 512, 2000],
-    ['wallHigh', 4, 10, 'structureReactor', 6 * 512, 2000],
+    ['wallLow', 2, 10, 'barrierCrate', [8, 9], 600],
+    ['wallLow', 3, 10, 'barrierRail', [10], 600],
+    ['wallLow', 4, 10, 'barrierCrate', [11, 12], 600],
+    ['wallHigh', 2, 10, 'structureReactor', [8, 9], 2000],
+    ['wallHigh', 3, 10, 'structureTower', [10], 2000],
+    ['wallHigh', 4, 10, 'structureReactor', [11, 12], 2000],
   ];
   const zMid = 525;
   const scale = 0.05 / zMid;
-  for (const [category, lane, segIndex, expectedImage, expectedSourceX, worldHeight] of cases) {
+  for (const [category, lane, segIndex, expectedImage, frameIndices, worldHeight] of cases) {
     const { events, randomCalls } = drawWall(harness, category, { lane, segIndex });
     const calls = imageCalls(events);
-    assert.equal(calls.length, 1, `${category} lane ${lane} must use one exact yaw frame`);
-    assert.equal(calls[0].image, expectedImage);
-    assert.equal(calls[0].args[0], expectedSourceX);
-    assert.deepEqual(calls[0].args.slice(1, 4), [0, 512, 512]);
-    assert.ok(Math.abs(calls[0].args[6] - scale * 648 * 960 / 2) < 1e-10);
-    assert.ok(Math.abs(calls[0].args[7] - scale * worldHeight * 600 / 2) < 1e-10);
+    const metadata = worldArt.WORLD_ATLAS_MANIFEST[expectedImage];
+    assert.equal(calls.length, frameIndices.length, `${category} lane ${lane} bridge draw count`);
+    assert.deepEqual(calls.map((call) => call.image), frameIndices.map(() => expectedImage));
+    assert.deepEqual(calls.map((call) => call.args.slice(0, 4)),
+      frameIndices.map((index) => sourceTuple(metadata, index)));
+    assert.ok(Math.abs(calls.reduce((sum, call) => sum + call.alpha, 0) - 1) < 1e-12);
+    for (const call of calls) {
+      assert.ok(Math.abs(call.args[6] - scale * 648 * 960 / 2) < 1e-10);
+      assert.ok(Math.abs(call.args[7] - scale * worldHeight * 600 / 2) < 1e-10);
+    }
     const laneWorldX = (lane - 3) * 720;
     assert.ok(Math.abs(bottomCenter(calls[0]).x - (480 + scale * laneWorldX * 480)) < 1e-10);
     assert.ok(Math.abs(bottomCenter(calls[0]).y - (210 + scale * 2340 * 300)) < 1e-10);
