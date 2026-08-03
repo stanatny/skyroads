@@ -479,35 +479,40 @@ test('full gaps cap at three and bridge runs remain two to five segments on a re
 test('connected low and medium corridors preserve one safe lane and ten clear landing segments', () => {
   const sandbox = createGameLogicHarness();
   const result = JSON.parse(vm.runInContext(`(() => {
-    const { newGenState, generateSegment, LANE_TYPE } = __generatorApi;
+    const { newGenState, generateSegment } = __generatorApi;
     const withRandom = (values, callback) => {
       const previous = Math.random;
       let cursor = 0;
       Math.random = () => cursor < values.length ? values[cursor++] : 1;
       try { return callback(); } finally { Math.random = previous; }
     };
-    const generateRun = (typeRoll, lengthRoll) => withRandom(
+    const generateRun = (safeLane, typeRoll, lengthRoll) => withRandom(
       [0, 0.4, typeRoll, lengthRoll],
       () => {
         const gen = newGenState();
-        gen.safeLane = 3;
+        gen.safeLane = safeLane;
         gen.clearStreak = new Array(7).fill(15);
-        const segments = [generateSegment(100, gen)];
+        const generateAndRecord = (index) => {
+          const safeLaneBefore = gen.safeLane;
+          const segment = generateSegment(index, gen);
+          return { segment, safeLaneBefore, safeLaneAfter: gen.safeLane };
+        };
+        const segments = [generateAndRecord(100)];
         while (gen.runLeft > 0) {
-          segments.push(generateSegment(100 + segments.length, gen));
+          segments.push(generateAndRecord(100 + segments.length));
         }
         gen.sinceFuel = 75;
         const landing = [];
         while (gen.landingLeft > 0) {
-          landing.push(generateSegment(100 + segments.length + landing.length, gen));
+          landing.push(generateAndRecord(100 + segments.length + landing.length));
         }
-        return { safeLane: 3, segments, landing, state: gen };
+        return { safeLane, segments, landing, state: gen };
       },
     );
     return JSON.stringify({
       initialState: newGenState(),
-      low: generateRun(0.99, 0),
-      medium: generateRun(0, 0.999),
+      low: generateRun(1, 0.99, 0),
+      medium: generateRun(5, 0, 0.999),
     });
   })()`, sandbox));
 
@@ -534,16 +539,18 @@ test('connected low and medium corridors preserve one safe lane and ten clear la
   });
 
   const pickups = new Set(['FUEL', 'BOOST', 'SLOW', 'TRIPLE', 'MAGNET']);
-  const ordinary = (type) => type === 'ROAD' || pickups.has(type);
   for (const [kind, expectedType, expectedLength] of [
     [result.low, 'WALL_LOW', 5],
     [result.medium, 'WALL_MEDIUM', 7],
   ]) {
     assert.equal(kind.segments.length, expectedLength);
-    const runLane = kind.segments[0].corridor.lane;
+    const runLane = kind.segments[0].segment.corridor.lane;
     assert.notEqual(runLane, kind.safeLane);
     for (let index = 0; index < kind.segments.length; index++) {
-      const segment = kind.segments[index];
+      const tile = kind.segments[index];
+      const segment = tile.segment;
+      assert.equal(tile.safeLaneBefore, kind.safeLane);
+      assert.equal(tile.safeLaneAfter, kind.safeLane);
       assert.deepEqual(segment.corridor, {
         id: 100,
         lane: runLane,
@@ -552,17 +559,18 @@ test('connected low and medium corridors preserve one safe lane and ten clear la
         length: expectedLength,
       });
       assert.equal(segment.lanes[runLane], expectedType);
-      assert.ok(ordinary(segment.lanes[kind.safeLane]));
-      assert.notEqual(segment.lanes[runLane], 'GAP');
-      assert.equal(pickups.has(segment.lanes[runLane]), false);
-      assert.equal((segment.enemies || []).some((enemy) => Math.round(enemy.lane) === runLane), false);
+      assert.equal(segment.lanes[kind.safeLane], 'ROAD');
+      assert.equal(segment.lanes.includes('GAP'), false);
+      assert.equal(segment.lanes.some((type) => pickups.has(type)), false);
+      assert.deepEqual(segment.enemies || [], []);
     }
     assert.equal(kind.landing.length, 10);
-    for (const segment of kind.landing) {
+    for (const tile of kind.landing) {
+      const segment = tile.segment;
       assert.equal(segment.lanes[runLane], 'ROAD');
       assert.equal((segment.enemies || []).some((enemy) => Math.round(enemy.lane) === runLane), false);
     }
-    assert.equal(kind.landing[0].lanes[kind.safeLane], 'FUEL');
+    assert.equal(kind.landing[0].segment.lanes[kind.safeLane], 'FUEL');
     assert.equal(kind.state.landingLane, runLane);
     assert.equal(kind.state.landingLeft, 0);
   }
@@ -706,6 +714,8 @@ test('seeded 20000-segment generation preserves corridor approaches, landings, a
           enemies: segment.enemies || [],
           corridor: segment.corridor || null,
           fullGap,
+          gapRunBefore: before.gapRun,
+          gapRunAfter: gen.gapRun,
           guaranteedLane,
           safeLaneBefore: before.safeLane,
           safeLaneAfter: gen.safeLane,
@@ -729,6 +739,16 @@ test('seeded 20000-segment generation preserves corridor approaches, landings, a
   let longestFullGapRun = 0;
   for (let index = 0; index < result.segmentCount; index++) {
     const record = result.records[index];
+    if (record.fullGap) {
+      const startsFullGap = record.gapRunBefore === 0 && record.gapRunAfter === 1;
+      const continuesFullGap = record.gapRunBefore > 0
+        && record.gapRunAfter === record.gapRunBefore + 1
+        && record.gapRunAfter <= 3;
+      assert.ok(
+        startsFullGap || continuesFullGap,
+        'unproven full-GAP exception at ' + index + ': ' + JSON.stringify(record),
+      );
+    }
     if (!record.fullGap) {
       assert.ok(
         isClear(record, record.guaranteedLane),
@@ -741,9 +761,14 @@ test('seeded 20000-segment generation preserves corridor approaches, landings, a
       const corridor = record.corridor;
       assert.equal(record.lanes[corridor.lane], corridor.type);
       assert.ok(corridor.lane >= 0 && corridor.lane < 7);
-      assert.equal(corridor.lane === record.guaranteedLane, false);
-      assert.ok(isClear(record, record.guaranteedLane));
+      assert.equal(record.safeLaneBefore, record.safeLaneAfter);
+      assert.equal(corridor.lane === record.safeLaneBefore, false);
+      assert.equal(record.lanes[record.safeLaneBefore], 'ROAD');
+      assert.equal(record.lanes.includes('GAP'), false);
+      assert.equal(record.lanes.some((type) => ['FUEL', 'BOOST', 'SLOW', 'TRIPLE', 'MAGNET'].includes(type)), false);
+      assert.deepEqual(record.enemies, []);
       if (corridor.index === 0) {
+        const corridorSafeLane = record.safeLaneBefore;
         for (let offset = 1; offset <= 10; offset++) {
           assert.ok(isClear(result.records[index - offset], corridor.lane), 'corridor approach blocked at ' + index);
         }
@@ -757,6 +782,8 @@ test('seeded 20000-segment generation preserves corridor approaches, landings, a
             length: corridor.length,
           });
           assert.equal(tile.lanes[corridor.lane], corridor.type);
+          assert.equal(tile.safeLaneBefore, corridorSafeLane);
+          assert.equal(tile.safeLaneAfter, corridorSafeLane);
         }
         for (let offset = 1; offset <= 10; offset++) {
           const landing = result.records[index + corridor.length - 1 + offset];
@@ -778,12 +805,19 @@ test('seeded 20000-segment generation preserves corridor approaches, landings, a
     if (record.fullGap && (index === 0 || !result.records[index - 1].fullGap)) {
       let length = 0;
       while (result.records[index + length].fullGap) {
-        assert.equal(result.records[index + length].lanes.filter((type) => type === 'GAP').length, 7);
+        const gapTile = result.records[index + length];
+        assert.equal(gapTile.lanes.filter((type) => type === 'GAP').length, 7);
+        assert.equal(gapTile.gapRunBefore, length);
+        assert.equal(gapTile.gapRunAfter, length + 1);
         length++;
       }
+      assert.ok(length >= 1 && length <= 3);
       fullGapCount += length;
       longestFullGapRun = Math.max(longestFullGapRun, length);
       const landing = result.records[index + length];
+      assert.equal(landing.fullGap, false);
+      assert.equal(landing.gapRunBefore, length);
+      assert.equal(landing.gapRunAfter, 0);
       assert.ok(Math.abs(landing.safeLaneAfter - record.safeLaneBefore) <= 2);
       assert.ok(isClear(landing, landing.safeLaneAfter));
     }
