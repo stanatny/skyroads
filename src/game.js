@@ -409,6 +409,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (code === 'KeyP') {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.repeat || pauseKeyHeld) return;
     if (STATE.mode === 'PLAYING' || STATE.mode === 'PAUSED') {
       pauseKeyHeld = true;
@@ -4199,7 +4200,6 @@ const AUDIO = {
   bgmTimer: null,
   bgmStep: 0,
   nextNoteTime: 0,
-  resumeLegacyAfterPause: false,
   glideNodes: null, // 滑翔喷火轰鸣节点组 { src, lfo, lfo2, gain }（非 null = 播放中）
 };
 
@@ -4251,14 +4251,12 @@ function setLegacyAudioPaused(paused) {
   const preferencesAllowAudio = !(current.musicMuted && current.sfxMuted);
   try {
     if (paused) {
-      AUDIO.resumeLegacyAfterPause = Boolean(AUDIO.master && AUDIO.master.gain.value > 0);
       if (AUDIO.master) AUDIO.master.gain.value = 0;
       return;
     }
     if (AUDIO.master) {
-      AUDIO.master.gain.value = AUDIO.resumeLegacyAfterPause && preferencesAllowAudio ? 0.45 : 0;
+      AUDIO.master.gain.value = preferencesAllowAudio ? 0.45 : 0;
     }
-    AUDIO.resumeLegacyAfterPause = false;
   } catch (_) {}
 }
 

@@ -635,6 +635,30 @@ test('P toggles only PLAYING and PAUSED after editing and dialog guards', () => 
   assert.equal(prevented, 2);
 });
 
+test('browser and operating-system P shortcuts are not captured by the game', () => {
+  const { sandbox, windowObject, elements } = makeGameUiSandbox();
+  const utility = appUiTarget(elements);
+  vm.runInContext('startGame()', sandbox);
+
+  for (const modifiers of [
+    { metaKey: true },
+    { ctrlKey: true },
+    { altKey: true },
+    { metaKey: true, shiftKey: true },
+  ]) {
+    let prevented = false;
+    windowObject.dispatch('keydown', {
+      code: 'KeyP',
+      target: utility,
+      ...modifiers,
+      preventDefault() { prevented = true; },
+    });
+    assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
+    assert.equal(vm.runInContext('pauseKeyHeld', sandbox), false);
+    assert.equal(prevented, false);
+  }
+});
+
 test('pause clears movement glide and charge without firing', () => {
   const { sandbox, windowObject } = makeGameUiSandbox();
   vm.runInContext(`
@@ -749,6 +773,23 @@ test('a legacy bus muted before pause stays muted after resume', () => {
   assert.deepEqual(modes, ['PLAYING', 'PAUSED', 'PLAYING']);
   assert.equal(sandbox.localStorage.getItem('nebula-cruise.audio.music-muted'), 'true');
   assert.equal(sandbox.localStorage.getItem('nebula-cruise.audio.sfx-muted'), 'true');
+});
+
+test('enabling either audio channel while paused restores the legacy bus on resume', () => {
+  for (const control of ['music', 'sfx']) {
+    const { sandbox, windowObject } = makeGameUiSandbox({ musicMuted: true, sfxMuted: true });
+    vm.runInContext('startGame()', sandbox);
+    windowObject.dispatch('keydown', { code: 'KeyP' });
+
+    vm.runInContext(`STATE.ui.${control}Button.dispatch('click')`, sandbox);
+    assert.equal(vm.runInContext('AUDIO.master.gain.value', sandbox), 0);
+
+    windowObject.dispatch('keyup', { code: 'KeyP' });
+    windowObject.dispatch('keydown', { code: 'KeyP' });
+    assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
+    assert.equal(vm.runInContext('AUDIO.master.gain.value', sandbox), 0.45);
+    assert.equal(vm.runInContext(`audioIs${control === 'music' ? 'Music' : 'Sfx'}Muted()`, sandbox), false);
+  }
 });
 
 for (const control of ['music', 'sfx']) {
