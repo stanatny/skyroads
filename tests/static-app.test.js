@@ -44,6 +44,16 @@ test('the adaptive audio policy loads as a classic script before the game', () =
   assert.ok(audioIndex < gameIndex, 'audio must initialize before the game consumes it');
 });
 
+test('the world-art contract loads as a classic script after presentation and before the game', () => {
+  const scripts = [...html.matchAll(/<script defer src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+  const presentationIndex = scripts.indexOf('./src/presentation.js');
+  const worldArtIndex = scripts.indexOf('./src/world-art.js');
+  const gameIndex = scripts.indexOf('./src/game.js');
+  assert.ok(presentationIndex >= 0, 'presentation must be part of the static resource graph');
+  assert.ok(worldArtIndex > presentationIndex, 'world-art must initialize after presentation');
+  assert.ok(worldArtIndex < gameIndex, 'world-art must initialize before the game consumes it');
+});
+
 test('startup exposes a locked adaptive-audio diagnostic without creating AudioContext', () => {
   let contextConstructions = 0;
   class GuardAudioContext { constructor() { contextConstructions++; } }
