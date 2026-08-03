@@ -53,13 +53,15 @@ Both license files are exact byte-for-byte copies of the upstream **Creative Com
 | `turret-heavy` | Space Kit `turret_double`, with exact OBJ group `turret` faces removed |
 | `barrier-rail` | Two Space Kit `barrels_rail` components, scale `0.72`, X `-0.44/+0.44` |
 | `barrier-crate` | Three Modular Space Kit `gate-lasers` components, scale `0.72`, X `-0.85/0/+0.85` |
-| `structure-reactor` | Two rocket assemblies at X `-0.48/+0.48`; base/sides/fuel/top scales `0.85/0.80/0.72/0.72`, Y `0/0.72/1.40/2.02` |
+| `structure-reactor` | Two rocket assemblies at X `-0.74/+0.74`; base/sides/fuel/top scales `0.85/0.80/0.72/0.72`, Y `0/0.72/1.40/2.02` |
 | `structure-tower` | Six Modular Space Kit `room-large` components, scale `0.72`, Y `0/0.60/1.20/1.80/2.40/3.00` |
 | `gap-edge` | Two Space Kit `terrain_sideCliff` components, scale `0.78`, X `-0.42/+0.42` |
 
-`tools/render-world-assets.swift` SHA-256: `d6a84146e16e584d6e664dc548fa1117162d7f7e75d899488a364edc4d0a4d98`.
+`tools/render-world-assets.swift` SHA-256: `6b01b02b36c4285a1eb1934e64ea2985c358a49aa5648b9eb791411b2c880948`.
 
-Space Kit solid materials map to graphite `#253044`, safety orange `#f09245`, or warm white `#e9eff6`; the Modular Space Kit colormap is preserved. PBR materials use metalness `0.24` and roughness `0.38`. Added details use cyan `#68e8ff`/`#58e7ff` and restrained orange `#ff8a42`; no warning red or magenta is baked into the base atlases.
+Space Kit solid materials map by material name rather than source hue: `metal`, `_defaultMat`, and unknown defaults use warm white `#e9eff6`; `dark` uses graphite `#253044`; `rockDark` uses graphite `#303a46`; `metalDark`, `metalRed`, and `rock` use cool-steel levels `#8b9bab`, `#64788e`, and `#536678`. The Modular Space Kit colormap is preserved. PBR materials use metalness `0.24` and roughness `0.38`. Added details use cyan `#68e8ff`/`#58e7ff`; `#ff8a42` is reserved for the renderer's small generated hazard/status light. No warning red or magenta is baked into the base atlases.
+
+The turret collision and procedural fallback remain at `1900` world units. Atlas-backed turrets use the independent visual `weaponMountHeight` of `1120`; with the runtime 960×600 projection fixture at zNear/zFar `300/350`, every committed turret view overlaps the barrel mount by `5.072–6.615` screen pixels.
 
 Raw frames render at 2×. Alpha ≥ 16 defines one seven-view union bound; one shared uniform scale, horizontal center, and bottom anchor frames every yaw. Target width/height/bottom-padding contracts are drone `0.72/0.64/48`, turret `0.76/0.86/36`, wallLow `0.86/0.58/36`, wallHigh `0.78/0.88/28`, and gap `0.88/0.56/32`. If the shared placement leaves any yaw outside Y 440–488, the renderer shifts all seven frames together by the smallest legal integer offset; it never moves frames independently. Downsampling is bilinear in premultiplied RGBA; zero-alpha RGB is cleared. SceneKit prepares the complete scene before snapshots, repeated source components clone one prepared template, and color channels round to the nearest 4-bit bucket before the narrow isolated-noise canonicalizer.
 
@@ -71,20 +73,20 @@ swift tools/render-world-assets.swift --manifest tools/world-assets.json --sourc
 for atlas in drone-scout drone-striker turret-sentry turret-heavy barrier-rail barrier-crate structure-reactor structure-tower gap-edge; do cmp "$WORLD_WORK_DIR/render-a/$atlas.png" "$WORLD_WORK_DIR/render-b/$atlas.png"; done
 ```
 
-Fresh independent sequential processes produced byte-identical JSON reports and byte-identical A/B PNGs for all nine atlases. Every frame preserves at least 12 transparent pixels on left, right, and top; bottom opaque pixels remain from Y 440 through 488. Every output stays below 2 MiB and the combined size is `2,081,310` bytes.
+Fresh independent sequential processes produced byte-identical JSON reports and byte-identical A/B PNGs for all nine atlases. Every frame preserves at least 12 transparent pixels on left, right, and top; bottom opaque pixels remain from Y 440 through 488. Gap frames additionally keep at least 24 transparent pixels on every edge. Orange coverage is `0.099–1.838%` and red/purple coverage is `0–1.749%` of alpha≥16 pixels across the nine atlases. Every output stays below 2 MiB and the combined size is `2,085,162` bytes.
 
 ## Derived outputs
 
 | Repository path | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `assets/world/drone-scout.png` | 147996 | `e67825e80a45e4accbe1d8d575d2d567cf0bdf75bdda637baa0bb2aeb40dca6c` |
-| `assets/world/drone-striker.png` | 140649 | `05ba45525809874f36560372a87e3fa5b01091323c2ac31f18d5ae5c5f192fbb` |
-| `assets/world/turret-sentry.png` | 137748 | `d1cc90386ef83adefe23373dd8ea2ea6bd63c161e6fd57af3f5922dd4102276e` |
-| `assets/world/turret-heavy.png` | 144464 | `89f51d2f4cd8e6a976ca9bfc082d7eb2808074c237ccb34aa964a4407b18a5b9` |
-| `assets/world/barrier-rail.png` | 237168 | `33bb2c69b61943b81d6c2f04d5a0ce1b3bab5890fbe2d5d8e7cb0c371aefb36c` |
+| `assets/world/drone-scout.png` | 145852 | `9ab7c75a5eb1afe52950b064e8d453798be0df8c9bc600fdc9952e3d1106ed5d` |
+| `assets/world/drone-striker.png` | 135056 | `8065eadf564c7b17aa301bc3738afd7591ba8c8cae695de98c96532b86c99736` |
+| `assets/world/turret-sentry.png` | 143178 | `78ae048ac6fa37c8c46efa584de197caa09daa9d2fb99ea26d6a34e61225dc2a` |
+| `assets/world/turret-heavy.png` | 145895 | `ebd1950a29d6424db4fc19f3f9643c3ff133b1d630460e8848f08862028194b7` |
+| `assets/world/barrier-rail.png` | 237310 | `f0a8f85fdb02e5c07400e7ff06567cfd9d066051f5406ca37c591daf8285d914` |
 | `assets/world/barrier-crate.png` | 345582 | `33b44384aae4c7cb6ea7d3f468fddf41f7918bf04b26ced88ef7e5561faf386d` |
-| `assets/world/structure-reactor.png` | 282060 | `267f169abd1040c6a90e6c1e74b1f21b4f697294e8c65740125518fccef6730d` |
+| `assets/world/structure-reactor.png` | 284323 | `317a3b6dcb3fe72d4a065f4fd52d541494150681c9a068c4c6aff36b7d6db690` |
 | `assets/world/structure-tower.png` | 505598 | `360a2fbae947d891c4b2ee9b50d141ad12186dfd894630036e9f4d953a360b3d` |
-| `assets/world/gap-edge.png` | 140045 | `00b05e81a7ec92b9b0fddf3a6e0af058d3f598a9feb5232adc0b8646d2f1687d` |
+| `assets/world/gap-edge.png` | 142368 | `c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49` |
 
-The original-resolution nine-row contact sheet was inspected before these hashes were frozen. All 63 views have complete silhouettes, stable shared framing, transparent padding, readable lane barriers and high structures, barrel-free turret bodies, tileable gap modules, and the approved graphite/warm-white/cyan/orange palette.
+The original-resolution nine-row contact sheet was inspected before these hashes were frozen. All 63 views have complete silhouettes, stable shared framing, transparent padding, readable lane barriers and high structures, barrel-free turret bodies, tileable gap modules, and distinct warm-white/graphite/cool-steel/cyan materials with only tiny orange status accents.

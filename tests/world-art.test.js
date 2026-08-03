@@ -42,7 +42,7 @@ test('the atlas manifest and geometry are the frozen seven-view contract', () =>
   });
   assert.deepEqual(WORLD_GEOMETRY, {
     drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
-    turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0 },
+    turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120 },
     wallLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
     wallHigh: { worldWidth: 648, worldHeight: 2000, baseY: 0 },
   });

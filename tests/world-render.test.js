@@ -274,6 +274,21 @@ test('missing atlases call the named procedural fallbacks without drawing images
   assert.equal(vm.runInContext("typeof drawProceduralDrone + ':' + typeof drawProceduralTurret", harness.sandbox), 'function:function');
 });
 
+test('turret barrels use the atlas visual mount while procedural fallback keeps collision height', () => {
+  const enemy = { type: 'turret', lane: 3, phase: 0, visualVariant: 'turretSentry' };
+  const zNear = 300;
+  for (const [loaded, expectedHeight] of [[true, 1120], [false, 1900]]) {
+    const harness = createHarness({ loaded });
+    const events = drawEnemy(harness, enemy, { zNear, zFar: 350 });
+    const barrel = events.find((event) => event.type === 'stroke' && event.style === '#120a20');
+    assert.ok(barrel, `${loaded ? 'atlas' : 'procedural'} turret must draw its barrel`);
+    const expected = vm.runInContext(`project(0, ${expectedHeight}, ${zNear})`, harness.sandbox);
+    const move = barrel.path.find((part) => part[0] === 'moveTo');
+    assert.ok(Math.abs(move[1] - expected.x) < 1e-10);
+    assert.ok(Math.abs(move[2] - expected.y) < 1e-10);
+  }
+});
+
 test('procedural enemies remain visible when the world-art module itself is unavailable', () => {
   const harness = createHarness();
   const events = JSON.parse(vm.runInContext(`(() => {

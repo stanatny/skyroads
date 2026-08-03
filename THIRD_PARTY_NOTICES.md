@@ -45,13 +45,13 @@ The repository's project license applies only to original project code and artwo
   - `space-kit/Models/OBJ format/turret_single.mtl` — upstream SHA-256 `762ff003991e23328663179e8246dbe450f15f2467cc1947ff144c0ff1f49c8b`
   - `space-kit/Models/OBJ format/turret_single.obj` — upstream SHA-256 `2b3492cde9c9496d73963669d8d59e9f5ebccb9dcbf15dbf5336e7ca630c6a89`
 - Repository outputs:
-  - `assets/world/drone-scout.png` — SHA-256 `e67825e80a45e4accbe1d8d575d2d567cf0bdf75bdda637baa0bb2aeb40dca6c`
-  - `assets/world/drone-striker.png` — SHA-256 `05ba45525809874f36560372a87e3fa5b01091323c2ac31f18d5ae5c5f192fbb`
-  - `assets/world/turret-sentry.png` — SHA-256 `d1cc90386ef83adefe23373dd8ea2ea6bd63c161e6fd57af3f5922dd4102276e`
-  - `assets/world/turret-heavy.png` — SHA-256 `89f51d2f4cd8e6a976ca9bfc082d7eb2808074c237ccb34aa964a4407b18a5b9`
-  - `assets/world/barrier-rail.png` — SHA-256 `33bb2c69b61943b81d6c2f04d5a0ce1b3bab5890fbe2d5d8e7cb0c371aefb36c`
-  - `assets/world/structure-reactor.png` — SHA-256 `267f169abd1040c6a90e6c1e74b1f21b4f697294e8c65740125518fccef6730d`
-  - `assets/world/gap-edge.png` — SHA-256 `00b05e81a7ec92b9b0fddf3a6e0af058d3f598a9feb5232adc0b8646d2f1687d`
+  - `assets/world/drone-scout.png` — SHA-256 `9ab7c75a5eb1afe52950b064e8d453798be0df8c9bc600fdc9952e3d1106ed5d`
+  - `assets/world/drone-striker.png` — SHA-256 `8065eadf564c7b17aa301bc3738afd7591ba8c8cae695de98c96532b86c99736`
+  - `assets/world/turret-sentry.png` — SHA-256 `78ae048ac6fa37c8c46efa584de197caa09daa9d2fb99ea26d6a34e61225dc2a`
+  - `assets/world/turret-heavy.png` — SHA-256 `ebd1950a29d6424db4fc19f3f9643c3ff133b1d630460e8848f08862028194b7`
+  - `assets/world/barrier-rail.png` — SHA-256 `f0a8f85fdb02e5c07400e7ff06567cfd9d066051f5406ca37c591daf8285d914`
+  - `assets/world/structure-reactor.png` — SHA-256 `317a3b6dcb3fe72d4a065f4fd52d541494150681c9a068c4c6aff36b7d6db690`
+  - `assets/world/gap-edge.png` — SHA-256 `c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49`
 
 ## Kenney — Modular Space Kit
 
@@ -69,7 +69,7 @@ The repository's project license applies only to original project code and artwo
   - `assets/world/barrier-crate.png` — SHA-256 `33b44384aae4c7cb6ea7d3f468fddf41f7918bf04b26ced88ef7e5561faf386d`
   - `assets/world/structure-tower.png` — SHA-256 `360a2fbae947d891c4b2ee9b50d141ad12186dfd894630036e9f4d953a360b3d`
 
-The two Kenney kits were normalized, assembled only as declared in `tools/world-assets.json`, styled with the Orbital Defense graphite/warm-white/cyan/orange palette, and rendered to seven-view transparent atlases. Renderer SHA-256: `d6a84146e16e584d6e664dc548fa1117162d7f7e75d899488a364edc4d0a4d98`. See `docs/assets/world-art.md`.
+The two Kenney kits were normalized, assembled only as declared in `tools/world-assets.json`, styled with the Orbital Defense warm-white/graphite/cool-steel/cyan palette plus small generated orange status lights, and rendered to seven-view transparent atlases. Renderer SHA-256: `6b01b02b36c4285a1eb1934e64ea2985c358a49aa5648b9eb791411b2c880948`. See `docs/assets/world-art.md`.
 
 ## Kenney — UI Pack: Sci-Fi 2.0
 

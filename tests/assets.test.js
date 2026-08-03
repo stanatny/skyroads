@@ -22,17 +22,17 @@ const WORLD_ATLAS_IDS = [
   'gap-edge',
 ];
 const WORLD_ATLAS_PATHS = WORLD_ATLAS_IDS.map((id) => `assets/world/${id}.png`);
-const WORLD_RENDERER_SHA256 = 'd6a84146e16e584d6e664dc548fa1117162d7f7e75d899488a364edc4d0a4d98';
+const WORLD_RENDERER_SHA256 = '6b01b02b36c4285a1eb1934e64ea2985c358a49aa5648b9eb791411b2c880948';
 const WORLD_OUTPUT_HASHES = {
-  'assets/world/drone-scout.png': 'e67825e80a45e4accbe1d8d575d2d567cf0bdf75bdda637baa0bb2aeb40dca6c',
-  'assets/world/drone-striker.png': '05ba45525809874f36560372a87e3fa5b01091323c2ac31f18d5ae5c5f192fbb',
-  'assets/world/turret-sentry.png': 'd1cc90386ef83adefe23373dd8ea2ea6bd63c161e6fd57af3f5922dd4102276e',
-  'assets/world/turret-heavy.png': '89f51d2f4cd8e6a976ca9bfc082d7eb2808074c237ccb34aa964a4407b18a5b9',
-  'assets/world/barrier-rail.png': '33bb2c69b61943b81d6c2f04d5a0ce1b3bab5890fbe2d5d8e7cb0c371aefb36c',
+  'assets/world/drone-scout.png': '9ab7c75a5eb1afe52950b064e8d453798be0df8c9bc600fdc9952e3d1106ed5d',
+  'assets/world/drone-striker.png': '8065eadf564c7b17aa301bc3738afd7591ba8c8cae695de98c96532b86c99736',
+  'assets/world/turret-sentry.png': '78ae048ac6fa37c8c46efa584de197caa09daa9d2fb99ea26d6a34e61225dc2a',
+  'assets/world/turret-heavy.png': 'ebd1950a29d6424db4fc19f3f9643c3ff133b1d630460e8848f08862028194b7',
+  'assets/world/barrier-rail.png': 'f0a8f85fdb02e5c07400e7ff06567cfd9d066051f5406ca37c591daf8285d914',
   'assets/world/barrier-crate.png': '33b44384aae4c7cb6ea7d3f468fddf41f7918bf04b26ced88ef7e5561faf386d',
-  'assets/world/structure-reactor.png': '267f169abd1040c6a90e6c1e74b1f21b4f697294e8c65740125518fccef6730d',
+  'assets/world/structure-reactor.png': '317a3b6dcb3fe72d4a065f4fd52d541494150681c9a068c4c6aff36b7d6db690',
   'assets/world/structure-tower.png': '360a2fbae947d891c4b2ee9b50d141ad12186dfd894630036e9f4d953a360b3d',
-  'assets/world/gap-edge.png': '00b05e81a7ec92b9b0fddf3a6e0af058d3f598a9feb5232adc0b8646d2f1687d',
+  'assets/world/gap-edge.png': 'c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49',
 };
 const WORLD_SOURCE_HASHES = {
   'modular-space-kit/Models/OBJ format/Textures/colormap.png': '5aa7d186416e85310d99308c8e5510ededda181f3354ba9f4887cd56273f2b1e',
@@ -123,6 +123,9 @@ function pngAlphaStats(relativePaths) {
       ] }
       var transparentPixels = 0
       var hiddenRgbPixels = 0
+      var opaqueColorPixels = 0
+      var orangePixels = 0
+      var redPurplePixels = 0
       for y in 0..<bitmap.pixelsHigh {
         for x in 0..<bitmap.pixelsWide {
           guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { exit(3) }
@@ -141,6 +144,14 @@ function pngAlphaStats(relativePaths) {
             if x % 512 == 511 { frameRightBorders[x / 512] += 1 }
           }
           if color.alphaComponent >= (16.0 / 255.0) {
+            opaqueColorPixels += 1
+            var hue: CGFloat = 0
+            var saturation: CGFloat = 0
+            var brightness: CGFloat = 0
+            var alpha: CGFloat = 0
+            color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+            if saturation >= 0.35 && hue >= 0.04 && hue <= 0.14 { orangePixels += 1 }
+            if saturation >= 0.35 && (hue < 0.04 || hue >= 0.78) { redPurplePixels += 1 }
             let frameIndex = x / 512
             let frameX = x % 512
             frameBounds[frameIndex]["minX"] = min(frameBounds[frameIndex]["minX"]!, frameX)
@@ -177,6 +188,9 @@ function pngAlphaStats(relativePaths) {
         "opaqueBounds": opaqueBounds,
         "transparentPixels": transparentPixels,
         "hiddenRgbPixels": hiddenRgbPixels,
+        "opaqueColorPixels": opaqueColorPixels,
+        "orangePixels": orangePixels,
+        "redPurplePixels": redPurplePixels,
       ]
       let encoded = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
       print(String(data: encoded, encoding: .utf8)!)
@@ -341,6 +355,54 @@ test('the world renderer reuses one prepared source template for repeated compon
   assert.match(renderer, /sourceTemplates\[sourceIdentity\] = component/);
 });
 
+test('the world renderer maps source material names to an orange-free neutral hierarchy', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-material-palette.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    fs.writeFileSync(harnessPath, `
+      import AppKit
+      import Foundation
+      import SceneKit
+
+      func rgb(_ name: String?) -> [Int] {
+          let source = SCNMaterial()
+          source.name = name
+          source.diffuse.contents = srgb(0xff, 0x8a, 0x42)
+          let result = styledMaterial(source: source, index: 0, texturePaths: [], images: [:])
+          let color = (result.diffuse.contents as! NSColor).usingColorSpace(.deviceRGB)!
+          return [color.redComponent, color.greenComponent, color.blueComponent].map {
+              Int(($0 * 255).rounded())
+          }
+      }
+
+      precondition(rgb("metal") == [0xe9, 0xef, 0xf6])
+      precondition(rgb("_defaultMat") == [0xe9, 0xef, 0xf6])
+      precondition(rgb(nil) == [0xe9, 0xef, 0xf6])
+      precondition(rgb("dark") == [0x25, 0x30, 0x44])
+      precondition(rgb("rockDark") == [0x30, 0x3a, 0x46])
+      precondition(rgb("metalDark") == [0x8b, 0x9b, 0xab])
+      precondition(rgb("metalRed") == [0x64, 0x78, 0x8e])
+      precondition(rgb("rock") == [0x53, 0x66, 0x78])
+      precondition(rgb("unexpected-orange-source") == [0xe9, 0xef, 0xf6])
+    `);
+    const executablePath = path.join(temporaryRoot, 'material-palette-test');
+    const compile = spawnSync('swiftc', [rendererLibraryPath, harnessPath, '-o', executablePath], {
+      cwd: root, encoding: 'utf8',
+    });
+    assert.equal(compile.status, 0, compile.stderr);
+    const run = spawnSync(executablePath, [], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test('the world manifest freezes the audited free OBJ recipes and seven-view geometry', () => {
   const manifest = JSON.parse(read('tools/world-assets.json'));
   assert.equal(manifest.version, 2);
@@ -351,7 +413,7 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
   });
   assert.deepEqual(manifest.geometry, {
     drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
-    turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0 },
+    turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120 },
     wallLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
     wallHigh: { worldWidth: 648, worldHeight: 2000, baseY: 0 },
   });
@@ -432,7 +494,7 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
       }),
     ], []],
     ['structure-reactor', 'kenney-space-kit', 'wallHigh', [
-      ...[-0.48, 0.48].flatMap((x) => [
+      ...[-0.74, 0.74].flatMap((x) => [
         component('space-kit/Models/OBJ format/rocket_baseA.obj', [], {
           scale: 0.85, rotationDegrees: [0, 0, 0], translation: [x, 0, 0],
         }),
@@ -468,6 +530,12 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
   assert.deepEqual(manifest.assets.map(({ id, sourceFamily, category, components, hideNodes }) => [
     id, sourceFamily, category, components, hideNodes,
   ]), expected);
+  const reactor = manifest.assets.find(({ id }) => id === 'structure-reactor');
+  const fuelCenters = reactor.components
+    .filter(({ model }) => model.endsWith('/rocket_fuelA.obj'))
+    .map(({ translation }) => translation[0]);
+  assert.ok(fuelCenters[1] - fuelCenters[0] >= 1.44,
+    'the two normalized 2:1 fuel bodies at scale 0.72 must not overlap horizontally');
   assert.deepEqual(manifest.assets.map(({ id }) => id), WORLD_ATLAS_IDS);
 
   const sourcePaths = manifest.assets.flatMap(({ components }) => components.flatMap(({ model, material, textures }) => [
@@ -796,6 +864,12 @@ test('the nine committed world atlases are bounded transparent 3584 by 512 PNGs'
     assert.ok(stats.transparentPixels > 0, `${stats.path} must retain transparent padding`);
     assert.equal(stats.hiddenRgbPixels, 0, `${stats.path} must clear RGB under zero alpha`);
     const minimum = minimumOpaqueExtent[categories[atlasIndex]];
+    const orangeCoverage = stats.orangePixels / stats.opaqueColorPixels;
+    const redPurpleCoverage = stats.redPurplePixels / stats.opaqueColorPixels;
+    assert.ok(orangeCoverage <= 0.20,
+      `${stats.path} orange coverage ${(orangeCoverage * 100).toFixed(3)}% must stay at or below 20%`);
+    assert.ok(redPurpleCoverage <= 0.05,
+      `${stats.path} red/purple coverage ${(redPurpleCoverage * 100).toFixed(3)}% must stay at or below 5%`);
     for (const [frameIndex, bounds] of stats.opaqueBounds.entries()) {
       assert.ok(bounds.minX >= 12, `${stats.path} frame ${frameIndex} must keep 12 transparent pixels on the left`);
       assert.ok(bounds.maxX <= 499, `${stats.path} frame ${frameIndex} must keep 12 transparent pixels on the right`);
@@ -803,6 +877,39 @@ test('the nine committed world atlases are bounded transparent 3584 by 512 PNGs'
       assert.ok(bounds.maxY >= 440 && bounds.maxY <= 488, `${stats.path} frame ${frameIndex} must keep its bottom anchor`);
       assert.ok(bounds.opaqueWidth >= minimum.width, `${stats.path} frame ${frameIndex} must fill the canonical width`);
       assert.ok(bounds.opaqueHeight >= minimum.height, `${stats.path} frame ${frameIndex} must fill the canonical height`);
+      if (categories[atlasIndex] === 'gap') {
+        assert.ok(bounds.minX >= 24, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on the left`);
+        assert.ok(bounds.maxX <= 487, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on the right`);
+        assert.ok(bounds.minY >= 24, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on top`);
+        assert.ok(bounds.maxY <= 487, `${stats.path} frame ${frameIndex} must keep 24 transparent pixels on the bottom`);
+      }
+    }
+  }
+});
+
+test('all fourteen turret views overlap the independent weapon mount without changing collision height', () => {
+  const manifest = JSON.parse(read('tools/world-assets.json'));
+  const { worldHeight, weaponMountHeight } = manifest.geometry.turret;
+  assert.equal(worldHeight, 1900, 'turret collision height must remain unchanged');
+  assert.equal(weaponMountHeight, 1120);
+  const viewportHeight = 600;
+  const horizon = viewportHeight * 0.42;
+  const cameraHeight = 2340;
+  const cameraDepth = 0.05;
+  const zNear = 300;
+  const zMid = 325;
+  const projectY = (worldY, zRel) => horizon
+    + cameraDepth / zRel * (cameraHeight - worldY) * (viewportHeight / 2);
+  const destinationTop = projectY(worldHeight, zMid);
+  const destinationHeight = projectY(0, zMid) - destinationTop;
+  const mountY = projectY(weaponMountHeight, zNear);
+  const turretPaths = ['assets/world/turret-sentry.png', 'assets/world/turret-heavy.png'];
+  for (const stats of pngAlphaStats(turretPaths)) {
+    for (const [frameIndex, bounds] of stats.opaqueBounds.entries()) {
+      const bodyTopY = destinationTop + bounds.minY / manifest.frame.height * destinationHeight;
+      const overlap = mountY - bodyTopY;
+      assert.ok(overlap >= 5 && overlap <= 7,
+        `${stats.path} frame ${frameIndex} projected mount overlap ${overlap.toFixed(3)}px must stay slight`);
     }
   }
 });

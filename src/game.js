@@ -1547,8 +1547,8 @@ function drawProceduralTurret(ctx, shape) {
   ctx.lineWidth = 1.5; quad(ctx, b1, b2, t2, t1); ctx.stroke();
 }
 
-function drawTurretWeapon(ctx, e, cx, shape, animationTime, zNear) {
-  const mount = project((shape.xLt + shape.xRt) / 2, shape.height, zNear);
+function drawTurretWeapon(ctx, e, cx, shape, animationTime, zNear, mountHeight = shape.height) {
+  const mount = project((shape.xLt + shape.xRt) / 2, mountHeight, zNear);
   if (!mount.visible) return;
   const unit = mount.scale * STATE.width / 2;
   const direction = Math.sign(playerWorldX() - cx) || 1;
@@ -1609,7 +1609,10 @@ function drawEnemy(ctx, e, segIndex, zNear, zFar) {
     worldX: cx, zRel: zMid, destination, alpha: 1,
   });
   if (!drawn) drawProceduralTurret(ctx, shape);
-  drawTurretWeapon(ctx, e, cx, shape, animationTime, zNear);
+  const weaponMountHeight = drawn && Number.isFinite(geometry.weaponMountHeight)
+    ? geometry.weaponMountHeight
+    : shape.height;
+  drawTurretWeapon(ctx, e, cx, shape, animationTime, zNear, weaponMountHeight);
 }
 
 // Compatibility entry point for older diagnostics and local test harnesses.

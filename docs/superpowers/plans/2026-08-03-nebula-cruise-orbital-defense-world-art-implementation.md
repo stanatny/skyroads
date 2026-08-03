@@ -4,7 +4,7 @@
 
 **Goal:** Replace all nine hostile-world atlases with the approved Kenney-based Orbital Defense style, make barriers visibly occupy their lane, and preserve every gameplay, perspective, fallback, and movement-telegraph contract.
 
-**Architecture:** Keep the existing Canvas 2D runtime and deterministic seven-yaw atlas API. Extend the offline SceneKit renderer with source-aware white/graphite/cyan/orange materials and category-specific canonical framing, then regenerate the same nine runtime paths from two audited Kenney CC0 packages. Runtime code changes only the cosmetic width of low and high wall sprites; collision and generation remain untouched.
+**Architecture:** Keep the existing Canvas 2D runtime and deterministic seven-yaw atlas API. Extend the offline SceneKit renderer with name-aware warm-white/graphite/cool-steel materials, generated cyan/small-orange details, and category-specific canonical framing, then regenerate the same nine runtime paths from two audited Kenney CC0 packages. Runtime code adds only an atlas-specific turret visual mount and cosmetic sprite geometry; collision and generation remain untouched.
 
 **Tech Stack:** HTML5 Canvas 2D, classic JavaScript, Node 22 node:test, Swift/SceneKit/AppKit, transparent PNG atlases, GitHub Pages, macOS WKWebView.
 
@@ -18,7 +18,7 @@
 - Keep the nine current runtime paths, manifest keys, seven 512×512 yaw frames, independent per-atlas fallback, transparent padding, zero RGB under alpha zero, 2 MiB per-atlas limit, and 18 MiB total limit.
 - Use warm-white armor, graphite joints, cyan energy, and restrained orange safety accents. Red/magenta remains only for the existing hostile movement warning layer.
 - A low or high wall sprite uses 648 visual world units, exactly 90% of one lane. Gameplay still treats the complete lane as occupied.
-- Keep 'drawTurretWeapon()' as the authoritative aiming barrel and muzzle. Kenney turret source nodes named 'turret' are recursively hidden so the atlas contains only the base/body.
+- Keep 'drawTurretWeapon()' as the authoritative aiming barrel and muzzle. Atlas-backed turrets mount it at visual height 1120; procedural fallback and collision stay at height 1900. Kenney turret source nodes named 'turret' are recursively hidden so the atlas contains only the base/body.
 - Keep 'drawDroneDirectionCues()', bottom-center banking, 'enemyLane()', and reduced-motion behavior unchanged.
 - Preserve the uncommitted projected deep-gap opening in 'src/game.js'; the new 'gap-edge' remains a repeatable rim module around that opening.
 - The generated direction mockup is reference-only and must never be copied into runtime assets.
@@ -96,7 +96,7 @@ Change the expected geometry in 'tests/world-art.test.js' and the manifest geome
 ~~~js
 {
   drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
-  turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0 },
+  turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120 },
   wallLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
   wallHigh: { worldWidth: 648, worldHeight: 2000, baseY: 0 },
 }
@@ -221,7 +221,7 @@ Require the exact model/material mapping below. All paths are relative to the te
 | 'turret-heavy' | 'space-kit/Models/OBJ format/turret_double.obj' + matching MTL, textures [], hideNodes ['turret'] |
 | 'barrier-rail' | two 'space-kit/Models/OBJ format/barrels_rail.obj' components at scale 0.72 and X translations -0.44/+0.44 |
 | 'barrier-crate' | three 'modular-space-kit/Models/OBJ format/gate-lasers.obj' components at scale 0.72 and X translations -0.85/0/+0.85; each uses matching MTL + 'Models/OBJ format/Textures/colormap.png' |
-| 'structure-reactor' | two identical Space Kit rocket assemblies at X -0.48/+0.48: 'rocket_baseA' scale 0.85 at Y 0, 'rocket_sidesA' scale 0.80 at Y 0.72, 'rocket_fuelA' scale 0.72 at Y 1.40, and 'rocket_topA' scale 0.72 at Y 2.02; each uses matching MTL and textures [] |
+| 'structure-reactor' | two identical Space Kit rocket assemblies at X -0.74/+0.74: 'rocket_baseA' scale 0.85 at Y 0, 'rocket_sidesA' scale 0.80 at Y 0.72, 'rocket_fuelA' scale 0.72 at Y 1.40, and 'rocket_topA' scale 0.72 at Y 2.02; each uses matching MTL and textures []; the 1.48 center separation leaves 0.04 between the normalized 1.44-wide fuel bodies |
 | 'structure-tower' | six 'modular-space-kit/Models/OBJ format/room-large.obj' components at scale 0.72 and Y translations 0/0.60/1.20/1.80/2.40/3.00; each uses matching MTL + colormap.png |
 | 'gap-edge' | two 'space-kit/Models/OBJ format/terrain_sideCliff.obj' components at scale 0.78 and X translations -0.42/+0.42; each uses matching MTL and textures [] |
 
@@ -278,7 +278,7 @@ Copy 'License.txt' byte-for-byte from each extracted archive to its declared rep
 
 Add 'FramingContract' to the manifest decoder and validate the exact five-category framing map. Keep the existing nine-ID, source-path, hash, alpha, size, and determinism validation.
 
-For solid-color Space Kit MTL materials, inspect the source diffuse color. Map dark source luminance below 0.32 to graphite '#253044', saturated orange source hues to safety orange '#f09245', and the remaining panels to warm white '#e9eff6'. For the Modular Space Kit colormap, preserve the texture and apply neutral white multiplication. Use physically based lighting with metalness 0.24 and roughness 0.38.
+For solid-color Space Kit MTL materials, map by `materialName`, never by source hue: `metal`, `_defaultMat`, nil, and unknown names use warm white `#e9eff6`; `dark` uses graphite `#253044`; `rockDark` uses graphite `#303a46`; `metalDark`, `metalRed`, and `rock` use cool steel `#8b9bab`, `#64788e`, and `#536678`. For the Modular Space Kit colormap, preserve the texture and apply neutral white multiplication. Use physically based lighting with metalness 0.24 and roughness 0.38.
 
 Replace the violet/red generated seam treatment with:
 
@@ -325,6 +325,8 @@ Build a temporary contact sheet from all seven frames of all nine render-a atlas
 - purple base materials or dominant red lighting.
 
 The accepted sheet must visibly match the approved warm-white/graphite/cyan/orange direction.
+
+Quantitative acceptance additionally requires orange-like alpha≥16 pixels at or below 20% and red/purple-like pixels at or below 5% in every atlas. Gap frames require `minX/minY >= 24` and `maxX/maxY <= 487`. All fourteen turret views must overlap the real projected 1120-height atlas mount slightly, while the missing-atlas fallback remains mounted at 1900.
 
 - [ ] **Step 8: Freeze provenance and replace the nine atlases**
 

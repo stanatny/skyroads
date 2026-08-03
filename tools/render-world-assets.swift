@@ -16,6 +16,7 @@ struct GeometryDimensions: Decodable, Equatable {
     let worldWidth: Double
     let worldHeight: Double
     let baseY: Double
+    let weaponMountHeight: Double?
 }
 
 struct FramingContract: Decodable, Equatable {
@@ -26,10 +27,10 @@ struct FramingContract: Decodable, Equatable {
 
 // Keep these category dimensions byte-for-byte aligned with src/world-art.js.
 let WORLD_GEOMETRY: [String: GeometryDimensions] = [
-    "drone": GeometryDimensions(worldWidth: 380, worldHeight: 360, baseY: 140),
-    "turret": GeometryDimensions(worldWidth: 489.6, worldHeight: 1900, baseY: 0),
-    "wallLow": GeometryDimensions(worldWidth: 648, worldHeight: 600, baseY: 0),
-    "wallHigh": GeometryDimensions(worldWidth: 648, worldHeight: 2000, baseY: 0),
+    "drone": GeometryDimensions(worldWidth: 380, worldHeight: 360, baseY: 140, weaponMountHeight: nil),
+    "turret": GeometryDimensions(worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120),
+    "wallLow": GeometryDimensions(worldWidth: 648, worldHeight: 600, baseY: 0, weaponMountHeight: nil),
+    "wallHigh": GeometryDimensions(worldWidth: 648, worldHeight: 2000, baseY: 0, weaponMountHeight: nil),
 ]
 
 struct UpstreamRecord: Decodable {
@@ -350,6 +351,17 @@ func srgb(_ red: Int, _ green: Int, _ blue: Int) -> NSColor {
     NSColor(srgbRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1)
 }
 
+func neutralMaterialColor(named materialName: String) -> NSColor {
+    switch materialName.lowercased() {
+    case "dark": return srgb(0x25, 0x30, 0x44)
+    case "rockdark": return srgb(0x30, 0x3a, 0x46)
+    case "metaldark": return srgb(0x8b, 0x9b, 0xab)
+    case "metalred": return srgb(0x64, 0x78, 0x8e)
+    case "rock": return srgb(0x53, 0x66, 0x78)
+    default: return srgb(0xe9, 0xef, 0xf6)
+    }
+}
+
 func styledMaterial(
     source: SCNMaterial,
     index: Int,
@@ -363,20 +375,7 @@ func styledMaterial(
         result.diffuse.contents = texture
         result.multiply.contents = NSColor.white
     } else {
-        let sourceColor = (source.diffuse.contents as? NSColor)?
-            .usingColorSpace(.deviceRGB) ?? NSColor.white
-        let luminance = 0.2126 * sourceColor.redComponent
-            + 0.7152 * sourceColor.greenComponent
-            + 0.0722 * sourceColor.blueComponent
-        var hue: CGFloat = 0
-        var saturation: CGFloat = 0
-        var brightness: CGFloat = 0
-        var alpha: CGFloat = 0
-        sourceColor.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-        let isOrange = saturation >= 0.35 && hue >= 0.04 && hue <= 0.14
-        result.diffuse.contents = luminance < 0.32
-            ? srgb(0x25, 0x30, 0x44)
-            : (isOrange ? srgb(0xf0, 0x92, 0x45) : srgb(0xe9, 0xef, 0xf6))
+        result.diffuse.contents = neutralMaterialColor(named: materialName)
         result.multiply.contents = NSColor.white
     }
     result.name = "Orbital defense \(materialName)"
