@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03
 
-**Status:** Approved in the visual design session; awaiting written-spec review
+**Status:** Approved
 
 **Delivery target:** Update the open `feat/stellar-command-polish` pull request against `main`; do not merge it
 
@@ -23,8 +23,9 @@ This document supersedes the obstacle-height, generation, atlas-layout, and view
 
 - Make visible obstacle size agree with collision height and ground position.
 - Establish readable one-jump, two-jump, and super-form three-jump building tiers.
-- Add low and medium continuous building runs that require the existing hold-to-glide action at the intended nominal speed.
-- Preserve at least one ordinary safe lane through every new optional challenge.
+- Add low continuous runs whose primary solution is one jump plus the existing hold-to-glide action, while accepting a well-timed second jump as an advanced alternative.
+- Add medium continuous runs that require two jumps followed by the existing hold-to-glide action at the intended nominal speed.
+- Preserve at least one ordinary safe lane through every newly added building or corridor challenge, without changing the existing all-lane gap challenge.
 - Make near left/right lane structures reveal the correct side and top instead of reading as front-facing billboards.
 - Increase the drone's visible body modestly while preserving its gameplay hitbox, height, movement, and direction cues.
 - Make `Space` and `Enter` restart reliably without allowing shortcuts to fire while editing text or using another dialog control.
@@ -35,6 +36,7 @@ This document supersedes the obstacle-height, generation, atlas-layout, and view
 
 - No WebGL/Three.js conversion, runtime model loading, or remote runtime assets.
 - No new ground-slide or crouch mechanic. “Glide” means the existing airborne behavior activated by holding a jump key while descending and while fuel remains.
+- No tunnel ceiling or rule that disables the player's ordinary second jump over a low run.
 - No mandatory two-jump, three-jump, or glide gate across every lane.
 - No continuous high-rise run in this pass; long runs use only the one-jump and two-jump heights.
 - No change to jump velocity, gravity, fuel cost, glide gravity factors, player speed curve, boost invulnerability, score, leaderboard, persistence, music, or player ship art.
@@ -56,7 +58,8 @@ The resulting obstacle tiers are:
 | Low barrier | 600 | One ordinary jump | Broad low armor, one cyan height band |
 | Medium defense structure | 1,250 | Two ordinary jumps | Independent mid-rise silhouette, two cyan height bands |
 | High command structure | 2,000 | Three jumps during super form | Tall skyline silhouette, two cyan bands plus one gold super beacon |
-| Continuous defense corridor | 600 or 1,250 | One or two jumps, then hold the jump key to glide | Connected start marker, repeatable body modules, continuous conduit/light line, end cap |
+| Low continuous defense corridor | 600 | One jump plus glide is the primary solution; a well-timed second jump is also valid | Connected start marker, repeatable low body modules, continuous conduit/light line, end cap |
+| Medium continuous defense corridor | 1,250 | Two jumps, then hold the jump key to glide | Connected start marker, repeatable medium body modules, continuous conduit/light line, end cap |
 
 These heights preserve clear margins:
 
@@ -66,7 +69,7 @@ These heights preserve clear margins:
 
 Collision remains strict at the boundary: `playerY <= obstacleHeight` collides; only a height greater than the threshold clears it.
 
-All four families are skill routes, not solvability requirements. A new challenge may occupy one or more non-safe lanes, but the generator must retain at least one traversable safe lane (`ROAD`, `FUEL`, or a non-hazard pickup) that requires no special power-up or advanced jump.
+All five rows in the table describe skill routes, not solvability requirements. A newly added building or corridor challenge may occupy one or more non-safe lanes, but the generator must retain at least one traversable safe lane (`ROAD`, `FUEL`, or a non-hazard pickup) that requires no special power-up or advanced jump. This guarantee is scoped to the new building/corridor system; the existing intentional all-lane gap challenge remains unchanged.
 
 The new medium collision type is `WALL_MEDIUM`. Ordinary bullets pass only when their stored flight height is greater than the struck building's tier height: 600 for low and 1,250 for medium. High structures continue to block ordinary bullets at every attainable ordinary firing height. Ordinary missiles clear the struck tile, while existing super-form bullet and area-missile rules apply to all three wall types.
 
@@ -85,6 +88,8 @@ For exact obstacle-height clearance, the ordinary no-glide and glide windows are
 
 The outdated formula comment beside `GLIDE_GRAVITY_FACTOR` must be corrected to use `0.08`; this documentation-only correction does not change physics.
 
+An ordinary second jump can keep the player above 600 for approximately 0.733 seconds without gliding, longer than the 0.599-second one-jump glide window. Therefore a low run cannot strictly require glide without adding an artificial ceiling or disabling the second jump. The approved behavior keeps both solutions: one jump plus glide is the signposted route, and a well-timed second jump is a valid advanced substitute. A medium run can strictly require glide because both ordinary jumps have already been consumed before the player reaches 1,250.
+
 ### 5.2 Nominal-speed calculation
 
 Track generation remains deterministic and ahead-of-player. It therefore uses nominal speed derived from the unchanged acceleration curve, rather than transient runtime BOOST or SLOW state:
@@ -93,18 +98,18 @@ Track generation remains deterministic and ahead-of-player. It therefore uses no
 nominalSpeed(index) = min(24, sqrt(64 + 0.8 × index)) segments/second
 ```
 
-Continuous runs unlock at segment 100, where nominal speed is approximately 12 segments/second. For a height with no-glide window `Tfree` and glide window `Tglide`:
+Continuous runs unlock at segment 100, where nominal speed is approximately 12 segments/second. For the signposted route at a height with no-glide window `Tfree` and glide window `Tglide`:
 
 ```text
 minimumLength = ceil(nominalSpeed × Tfree) + 1
 maximumSafeLength = floor(nominalSpeed × Tglide) - 1
 ```
 
-The generator selects either `minimumLength` or `minimumLength + 1`, capped at `maximumSafeLength`. This creates small variation while avoiding a perfect-timing requirement.
+The generator selects either `minimumLength` or `minimumLength + 1`, capped at `maximumSafeLength`. This creates small variation while avoiding a perfect-timing requirement. For low runs, the bounds compare one jump without glide against one jump with glide and intentionally do not prohibit the legal second-jump substitute. For medium runs, the bounds compare the complete two-jump trajectory without glide against the same trajectory followed by glide, so glide is strictly required on that route.
 
 Reference values are:
 
-| Nominal speed | Low run allowed range | Selected low length | Medium run allowed range | Selected medium length |
+| Nominal speed | Low primary-route range | Selected low length | Medium strict-glide range | Selected medium length |
 |---:|---:|---:|---:|---:|
 | 12 | 5–6 | 5 or 6 | 6–8 | 6 or 7 |
 | 16 | 6–8 | 6 or 7 | 7–11 | 7 or 8 |
@@ -257,7 +262,8 @@ Automated coverage must include:
 - ordinary third-jump rejection and super-form third-jump acceptance;
 - glide activation only while descending, held, and fueled, with unchanged 0.08/0.045 factors;
 - run-length calculations at nominal speeds 12, 16, 20, and 24;
-- proof that selected run lengths fail without glide and clear with glide under the test trajectory;
+- proof that selected low-run lengths fail with only one jump and no glide, clear with one jump plus glide, and may also clear with a well-timed second jump;
+- proof that selected medium-run lengths fail under every ordinary no-glide two-jump trajectory and clear with two jumps followed by glide;
 - run lane/type continuity, start/middle/end phases, approach/landing clear zones, and safe-lane preservation;
 - no gap, pickup, or enemy overlap inside a run;
 - low/medium bullet-height behavior, ordinary missile clearing, super bullet clearing, and super area-missile clearing for the new wall type;
@@ -278,10 +284,11 @@ Manual browser review covers 1,280×800 and 1,920×1,080 at normal and maximum s
 1. a near low barrier cleared by one jump;
 2. a medium structure cleared by two jumps;
 3. a high structure blocked in ordinary mode and cleared with a super-form third jump;
-4. low and medium continuous runs cleared only by holding glide on the intended route;
-5. center and both outer lanes at near, middle, and far depths;
-6. a drone performing rest, warn, and move states;
-7. game over with the restart button focused, followed by successful `Space` restart.
+4. a low continuous run cleared by the signposted one-jump-plus-glide route and by the accepted well-timed second-jump alternative;
+5. a medium continuous run that cannot be cleared by two jumps alone and is cleared by two jumps followed by glide;
+6. center and both outer lanes at near, middle, and far depths;
+7. a drone performing rest, warn, and move states;
+8. game over with the restart button focused, followed by successful `Space` restart.
 
 Acceptance requires correct side/top exposure on edge lanes, substantial but lane-contained buildings, readable height tiers, a visibly larger but non-dominating drone, no ground-anchor drift, no view popping, and no discrepancy between visible and collision height.
 
