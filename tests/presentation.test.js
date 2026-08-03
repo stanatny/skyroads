@@ -258,6 +258,53 @@ test('world preload exposes all eight exact categories when dimensions are valid
   });
 });
 
+test('visual preload timeout preserves completed images while cancelling and releasing pending images', async () => {
+  const images = [];
+  class PartiallyLoadedImage {
+    constructor() {
+      this._src = '';
+      this.removeCount = 0;
+      images.push(this);
+    }
+
+    set src(value) {
+      this._src = value;
+      if (images.length === 1) queueMicrotask(() => { if (this.onload) this.onload(); });
+    }
+
+    get src() { return this._src; }
+
+    removeAttribute(name) {
+      assert.equal(name, 'src');
+      this.removeCount += 1;
+      this._src = '';
+    }
+  }
+
+  const visualAssets = await preloadVisualAssets({
+    timeoutMs: 5,
+    ImageCtor: PartiallyLoadedImage,
+    FontFaceCtor: null,
+    fontSet: null,
+  });
+
+  const entries = Object.values(visualAssets.assets).flatMap((group) => Object.values(group));
+  const completed = images[0];
+  assert.equal(visualAssets.timedOut, true);
+  assert.equal(visualAssets.loadedCount, 1);
+  assert.equal(visualAssets.assets.ship.neutral.loaded, true);
+  assert.equal(visualAssets.assets.ship.neutral.element, completed);
+  assert.equal(completed.src, VISUAL_ASSET_MANIFEST.ship.neutral);
+  assert.equal(completed.removeCount, 0);
+  assert.deepEqual(entries.filter((entry) => entry.element), [visualAssets.assets.ship.neutral]);
+  for (const pending of images.slice(1)) {
+    assert.equal(pending.onload, null);
+    assert.equal(pending.onerror, null);
+    assert.equal(pending.src, '');
+    assert.equal(pending.removeCount, 1);
+  }
+});
+
 test('canvas reduced-motion policy keeps gameplay moving but steadies decorative effects', () => {
   assert.deepEqual(canvasMotionPolicy(false), {
     decorativeMotion: true,

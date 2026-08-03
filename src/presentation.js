@@ -123,7 +123,18 @@
           state.loaded = loaded;
           resolve();
         };
-        imageTasks.push({ finish });
+        const cancel = () => {
+          if (settled) return;
+          image.onload = null;
+          image.onerror = null;
+          try {
+            if (typeof image.removeAttribute === 'function') image.removeAttribute('src');
+            else image.src = '';
+          } catch (_) {}
+          state.element = null;
+          finish(false);
+        };
+        imageTasks.push({ finish, cancel });
         image.onload = () => finish(!isWorldAsset || (
           image.naturalWidth === metadata.atlasWidth
           && image.naturalHeight === metadata.atlasHeight
@@ -186,7 +197,7 @@
         }),
       ]);
       if (timer !== null && typeof clearTimeoutFn === 'function') clearTimeoutFn(timer);
-      if (timedOut) imageTasks.forEach(({ finish }) => finish(false));
+      if (timedOut) imageTasks.forEach(({ cancel }) => cancel());
     } else {
       await allSettled;
     }
