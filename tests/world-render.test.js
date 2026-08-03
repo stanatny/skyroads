@@ -498,6 +498,12 @@ test('tessellated gap modules preserve authoritative one-lane, bridge, and full-
       .filter((event) => event.type === 'fill' && event.style === '#05050d')
       .map((event) => event.path);
     assert.deepEqual(voidPaths, expectedPaths, 'decoration must not alter any projected opening corner');
+    assert.ok(events.some((event) => event.type === 'stroke'
+      && typeof event.style === 'string' && event.style.startsWith('rgba(100,220,255,')),
+    'the abyss must expose a cyan perspective grid instead of the retired flat void');
+    assert.ok(events.some((event) => event.type === 'stroke'
+      && typeof event.style === 'string' && event.style.startsWith('rgba(204,92,255,')),
+    'the abyss must retain a violet energy-depth accent');
 
     const calls = imageCalls(events).filter((call) => call.image === 'gapEdge');
     assert.ok(calls.length > 0, 'loaded gap atlas must decorate the projected boundaries');

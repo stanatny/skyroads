@@ -932,22 +932,79 @@ function drawProceduralGapVoid(ctx, gapCorners, segIndex, lane) {
   ctx.fillStyle = '#05050d';
   quad(ctx, nearLeft, nearRight, farRight, farLeft); ctx.fill();
   const pulse = canvasPulse(0.45, 0.35, 4, segIndex * 0.8);
-  ctx.fillStyle = 'rgba(255,80,90,' + (pulse * 0.9).toFixed(3) + ')';
-  for (const fraction of [0.25, 0.5, 0.75]) {
-    const edgeX = nearLeft.x + (nearRight.x - nearLeft.x) * fraction;
-    const edgeY = nearLeft.y + (nearRight.y - nearLeft.y) * fraction;
-    const farX = farLeft.x + (farRight.x - farLeft.x) * fraction;
-    const farY = farLeft.y + (farRight.y - farLeft.y) * fraction;
-    const size = Math.max(3, (nearRight.x - nearLeft.x) * 0.06);
-    const tipX = edgeX + (farX - edgeX) * 0.35;
-    const tipY = edgeY + (farY - edgeY) * 0.35;
+  const nearMid = {
+    x: (nearLeft.x + nearRight.x) / 2,
+    y: (nearLeft.y + nearRight.y) / 2,
+  };
+  const farMid = {
+    x: (farLeft.x + farRight.x) / 2,
+    y: (farLeft.y + farRight.y) / 2,
+  };
+
+  // The collision opening remains the exact projected quadrilateral, while the interior becomes
+  // a deep energy well. The licensed gap modules drawn afterward supply its physical rim.
+  ctx.save();
+  try {
+    quad(ctx, nearLeft, nearRight, farRight, farLeft);
+    ctx.clip();
+    const depth = ctx.createLinearGradient(nearMid.x, nearMid.y, farMid.x, farMid.y);
+    depth.addColorStop(0, 'rgba(2,5,16,0.98)');
+    depth.addColorStop(0.48, 'rgba(5,20,42,0.96)');
+    depth.addColorStop(1, 'rgba(31,7,48,0.94)');
+    ctx.fillStyle = depth;
+    quad(ctx, nearLeft, nearRight, farRight, farLeft); ctx.fill();
+
+    const cyanAlpha = (0.10 + pulse * 0.11).toFixed(3);
+    ctx.strokeStyle = 'rgba(100,220,255,' + cyanAlpha + ')';
+    ctx.lineWidth = Math.max(1, (nearRight.x - nearLeft.x) * 0.004);
+    for (const fraction of [0.16, 0.36, 0.64, 0.84]) {
+      ctx.beginPath();
+      ctx.moveTo(
+        nearLeft.x + (nearRight.x - nearLeft.x) * fraction,
+        nearLeft.y + (nearRight.y - nearLeft.y) * fraction,
+      );
+      ctx.lineTo(
+        farLeft.x + (farRight.x - farLeft.x) * fraction,
+        farLeft.y + (farRight.y - farLeft.y) * fraction,
+      );
+      ctx.stroke();
+    }
+
+    for (const [index, fraction] of [0.14, 0.29, 0.46, 0.64, 0.81].entries()) {
+      const left = {
+        x: nearLeft.x + (farLeft.x - nearLeft.x) * fraction,
+        y: nearLeft.y + (farLeft.y - nearLeft.y) * fraction,
+      };
+      const right = {
+        x: nearRight.x + (farRight.x - nearRight.x) * fraction,
+        y: nearRight.y + (farRight.y - nearRight.y) * fraction,
+      };
+      ctx.strokeStyle = index % 2 === 0
+        ? 'rgba(204,92,255,' + (0.12 + pulse * 0.12).toFixed(3) + ')'
+        : 'rgba(100,220,255,' + (0.08 + pulse * 0.09).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(1, (nearRight.x - nearLeft.x) * 0.006 * (1 - fraction * 0.55));
+      ctx.beginPath();
+      ctx.moveTo(left.x, left.y);
+      ctx.lineTo(right.x, right.y);
+      ctx.stroke();
+    }
+
+    const horizonRadius = Math.max(6, (nearRight.x - nearLeft.x) * 0.42);
+    const horizon = ctx.createRadialGradient(
+      farMid.x, farMid.y, 0,
+      farMid.x, farMid.y, horizonRadius,
+    );
+    horizon.addColorStop(0, 'rgba(214,118,255,' + (0.22 + pulse * 0.14).toFixed(3) + ')');
+    horizon.addColorStop(0.42, 'rgba(72,176,255,0.12)');
+    horizon.addColorStop(1, 'rgba(5,8,24,0)');
+    ctx.fillStyle = horizon;
     ctx.beginPath();
-    ctx.moveTo(edgeX - size, edgeY);
-    ctx.lineTo(edgeX + size, edgeY);
-    ctx.lineTo(tipX, tipY);
-    ctx.closePath();
+    ctx.arc(farMid.x, farMid.y, horizonRadius, 0, Math.PI * 2);
     ctx.fill();
+  } finally {
+    ctx.restore();
   }
+
   for (let index = 0; index < 5; index++) {
     const hashA = Math.sin(segIndex * 127.1 + lane * 311.7 + index * 74.7) * 43758.5453;
     const hashB = Math.sin(segIndex * 269.5 + lane * 183.3 + index * 41.9) * 28001.8384;
@@ -962,7 +1019,9 @@ function drawProceduralGapVoid(ctx, gapCorners, segIndex, lane) {
     const emberY = nearY + (farY - nearY) * cycle;
     const alpha = Math.sin(cycle * Math.PI) * 0.55;
     const size = Math.max(1, (nearRight.x - nearLeft.x) * 0.018 * (1 - cycle * 0.5));
-    ctx.fillStyle = 'rgba(255,95,60,' + alpha.toFixed(3) + ')';
+    ctx.fillStyle = index % 2 === 0
+      ? 'rgba(116,224,255,' + alpha.toFixed(3) + ')'
+      : 'rgba(221,118,255,' + alpha.toFixed(3) + ')';
     ctx.beginPath();
     ctx.arc(emberX, emberY, size, 0, Math.PI * 2);
     ctx.fill();
