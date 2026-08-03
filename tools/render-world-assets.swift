@@ -193,6 +193,7 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
     for upstream in manifest.upstream {
         try validateRelativeSourcePath(upstream.archiveFilename, label: upstream.archiveFilename)
         try validateRelativeSourcePath(upstream.licenseSource, label: upstream.licenseSource)
+        try validateRelativeSourcePath(upstream.licenseCommitted, label: upstream.licenseCommitted)
         guard upstream.archiveSha256.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil,
               upstream.licenseSha256.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
             throw RenderError.validation("Upstream archive and license hashes must be lowercase SHA-256")
@@ -644,6 +645,44 @@ func canonicalizeIsolatedOpaqueNoise(
     }
 }
 
+func validateTransparentAtlasPadding(
+    _ pixels: [UInt8],
+    frameWidth: Int,
+    frameHeight: Int,
+    frameCount: Int,
+    bytesPerRow: Int,
+    assetID: String
+) throws {
+    let atlasWidth = frameWidth * frameCount
+    guard frameWidth > 0,
+          frameHeight > 0,
+          frameCount > 0,
+          bytesPerRow >= atlasWidth * 4,
+          pixels.count >= bytesPerRow * frameHeight else {
+        throw RenderError.render("\(assetID) has invalid atlas padding geometry")
+    }
+    for x in 0..<atlasWidth {
+        let bottomAlpha = pixels[x * 4 + 3]
+        let topAlpha = pixels[((frameHeight - 1) * bytesPerRow) + x * 4 + 3]
+        guard bottomAlpha == 0, topAlpha == 0 else {
+            throw RenderError.render("\(assetID) has a nontransparent top or bottom border")
+        }
+    }
+    for frameIndex in 0..<frameCount {
+        let leftX = frameIndex * frameWidth
+        let rightX = leftX + frameWidth - 1
+        for y in 0..<frameHeight {
+            let leftAlpha = pixels[y * bytesPerRow + leftX * 4 + 3]
+            let rightAlpha = pixels[y * bytesPerRow + rightX * 4 + 3]
+            guard leftAlpha == 0, rightAlpha == 0 else {
+                throw RenderError.render(
+                    "\(assetID) has a nontransparent left or right frame border at frame \(frameIndex)"
+                )
+            }
+        }
+    }
+}
+
 func makeAtlas(frames: [CGImage], frame: FrameContract, assetID: String) throws -> Data {
     let atlasWidth = frame.width * frames.count
     let atlasHeight = frame.height
@@ -709,20 +748,14 @@ func makeAtlas(frames: [CGImage], frame: FrameContract, assetID: String) throws 
     guard transparentPixels > 0 else {
         throw RenderError.render("\(assetID) has no transparent pixels")
     }
-    for x in 0..<atlasWidth {
-        let bottomAlpha = pixels[x * 4 + 3]
-        let topAlpha = pixels[((atlasHeight - 1) * bytesPerRow) + x * 4 + 3]
-        guard bottomAlpha == 0, topAlpha == 0 else {
-            throw RenderError.render("\(assetID) has a nontransparent top or bottom border")
-        }
-    }
-    for y in 0..<atlasHeight {
-        let leftAlpha = pixels[y * bytesPerRow + 3]
-        let rightAlpha = pixels[y * bytesPerRow + (atlasWidth - 1) * 4 + 3]
-        guard leftAlpha == 0, rightAlpha == 0 else {
-            throw RenderError.render("\(assetID) has a nontransparent left or right border")
-        }
-    }
+    try validateTransparentAtlasPadding(
+        pixels,
+        frameWidth: frame.width,
+        frameHeight: frame.height,
+        frameCount: frames.count,
+        bytesPerRow: bytesPerRow,
+        assetID: assetID
+    )
     for index in stride(from: 0, to: byteCount, by: 4) where pixels[index + 3] == 0 {
         guard pixels[index] == 0, pixels[index + 1] == 0, pixels[index + 2] == 0 else {
             throw RenderError.render("\(assetID) contains hidden RGB")

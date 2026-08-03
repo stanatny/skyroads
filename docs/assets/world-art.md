@@ -78,7 +78,7 @@ Both license files are exact byte-for-byte copies of the upstream **CC0 1.0 Univ
 | `structure-tower` | KayKit `structure_tall` |
 | `gap-edge` | KayKit `terrain_low`, rendered as one short repeatable deck-edge module |
 
-`tools/render-world-assets.swift` SHA-256: `e15cb4e2f0b1ddf18a001e09042c3875af5f74f29a2349935695602b8ef6a712`.
+`tools/render-world-assets.swift` SHA-256: `9096815858ca5450baaef09d08a2bf5d4eba37d648d28209bee05521e1045259`.
 
 SceneKit normalizes each visible component by height, applies the manifest transforms, normalizes the combined assembly by visible bounds, and anchors it to a common ground plane. A fixed orthographic camera, fixed pitch, deep-navy structural treatment, cyan key/rim light, magenta seams, and red hostile markers are used for all views. The runtime turret barrel remains a separate projected aiming layer; the atlases contain only the armored base/body and neutral mount detail.
 

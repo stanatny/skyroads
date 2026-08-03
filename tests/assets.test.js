@@ -22,7 +22,7 @@ const WORLD_ATLAS_IDS = [
   'gap-edge',
 ];
 const WORLD_ATLAS_PATHS = WORLD_ATLAS_IDS.map((id) => `assets/world/${id}.png`);
-const WORLD_RENDERER_SHA256 = 'e15cb4e2f0b1ddf18a001e09042c3875af5f74f29a2349935695602b8ef6a712';
+const WORLD_RENDERER_SHA256 = '9096815858ca5450baaef09d08a2bf5d4eba37d648d28209bee05521e1045259';
 const WORLD_OUTPUT_HASHES = {
   'assets/world/drone-scout.png': '069bb170fb605de78c924ab8983c09e1eddd2899a20ea794fa6c0ebc9b0e3bc1',
   'assets/world/drone-striker.png': 'a4f775132ad64e15ac472f4939e3b818c46fcee0757e6a32174131c5ee13a872',
@@ -127,6 +127,8 @@ function pngAlphaStats(relativePaths) {
             let data = image.tiffRepresentation,
             let bitmap = NSBitmapImageRep(data: data) else { exit(2) }
       var borders = ["top": 0, "right": 0, "bottom": 0, "left": 0]
+      var frameLeftBorders = [Int](repeating: 0, count: 7)
+      var frameRightBorders = [Int](repeating: 0, count: 7)
       var transparentPixels = 0
       var hiddenRgbPixels = 0
       for y in 0..<bitmap.pixelsHigh {
@@ -143,14 +145,21 @@ function pngAlphaStats(relativePaths) {
             if x == bitmap.pixelsWide - 1 { borders["right"]! += 1 }
             if y == bitmap.pixelsHigh - 1 { borders["bottom"]! += 1 }
             if x == 0 { borders["left"]! += 1 }
+            if x % 512 == 0 { frameLeftBorders[x / 512] += 1 }
+            if x % 512 == 511 { frameRightBorders[x / 512] += 1 }
           }
         }
       }
+      let frameBorders = (0..<7).map { [
+        "left": frameLeftBorders[$0],
+        "right": frameRightBorders[$0],
+      ] }
       let result: [String: Any] = [
         "path": path,
         "width": bitmap.pixelsWide,
         "height": bitmap.pixelsHigh,
         "borders": borders,
+        "frameBorders": frameBorders,
         "transparentPixels": transparentPixels,
         "hiddenRgbPixels": hiddenRgbPixels,
       ]
@@ -426,23 +435,30 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
   }
 });
 
-test('the world renderer CLI rejects absolute, network, and source-edition manifest paths', () => {
+test('the world renderer CLI rejects forbidden paths in every manifest path field', () => {
   const renderer = path.join(root, 'tools/render-world-assets.swift');
   const usage = spawnSync('swift', [renderer], { cwd: root, encoding: 'utf8' });
   assert.notEqual(usage.status, 0);
   assert.match(usage.stderr, /Usage: render-world-assets\.swift --manifest WORLD_ASSETS\.json --source-root EXTRACTED --output OUTPUT/);
 
   const original = JSON.parse(read('tools/world-assets.json'));
-  const cases = [
-    ['/tmp/Enemy_EyeDrone.obj', /absolute paths are forbidden/i],
-    ['https://example.invalid/Enemy_EyeDrone.obj', /network URLs are forbidden/i],
-    ['quaternius/Source/Enemy_EyeDrone.obj', /source-edition paths are forbidden/i],
+  const invalidPaths = [
+    ['/tmp/fixture.bin', /absolute paths are forbidden/i],
+    ['https://example.invalid/fixture.bin', /network URLs are forbidden/i],
+    ['../fixture.bin', /path traversal is forbidden/i],
+    ['quaternius/Source/fixture.bin', /source-edition paths are forbidden/i],
   ];
-  for (const [invalidPath, expectedMessage] of cases) {
+  const pathFields = [
+    ['upstream.archiveFilename', (manifest, value) => { manifest.upstream[0].archiveFilename = value; }],
+    ['upstream.licenseSource', (manifest, value) => { manifest.upstream[0].licenseSource = value; }],
+    ['upstream.licenseCommitted', (manifest, value) => { manifest.upstream[0].licenseCommitted = value; }],
+    ['component.model', (manifest, value) => { manifest.assets[0].components[0].model = value; }],
+  ];
+  for (const [field, setPath] of pathFields) for (const [invalidPath, expectedMessage] of invalidPaths) {
     const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-renderer-contract.'));
     try {
       const manifest = structuredClone(original);
-      manifest.assets[0].components[0].model = invalidPath;
+      setPath(manifest, invalidPath);
       const manifestPath = path.join(temporaryRoot, 'manifest.json');
       fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
       const result = spawnSync('swift', [renderer,
@@ -450,11 +466,69 @@ test('the world renderer CLI rejects absolute, network, and source-edition manif
         '--source-root', path.join(temporaryRoot, 'source'),
         '--output', path.join(temporaryRoot, 'output'),
       ], { cwd: root, encoding: 'utf8' });
-      assert.notEqual(result.status, 0, `${invalidPath} must be rejected`);
-      assert.match(result.stderr, expectedMessage);
+      assert.notEqual(result.status, 0, `${field}=${invalidPath} must be rejected`);
+      assert.match(result.stderr, expectedMessage, `${field}=${invalidPath}`);
     } finally {
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
     }
+  }
+});
+
+test('the world renderer rejects opaque left or right padding in every atlas frame', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-padding-validator.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harness = `
+      import Foundation
+
+      let frameWidth = 512
+      let frameCount = 7
+      let height = 3
+      let bytesPerRow = frameWidth * frameCount * 4
+      let transparent = [UInt8](repeating: 0, count: bytesPerRow * height)
+      try validateTransparentAtlasPadding(
+          transparent,
+          frameWidth: frameWidth,
+          frameHeight: height,
+          frameCount: frameCount,
+          bytesPerRow: bytesPerRow,
+          assetID: "transparent-fixture"
+      )
+
+      for seamX in [512, 1023] {
+          var opaqueSeam = transparent
+          opaqueSeam[bytesPerRow + seamX * 4 + 3] = 255
+          do {
+              try validateTransparentAtlasPadding(
+                  opaqueSeam,
+                  frameWidth: frameWidth,
+                  frameHeight: height,
+                  frameCount: frameCount,
+                  bytesPerRow: bytesPerRow,
+                  assetID: "opaque-seam-fixture"
+              )
+              preconditionFailure("opaque internal frame seam must be rejected")
+          } catch let error as RenderError {
+              precondition(error.description.contains("nontransparent left or right frame border"))
+          }
+      }
+    `;
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    const executablePath = path.join(temporaryRoot, 'padding-validator-test');
+    fs.writeFileSync(harnessPath, harness);
+    const compile = spawnSync('swiftc', [
+      rendererLibraryPath, harnessPath, '-o', executablePath,
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(compile.status, 0, compile.stderr);
+    const run = spawnSync(executablePath, [], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
 
@@ -532,6 +606,7 @@ test('the nine committed world atlases are bounded transparent 3584 by 512 PNGs'
   assert.ok(totalBytes <= 18 * 1024 * 1024, 'world atlases must not exceed 18 MiB in total');
   for (const stats of pngAlphaStats(WORLD_ATLAS_PATHS)) {
     assert.deepEqual(stats.borders, { bottom: 0, left: 0, right: 0, top: 0 }, stats.path);
+    assert.deepEqual(stats.frameBorders, Array.from({ length: 7 }, () => ({ left: 0, right: 0 })), stats.path);
     assert.ok(stats.transparentPixels > 0, `${stats.path} must retain transparent padding`);
     assert.equal(stats.hiddenRgbPixels, 0, `${stats.path} must clear RGB under zero alpha`);
   }
