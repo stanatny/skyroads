@@ -22,7 +22,7 @@ const WORLD_ATLAS_IDS = [
   'gap-edge',
 ];
 const WORLD_ATLAS_PATHS = WORLD_ATLAS_IDS.map((id) => `assets/world/${id}.png`);
-const WORLD_RENDERER_SHA256 = '6b01b02b36c4285a1eb1934e64ea2985c358a49aa5648b9eb791411b2c880948';
+const WORLD_RENDERER_SHA256 = '5fde628296a1369259c437e380c5b32e731ddd4b9d4c0c10735af786cce409d3';
 const WORLD_OUTPUT_HASHES = {
   'assets/world/drone-scout.png': '9ab7c75a5eb1afe52950b064e8d453798be0df8c9bc600fdc9952e3d1106ed5d',
   'assets/world/drone-striker.png': '8065eadf564c7b17aa301bc3738afd7591ba8c8cae695de98c96532b86c99736',
@@ -426,10 +426,10 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
   });
   assert.deepEqual(manifest.upstream.map(({
     id, sourcePage, archiveFilename, archiveSha256, downloadDate, license,
-    licenseCommitted, licenseSha256,
+    licenseSource, licenseCommitted, licenseSha256,
   }) => ({
     id, sourcePage, archiveFilename, archiveSha256, downloadDate, license,
-    licenseCommitted, licenseSha256,
+    licenseSource, licenseCommitted, licenseSha256,
   })), [
     {
       id: 'kenney-space-kit',
@@ -438,6 +438,7 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
       archiveSha256: 'd5d7cdf2635ed5a43a9187deaf409b6f47484e402321128341d3c3698e9ef4d9',
       downloadDate: '2026-08-03',
       license: 'Creative Commons CC0 1.0 Universal',
+      licenseSource: 'space-kit/License.txt',
       licenseCommitted: 'licenses/Kenney-Space-Kit-CC0.txt',
       licenseSha256: 'bd4e050e69d41351282c4d53f943cd4d80a80b968593e60653ba5292637941b7',
     },
@@ -448,6 +449,7 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
       archiveSha256: 'f394f7fd9eaf29c9de7e090e55b69926f699841af33b0b116f5cc0088de8a4dc',
       downloadDate: '2026-08-03',
       license: 'Creative Commons CC0 1.0 Universal',
+      licenseSource: 'modular-space-kit/License.txt',
       licenseCommitted: 'licenses/Kenney-Modular-Space-Kit-CC0.txt',
       licenseSha256: '38d94a4c79768cf5dc65e55b85f2dedd9f4bad35e325db1d0e5898fc1b7c5bbb',
     },
@@ -574,11 +576,20 @@ test('the world renderer CLI rejects forbidden paths in every manifest path fiel
     try {
       const manifest = structuredClone(original);
       setPath(manifest, invalidPath);
+      const sourceRoot = path.join(temporaryRoot, 'source');
+      for (const [licenseSource, committedPath] of [
+        ['space-kit/License.txt', 'licenses/Kenney-Space-Kit-CC0.txt'],
+        ['modular-space-kit/License.txt', 'licenses/Kenney-Modular-Space-Kit-CC0.txt'],
+      ]) {
+        const absolutePath = path.join(sourceRoot, licenseSource);
+        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+        fs.copyFileSync(path.join(root, committedPath), absolutePath);
+      }
       const manifestPath = path.join(temporaryRoot, 'manifest.json');
       fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
       const result = spawnSync('swift', [renderer,
         '--manifest', manifestPath,
-        '--source-root', path.join(temporaryRoot, 'source'),
+        '--source-root', sourceRoot,
         '--output', path.join(temporaryRoot, 'output'),
       ], { cwd: root, encoding: 'utf8' });
       assert.notEqual(result.status, 0, `${field}=${invalidPath} must be rejected`);
@@ -586,6 +597,81 @@ test('the world renderer CLI rejects forbidden paths in every manifest path fiel
     } finally {
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
     }
+  }
+});
+
+test('the world renderer verifies each source-root license before accepting the manifest', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-license-validator.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    fs.writeFileSync(harnessPath, `
+      import Foundation
+      let arguments = try Arguments([
+          "render-world-assets.swift",
+          "--manifest", CommandLine.arguments[1],
+          "--source-root", CommandLine.arguments[2],
+          "--output", CommandLine.arguments[3],
+      ])
+      _ = try loadAndValidateManifest(arguments: arguments)
+      print("validated")
+    `);
+    const executablePath = path.join(temporaryRoot, 'license-validator-test');
+    const compile = spawnSync('swiftc', [rendererLibraryPath, harnessPath, '-o', executablePath], {
+      cwd: root, encoding: 'utf8',
+    });
+    assert.equal(compile.status, 0, compile.stderr);
+
+    const manifest = JSON.parse(read('tools/world-assets.json'));
+    const sourceRoot = path.join(temporaryRoot, 'source');
+    for (const sourcePath of Object.keys(manifest.sourceHashes)) {
+      const bytes = Buffer.from(`fixture:${sourcePath}`);
+      const absolutePath = path.join(sourceRoot, sourcePath);
+      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+      fs.writeFileSync(absolutePath, bytes);
+      manifest.sourceHashes[sourcePath] = crypto.createHash('sha256').update(bytes).digest('hex');
+    }
+    for (const [licenseSource, committedPath] of [
+      ['space-kit/License.txt', 'licenses/Kenney-Space-Kit-CC0.txt'],
+      ['modular-space-kit/License.txt', 'licenses/Kenney-Modular-Space-Kit-CC0.txt'],
+    ]) {
+      const absolutePath = path.join(sourceRoot, licenseSource);
+      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+      fs.copyFileSync(path.join(root, committedPath), absolutePath);
+    }
+    const validManifestPath = path.join(temporaryRoot, 'valid-manifest.json');
+    fs.writeFileSync(validManifestPath, `${JSON.stringify(manifest)}\n`);
+    const valid = spawnSync(executablePath, [validManifestPath, sourceRoot, path.join(temporaryRoot, 'output')], {
+      encoding: 'utf8',
+    });
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.equal(valid.stdout.trim(), 'validated');
+
+    manifest.upstream[0].licenseSource = 'space-kit/Models/OBJ format/craft_speederA.obj';
+    const wrongManifestPath = path.join(temporaryRoot, 'wrong-manifest.json');
+    fs.writeFileSync(wrongManifestPath, `${JSON.stringify(manifest)}\n`);
+    const wrong = spawnSync(executablePath, [wrongManifestPath, sourceRoot, path.join(temporaryRoot, 'output')], {
+      encoding: 'utf8',
+    });
+    assert.notEqual(wrong.status, 0);
+    assert.match(wrong.stderr, /License hash mismatch for space-kit\/Models\/OBJ format\/craft_speederA\.obj/);
+
+    manifest.upstream[0].licenseSource = 'space-kit/License.txt';
+    fs.rmSync(path.join(sourceRoot, 'modular-space-kit/License.txt'));
+    const missingManifestPath = path.join(temporaryRoot, 'missing-manifest.json');
+    fs.writeFileSync(missingManifestPath, `${JSON.stringify(manifest)}\n`);
+    const missing = spawnSync(executablePath, [missingManifestPath, sourceRoot, path.join(temporaryRoot, 'output')], {
+      encoding: 'utf8',
+    });
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /Missing or unreadable license source: modular-space-kit\/License\.txt/);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
 

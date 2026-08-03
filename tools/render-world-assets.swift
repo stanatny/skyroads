@@ -216,20 +216,32 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
               upstream.licenseSha256.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
             throw RenderError.validation("Upstream archive and license hashes must be lowercase SHA-256")
         }
+        let licenseURL = arguments.sourceRoot.appendingPathComponent(upstream.licenseSource)
+        let actualLicenseHash: String
+        do {
+            actualLicenseHash = try sha256Hex(at: licenseURL)
+        } catch {
+            throw RenderError.load("Missing or unreadable license source: \(upstream.licenseSource)")
+        }
+        guard actualLicenseHash == upstream.licenseSha256 else {
+            throw RenderError.validation("License hash mismatch for \(upstream.licenseSource): \(actualLicenseHash)")
+        }
     }
     let upstreamIdentity = manifest.upstream.map {
         [$0.id, $0.sourcePage, $0.archiveFilename, $0.archiveSha256, $0.downloadDate,
-         $0.license, $0.licenseCommitted, $0.licenseSha256]
+         $0.license, $0.licenseSource, $0.licenseCommitted, $0.licenseSha256]
     }
     guard upstreamIdentity == [
         ["kenney-space-kit", "https://kenney.nl/assets/space-kit", "kenney_space-kit.zip",
          "d5d7cdf2635ed5a43a9187deaf409b6f47484e402321128341d3c3698e9ef4d9", "2026-08-03",
-         "Creative Commons CC0 1.0 Universal", "licenses/Kenney-Space-Kit-CC0.txt",
+         "Creative Commons CC0 1.0 Universal", "space-kit/License.txt",
+         "licenses/Kenney-Space-Kit-CC0.txt",
          "bd4e050e69d41351282c4d53f943cd4d80a80b968593e60653ba5292637941b7"],
         ["kenney-modular-space-kit", "https://kenney.nl/assets/modular-space-kit",
          "kenney_modular-space-kit_1.0.zip",
          "f394f7fd9eaf29c9de7e090e55b69926f699841af33b0b116f5cc0088de8a4dc", "2026-08-03",
-         "Creative Commons CC0 1.0 Universal", "licenses/Kenney-Modular-Space-Kit-CC0.txt",
+         "Creative Commons CC0 1.0 Universal", "modular-space-kit/License.txt",
+         "licenses/Kenney-Modular-Space-Kit-CC0.txt",
          "38d94a4c79768cf5dc65e55b85f2dedd9f4bad35e325db1d0e5898fc1b7c5bbb"],
     ] else {
         throw RenderError.validation("Manifest must pin the two audited Kenney source archives and licenses")

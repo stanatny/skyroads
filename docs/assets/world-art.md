@@ -57,7 +57,7 @@ Both license files are exact byte-for-byte copies of the upstream **Creative Com
 | `structure-tower` | Six Modular Space Kit `room-large` components, scale `0.72`, Y `0/0.60/1.20/1.80/2.40/3.00` |
 | `gap-edge` | Two Space Kit `terrain_sideCliff` components, scale `0.78`, X `-0.42/+0.42` |
 
-`tools/render-world-assets.swift` SHA-256: `6b01b02b36c4285a1eb1934e64ea2985c358a49aa5648b9eb791411b2c880948`.
+`tools/render-world-assets.swift` SHA-256: `5fde628296a1369259c437e380c5b32e731ddd4b9d4c0c10735af786cce409d3`.
 
 Space Kit solid materials map by material name rather than source hue: `metal`, `_defaultMat`, and unknown defaults use warm white `#e9eff6`; `dark` uses graphite `#253044`; `rockDark` uses graphite `#303a46`; `metalDark`, `metalRed`, and `rock` use cool-steel levels `#8b9bab`, `#64788e`, and `#536678`. The Modular Space Kit colormap is preserved. PBR materials use metalness `0.24` and roughness `0.38`. Added details use cyan `#68e8ff`/`#58e7ff`; `#ff8a42` is reserved for the renderer's small generated hazard/status light. No warning red or magenta is baked into the base atlases.
 

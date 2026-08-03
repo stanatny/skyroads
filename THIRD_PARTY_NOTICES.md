@@ -69,7 +69,7 @@ The repository's project license applies only to original project code and artwo
   - `assets/world/barrier-crate.png` — SHA-256 `33b44384aae4c7cb6ea7d3f468fddf41f7918bf04b26ced88ef7e5561faf386d`
   - `assets/world/structure-tower.png` — SHA-256 `360a2fbae947d891c4b2ee9b50d141ad12186dfd894630036e9f4d953a360b3d`
 
-The two Kenney kits were normalized, assembled only as declared in `tools/world-assets.json`, styled with the Orbital Defense warm-white/graphite/cool-steel/cyan palette plus small generated orange status lights, and rendered to seven-view transparent atlases. Renderer SHA-256: `6b01b02b36c4285a1eb1934e64ea2985c358a49aa5648b9eb791411b2c880948`. See `docs/assets/world-art.md`.
+The two Kenney kits were normalized, assembled only as declared in `tools/world-assets.json`, styled with the Orbital Defense warm-white/graphite/cool-steel/cyan palette plus small generated orange status lights, and rendered to seven-view transparent atlases. Renderer SHA-256: `5fde628296a1369259c437e380c5b32e731ddd4b9d4c0c10735af786cce409d3`. See `docs/assets/world-art.md`.
 
 ## Kenney — UI Pack: Sci-Fi 2.0
 
