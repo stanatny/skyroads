@@ -312,21 +312,26 @@ test('right HUD starts below utility controls at all target viewports', () => {
 });
 
 test('only the mode overlay selected by game state is visible', () => {
-  assert.deepEqual(overlayForMode('MENU'), { title: true, gameOver: false });
-  assert.deepEqual(overlayForMode('PLAYING'), { title: false, gameOver: false });
-  assert.deepEqual(overlayForMode('GAMEOVER'), { title: false, gameOver: true });
-  assert.throws(() => overlayForMode('PAUSED'), /Unsupported game mode/);
+  assert.deepEqual(overlayForMode('MENU'), { title: true, pause: false, gameOver: false });
+  assert.deepEqual(overlayForMode('PLAYING'), { title: false, pause: false, gameOver: false });
+  assert.deepEqual(overlayForMode('PAUSED'), { title: false, pause: true, gameOver: false });
+  assert.deepEqual(overlayForMode('GAMEOVER'), { title: false, pause: false, gameOver: true });
 });
 
-test('setOverlayMode hides both inactive semantic panels', () => {
+test('setOverlayMode exposes exactly one of the three semantic panels', () => {
   const titleScreen = { hidden: true };
+  const pauseScreen = { hidden: true };
   const gameOverScreen = { hidden: true };
-  setOverlayMode({ titleScreen, gameOverScreen }, 'GAMEOVER');
-  assert.equal(titleScreen.hidden, true);
-  assert.equal(gameOverScreen.hidden, false);
-  setOverlayMode({ titleScreen, gameOverScreen }, 'PLAYING');
-  assert.equal(titleScreen.hidden, true);
-  assert.equal(gameOverScreen.hidden, true);
+  const elements = { titleScreen, pauseScreen, gameOverScreen };
+  for (const [mode, expected] of [
+    ['MENU', [false, true, true]],
+    ['PLAYING', [true, true, true]],
+    ['PAUSED', [true, false, true]],
+    ['GAMEOVER', [true, true, false]],
+  ]) {
+    setOverlayMode(elements, mode);
+    assert.deepEqual([titleScreen.hidden, pauseScreen.hidden, gameOverScreen.hidden], expected, mode);
+  }
 });
 
 test('device pixel ratio is capped at two without changing logical size', () => {
@@ -349,6 +354,7 @@ test('mode transitions move focus to the active gameplay or panel surface', () =
   assert.equal(focusPrimaryForMode(elements, 'PLAYING'), canvas);
   assert.equal(canvas.tabIndex, -1);
   assert.equal(focusPrimaryForMode(elements, 'MENU'), startButton);
+  assert.equal(focusPrimaryForMode(elements, 'PAUSED'), null);
   assert.equal(focusPrimaryForMode(elements, 'GAMEOVER'), restartButton);
   assert.deepEqual(focused, ['canvas', 'start', 'restart']);
 });
@@ -469,11 +475,14 @@ test('bound dialogs trap Tab, close on Escape and restore opener focus', () => {
   dialog.querySelectorAll = () => [first, last];
 
   const gameOverScreen = new FakeEventTarget();
+  const pauseScreen = new FakeEventTarget();
   const utilityControls = new FakeEventTarget();
-  const controller = bindOverlayActions({ documentObject, elements: { gameOverScreen, utilityControls } });
+  const controller = bindOverlayActions({ documentObject, elements: { gameOverScreen, pauseScreen, utilityControls } });
   controller.openDialog(dialog, opener);
   assert.equal(dialog.hidden, false);
   assert.equal(gameOverScreen.inert, true);
+  assert.equal(pauseScreen.inert, true);
+  assert.equal(pauseScreen.getAttribute('aria-hidden'), 'true');
   assert.equal(gameOverScreen.getAttribute('aria-hidden'), 'true');
   assert.equal(documentObject.activeElement, first);
 
@@ -495,6 +504,8 @@ test('bound dialogs trap Tab, close on Escape and restore opener focus', () => {
   assert.equal(dialog.hidden, true);
   assert.equal(gameOverScreen.inert, false);
   assert.equal(gameOverScreen.getAttribute('aria-hidden'), null);
+  assert.equal(pauseScreen.inert, false);
+  assert.equal(pauseScreen.getAttribute('aria-hidden'), null);
   assert.equal(documentObject.activeElement, opener);
   controller.destroy();
 });
@@ -665,6 +676,7 @@ test('command center builds one semantic control tree and renders translated sta
   const elements = {
     utilityControls: documentObject.createElement('nav'),
     titleScreen: documentObject.createElement('section'),
+    pauseScreen: documentObject.createElement('section'),
     gameOverScreen: documentObject.createElement('section'),
     leaderboardDialog: documentObject.createElement('section'),
     renameDialog: documentObject.createElement('section'),
@@ -679,6 +691,14 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(ui.startButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
   assert.equal(ui.restartButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
   assert.equal(ui.menuButton.getAttribute('aria-keyshortcuts'), 'Escape');
+  assert.equal(ui.controlItems.length, 5);
+  assert.equal(ui.titleMeta.tagName, 'DIV');
+  assert.equal(ui.titleMeta.className, 'title-meta');
+  assert.deepEqual(ui.titleMeta.children, [ui.titleKicker, ui.versionBadge]);
+  assert.equal(ui.versionBadge.tagName, 'SMALL');
+  assert.equal(ui.versionBadge.tabIndex, -1);
+  assert.equal(elements.pauseScreen.getAttribute('aria-labelledby'), 'pause-heading');
+  assert.deepEqual(elements.pauseScreen.children, [ui.pauseHeading, ui.pauseHint]);
   assert.ok(ui.routeGuide, 'the command center must expose its route-guide paragraph');
   assert.equal(ui.routeGuide.tagName, 'P');
   assert.equal(ui.routeGuide.className, 'route-guide');
@@ -700,7 +720,8 @@ test('command center builds one semantic control tree and renders translated sta
   };
   renderCommandCenter(ui, {
     translator,
-    mode: 'GAMEOVER',
+    mode: 'PAUSED',
+    productVersion: { display: 'V1.1', accessible: '1.1' },
     deathReason: 'wall',
     musicMuted: false,
     sfxMuted: true,
@@ -726,7 +747,14 @@ test('command center builds one semantic control tree and renders translated sta
   });
 
   assert.equal(elements.titleScreen.hidden, true);
-  assert.equal(elements.gameOverScreen.hidden, false);
+  assert.equal(elements.pauseScreen.hidden, false);
+  assert.equal(elements.gameOverScreen.hidden, true);
+  assert.equal(ui.versionBadge.hidden, false);
+  assert.equal(ui.versionBadge.textContent, 'V1.1');
+  assert.equal(ui.versionBadge.getAttribute('aria-label'), 'app.versionLabel:1.1');
+  assert.equal(ui.pauseHeading.textContent, 'pause.title');
+  assert.equal(ui.pauseHint.textContent, 'pause.resumeHint');
+  assert.equal(ui.controlItems[4].textContent, 'controls.pause');
   assert.equal(ui.profileName.textContent, 'rename.label: <Nova>');
   assert.equal(ui.deathReason.textContent, 'death.wall');
   assert.equal(ui.resultScore.textContent, 'result.score:123');
@@ -762,6 +790,7 @@ test('command center builds one semantic control tree and renders translated sta
   renderCommandCenter(ui, {
     translator: alternateTranslator,
     mode: 'MENU',
+    productVersion: null,
     snapshot: {
       profile: { playerId: 'player-1', name: '<Nova>' },
       entries: [],
@@ -771,6 +800,11 @@ test('command center builds one semantic control tree and renders translated sta
   });
   assert.equal(ui.routeGuide, originalRouteGuide);
   assert.equal(ui.routeGuide.textContent, 'translated:guide.routes');
+  assert.equal(ui.versionBadge.hidden, true);
+  assert.equal(ui.versionBadge.textContent, '');
+  assert.equal(ui.versionBadge.getAttribute('aria-label'), null);
+  assert.equal(ui.pauseHeading.textContent, 'pause.title');
+  assert.equal(ui.pauseHint.textContent, 'pause.resumeHint');
   assert.equal(
     elements.titleScreen.children.filter((child) => child.className === 'route-guide').length,
     1,

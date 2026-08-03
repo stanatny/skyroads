@@ -282,9 +282,10 @@
 
   function overlayForMode(mode) {
     switch (mode) {
-      case 'MENU': return { title: true, gameOver: false };
-      case 'PLAYING': return { title: false, gameOver: false };
-      case 'GAMEOVER': return { title: false, gameOver: true };
+      case 'MENU': return { title: true, pause: false, gameOver: false };
+      case 'PLAYING': return { title: false, pause: false, gameOver: false };
+      case 'PAUSED': return { title: false, pause: true, gameOver: false };
+      case 'GAMEOVER': return { title: false, pause: false, gameOver: true };
       default: throw new RangeError(`Unsupported game mode: ${mode}`);
     }
   }
@@ -292,6 +293,7 @@
   function setOverlayMode(elements, mode) {
     const overlay = overlayForMode(mode);
     if (elements && elements.titleScreen) elements.titleScreen.hidden = !overlay.title;
+    if (elements && elements.pauseScreen) elements.pauseScreen.hidden = !overlay.pause;
     if (elements && elements.gameOverScreen) elements.gameOverScreen.hidden = !overlay.gameOver;
     return overlay;
   }
@@ -303,6 +305,7 @@
       target = elements.canvas || null;
       if (target) target.tabIndex = -1;
     } else if (mode === 'MENU') target = elements.startButton || null;
+    else if (mode === 'PAUSED') overlayForMode(mode);
     else if (mode === 'GAMEOVER') target = elements.restartButton || null;
     else overlayForMode(mode);
     if (target && typeof target.focus === 'function') {
@@ -363,6 +366,7 @@
       elements.canvas,
       elements.utilityControls,
       elements.titleScreen,
+      elements.pauseScreen,
       elements.gameOverScreen,
       elements.persistenceWarning,
     ].filter(Boolean);
@@ -644,7 +648,11 @@
     const sfxButton = makeButton(documentObject, 'sfx-toggle', 'utility-button audio-utility-button');
     elements.utilityControls.replaceChildren(languageButton, musicButton, sfxButton);
 
+    const titleMeta = makeElement(documentObject, 'div', { className: 'title-meta' });
     const titleKicker = makeElement(documentObject, 'p', { className: 'panel-kicker' });
+    const versionBadge = makeElement(documentObject, 'small', { id: 'version-badge', className: 'version-badge' });
+    versionBadge.tabIndex = -1;
+    titleMeta.append(titleKicker, versionBadge);
     const titleHeading = makeElement(documentObject, 'h1');
     const profileName = makeElement(documentObject, 'p', { className: 'pilot-name' });
     const legacyBest = makeElement(documentObject, 'p', { className: 'legacy-best' });
@@ -655,12 +663,17 @@
     const titleActions = makeElement(documentObject, 'div', { className: 'panel-actions' });
     titleActions.append(startButton, titleLeaderboardButton);
     const controlList = makeElement(documentObject, 'ul', { className: 'control-list' });
-    const controlItems = Array.from({ length: 4 }, () => makeElement(documentObject, 'li'));
+    const controlItems = Array.from({ length: 5 }, () => makeElement(documentObject, 'li'));
     controlList.append(...controlItems);
     const routeGuide = makeElement(documentObject, 'p', { className: 'route-guide' });
     elements.titleScreen.replaceChildren(
-      titleKicker, titleHeading, profileName, legacyBest, titleActions, controlList, routeGuide,
+      titleMeta, titleHeading, profileName, legacyBest, titleActions, controlList, routeGuide,
     );
+
+    const pauseHeading = makeElement(documentObject, 'h2', { id: 'pause-heading' });
+    const pauseHint = makeElement(documentObject, 'p', { className: 'pause-hint' });
+    elements.pauseScreen.setAttribute('aria-labelledby', 'pause-heading');
+    elements.pauseScreen.replaceChildren(pauseHeading, pauseHint);
 
     const gameOverHeading = makeElement(documentObject, 'h2');
     const deathReason = makeElement(documentObject, 'p', { className: 'death-reason' });
@@ -738,7 +751,8 @@
     return Object.freeze({
       ...elements,
       languageButton, musicButton, sfxButton,
-      titleKicker, titleHeading, profileName, legacyBest, startButton, titleLeaderboardButton, controlItems, routeGuide,
+      titleMeta, titleKicker, versionBadge, titleHeading, profileName, legacyBest,
+      startButton, titleLeaderboardButton, controlItems, routeGuide, pauseHeading, pauseHint,
       gameOverHeading, deathReason, resultScore, resultDistance, resultElapsed, resultRank, resultNewBest,
       restartButton, menuButton, gameOverLeaderboardButton, gameOverRenameButton,
       leaderboardPanel, leaderboardHeading, leaderboardCutoff, leaderboardEmpty, leaderboardTableWrap, leaderboardTable,
@@ -772,6 +786,7 @@
     audioStatus = 'unavailable',
     audioFormat = null,
     audioDecoded = false,
+    productVersion = (root.Skyroads && root.Skyroads.version) || null,
   } = {}) {
     if (!ui || !translator || !snapshot) return;
     const documentObject = ui.startButton && ui.startButton.ownerDocument ? ui.startButton.ownerDocument : root.document;
@@ -793,13 +808,24 @@
     ui.utilityControls.setAttribute('data-audio-format', audioFormat == null ? '' : String(audioFormat));
     ui.utilityControls.setAttribute('data-audio-decoded', String(Boolean(audioDecoded)));
     ui.titleKicker.textContent = translator.t('menu.subtitle');
+    ui.versionBadge.hidden = !productVersion;
+    ui.versionBadge.textContent = productVersion ? productVersion.display : '';
+    if (productVersion) {
+      ui.versionBadge.setAttribute('aria-label', translator.t('app.versionLabel', {
+        version: productVersion.accessible,
+      }));
+    } else {
+      ui.versionBadge.removeAttribute('aria-label');
+    }
     ui.titleHeading.textContent = translator.t('menu.title');
     ui.profileName.textContent = `${translator.t('rename.label')}: ${snapshot.profile.name}`;
     makeActionContent(documentObject, ui.startButton, translator.t('menu.start'), translator.t('shortcut.startRestart'));
     ui.titleLeaderboardButton.textContent = translator.t('menu.leaderboard');
-    const controlIds = ['controls.move', 'controls.jump', 'controls.shoot', 'controls.touch'];
+    const controlIds = ['controls.move', 'controls.jump', 'controls.shoot', 'controls.touch', 'controls.pause'];
     ui.controlItems.forEach((item, index) => { item.textContent = translator.t(controlIds[index]); });
     ui.routeGuide.textContent = translator.t('guide.routes');
+    ui.pauseHeading.textContent = translator.t('pause.title');
+    ui.pauseHint.textContent = translator.t('pause.resumeHint');
 
     ui.legacyBest.hidden = snapshot.legacyBest == null;
     ui.legacyBest.textContent = snapshot.legacyBest == null ? '' : translator.t('leaderboard.legacyBest', {

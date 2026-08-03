@@ -3637,6 +3637,7 @@ function refreshPresentation() {
     audioStatus: audioState.status,
     audioFormat: audioState.format,
     audioDecoded: audioState.decoded,
+    productVersion: globalThis.Skyroads.version || null,
   });
 }
 
@@ -4670,6 +4671,7 @@ function init() {
         appUi,
         utilityControls: document.getElementById('utility-controls'),
         titleScreen: document.getElementById('title-screen'),
+        pauseScreen: document.getElementById('pause-screen'),
         gameOverScreen: document.getElementById('game-over-screen'),
         leaderboardDialog: document.getElementById('leaderboard-dialog'),
         renameDialog: document.getElementById('rename-dialog'),

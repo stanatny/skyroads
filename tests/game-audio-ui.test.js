@@ -78,7 +78,7 @@ function makeGameUiSandbox({
   };
 
   const ids = [
-    'game', 'app-ui', 'utility-controls', 'title-screen', 'game-over-screen',
+    'game', 'app-ui', 'utility-controls', 'title-screen', 'pause-screen', 'game-over-screen',
     'leaderboard-dialog', 'rename-dialog', 'persistence-warning', 'aria-status',
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, documentObject.createElement(id === 'game' ? 'canvas' : 'div')]));
@@ -205,7 +205,7 @@ function makeGameUiSandbox({
     Image: FakeImage,
   };
   vm.createContext(sandbox);
-  const files = ['i18n.js', 'leaderboard.js', 'presentation.js', 'world-art.js', 'input.js', 'obstacles.js'];
+  const files = ['version.js', 'i18n.js', 'leaderboard.js', 'presentation.js', 'world-art.js', 'input.js', 'obstacles.js'];
   if (loadAdaptiveAudio) files.push('audio.js');
   files.push('game.js');
   for (const file of files) {
@@ -221,6 +221,49 @@ function makeGameUiSandbox({
     dispatchOverlayMutation() { for (const callback of observerCallbacks) callback([]); },
   };
 }
+
+test('game wiring renders the V1.1 badge and localized pause panel without taking focus', () => {
+  const { sandbox, documentObject, elements } = makeGameUiSandbox();
+  const preservedFocus = elements.game;
+  preservedFocus.focus();
+
+  vm.runInContext("STATE.mode = 'PAUSED'; refreshPresentation()", sandbox);
+
+  const rendered = vm.runInContext(`({
+    versionText: STATE.ui.versionBadge.textContent,
+    versionLabel: STATE.ui.versionBadge.getAttribute('aria-label'),
+    pauseTitle: STATE.ui.pauseHeading.textContent,
+    pauseHint: STATE.ui.pauseHint.textContent,
+    pauseControl: STATE.ui.controlItems[4].textContent,
+    pauseHidden: STATE.ui.pauseScreen.hidden,
+  })`, sandbox);
+  assert.deepEqual({ ...rendered }, {
+    versionText: 'V1.1',
+    versionLabel: 'Version 1.1',
+    pauseTitle: 'GAME PAUSED',
+    pauseHint: 'Press P to resume',
+    pauseControl: 'Pause / resume: P',
+    pauseHidden: false,
+  });
+  assert.equal(documentObject.activeElement, preservedFocus);
+
+  vm.runInContext('STATE.ui.languageButton.dispatch(\'click\')', sandbox);
+  const localized = vm.runInContext(`({
+    versionLabel: STATE.ui.versionBadge.getAttribute('aria-label'),
+    pauseTitle: STATE.ui.pauseHeading.textContent,
+    pauseHint: STATE.ui.pauseHint.textContent,
+    pauseControl: STATE.ui.controlItems[4].textContent,
+    pauseHidden: STATE.ui.pauseScreen.hidden,
+  })`, sandbox);
+  assert.deepEqual({ ...localized }, {
+    versionLabel: '版本 1.1',
+    pauseTitle: '游戏已暂停',
+    pauseHint: '按 P 继续',
+    pauseControl: '暂停 / 继续：P',
+    pauseHidden: false,
+  });
+  assert.equal(documentObject.activeElement, preservedFocus);
+});
 
 test('release diagnostics expose complete preferred world atlas readiness', async () => {
   const { sandbox } = makeGameUiSandbox();

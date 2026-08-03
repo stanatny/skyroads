@@ -37,6 +37,21 @@ test('mission shortcut labels are available in both catalogs', () => {
   assert.equal(createTranslator('zh-CN').t('shortcut.returnMenu'), 'Esc');
 });
 
+test('version, pause control, and pause status use the approved bilingual copy', () => {
+  const en = createTranslator('en');
+  const zh = createTranslator('zh-CN');
+
+  assert.equal(en.t('app.versionLabel', { version: '1.1' }), 'Version 1.1');
+  assert.equal(en.t('controls.pause'), 'Pause / resume: P');
+  assert.equal(en.t('pause.title'), 'GAME PAUSED');
+  assert.equal(en.t('pause.resumeHint'), 'Press P to resume');
+
+  assert.equal(zh.t('app.versionLabel', { version: '1.1' }), '版本 1.1');
+  assert.equal(zh.t('controls.pause'), '暂停 / 继续：P');
+  assert.equal(zh.t('pause.title'), '游戏已暂停');
+  assert.equal(zh.t('pause.resumeHint'), '按 P 继续');
+});
+
 test('jump and obstacle-route guidance uses the approved bilingual copy', () => {
   const en = MESSAGES.en;
   const zh = MESSAGES['zh-CN'];

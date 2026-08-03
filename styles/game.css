@@ -156,6 +156,33 @@ input:focus-visible {
 #leaderboard-dialog .dialog-panel { width: min(94vw, 920px); }
 #rename-dialog .dialog-panel { width: min(90vw, 480px); }
 
+.title-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.version-badge {
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid rgba(93, 231, 255, 0.55);
+  color: var(--cyan-soft);
+  font: 500 0.68rem/1 "Orbitron", sans-serif;
+  letter-spacing: 0.12em;
+}
+
+#pause-screen {
+  width: min(86vw, 440px);
+  text-align: center;
+  pointer-events: none;
+}
+
+.pause-hint {
+  color: var(--cyan-soft);
+  letter-spacing: 0.08em;
+}
+
 .panel-kicker {
   color: var(--cyan);
   font-size: 0.72rem;

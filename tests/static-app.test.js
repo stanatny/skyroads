@@ -41,6 +41,30 @@ test('the immutable version contract is the first deferred classic script', () =
   assert.equal(scripts[0], './src/version.js');
 });
 
+test('the static shell includes one hidden noninteractive polite pause status panel', () => {
+  const pausePanels = [...html.matchAll(/<section\b[^>]*\bid="pause-screen"[^>]*>/g)];
+  assert.equal(pausePanels.length, 1);
+  const panel = pausePanels[0][0];
+  assert.match(panel, /\bclass="screen-panel"/);
+  assert.match(panel, /\brole="status"/);
+  assert.match(panel, /\baria-live="polite"/);
+  assert.match(panel, /\baria-atomic="true"/);
+  assert.match(panel, /\bhidden\b/);
+
+  const rule = css.match(/#pause-screen\s*\{([^}]*)\}/);
+  assert.ok(rule, 'the pause panel needs a dedicated compact layout');
+  assert.match(rule[1], /width:\s*min\(86vw,\s*440px\)\s*;/);
+  assert.match(rule[1], /text-align:\s*center\s*;/);
+  assert.match(rule[1], /pointer-events:\s*none\s*;/);
+});
+
+test('the title metadata and five-control layout stay compact at the 960 by 600 floor', () => {
+  assert.match(css, /\.title-meta\s*\{[^}]*display:\s*flex\s*;[^}]*justify-content:\s*space-between\s*;/s);
+  assert.match(css, /\.version-badge\s*\{[^}]*flex:\s*none\s*;[^}]*font:\s*500\s+0\.68rem\/1\s+"Orbitron"/s);
+  assert.match(css, /\.control-list\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\s*;/s);
+  assert.match(css, /\.control-list\s*\{[^}]*font-size:\s*0\.82rem\s*;/s);
+});
+
 test('the viewport keeps native browser zoom available', () => {
   const viewport = html.match(/<meta\s+name="viewport"\s+content="([^"]+)"/i);
   assert.ok(viewport, 'the page must declare a viewport');
