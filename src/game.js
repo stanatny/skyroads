@@ -362,13 +362,13 @@ function clearAllInputState() {
 window.addEventListener('keydown', (e) => {
   if (e.defaultPrevented) return;
   const code = keyboardCode(e);
+  if (e.repeat || (code && KEYS[code])) return;
+
   const dialogIsOpen = modalOpen();
   if (editingTarget(e.target) || dialogIsOpen) {
     clearAllInputState();
     return;
   }
-
-  if (e.repeat || (code && KEYS[code])) return;
 
   const missionShortcut = (code === 'Enter' || code === 'Space')
     && (STATE.mode === 'MENU' || STATE.mode === 'GAMEOVER');

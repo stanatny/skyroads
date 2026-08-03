@@ -289,6 +289,46 @@ test('repeated mission shortcuts do not start a menu mission', () => {
   assert.equal(prevented, false);
 });
 
+for (const [label, prepare] of [
+  ['an editing target', ({ elements }) => appUiTarget(elements, 'input')],
+  ['an open dialog', ({ elements }) => {
+    elements['leaderboard-dialog'].hidden = false;
+    return elements.game;
+  }],
+]) {
+  test(`a repeated shortcut with ${label} leaves the input lifecycle untouched`, () => {
+    const game = makeGameUiSandbox();
+    const { sandbox, windowObject } = game;
+    vm.runInContext(`
+      KEYS.KeyJ = true;
+      STATE.chargeT = 2;
+      STATE.chargeStage = 2;
+      STATE.gliding = true;
+      STATE.movement.heldLeft = true;
+      STATE.movement.activeDirection = -1;
+    `, sandbox);
+
+    dispatchMissionShortcut(windowObject, prepare(game), 'Space', true);
+
+    const state = vm.runInContext(`({
+      heldLeft: STATE.movement.heldLeft,
+      activeDirection: STATE.movement.activeDirection,
+      keyJ: KEYS.KeyJ,
+      chargeT: STATE.chargeT,
+      chargeStage: STATE.chargeStage,
+      gliding: STATE.gliding,
+    })`, sandbox);
+    assert.deepEqual({ ...state }, {
+      heldLeft: true,
+      activeDirection: -1,
+      keyJ: true,
+      chargeT: 2,
+      chargeStage: 2,
+      gliding: true,
+    });
+  });
+}
+
 for (const [label, target] of [
   ['input', (elements) => appUiTarget(elements, 'input')],
   ['contenteditable', (elements) => {
