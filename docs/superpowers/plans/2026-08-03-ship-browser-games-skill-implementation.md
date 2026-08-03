@@ -56,7 +56,8 @@
 - [ ] **Step 1: Run the required initializer**
 
 ```bash
-python3 /Users/stan/.codex/skills/.system/skill-creator/scripts/init_skill.py \
+SKILL_CREATOR_ROOT="${CODEX_SKILL_CREATOR_ROOT:-$HOME/.codex/skills/.system/skill-creator}"
+python3 "$SKILL_CREATOR_ROOT/scripts/init_skill.py" \
   ship-browser-games \
   --path .agent/skills \
   --resources references \
@@ -226,8 +227,9 @@ Expected: each required evidence family appears at least once.
 - [ ] **Step 1: Run structural and formatting validation**
 
 ```bash
+SKILL_CREATOR_ROOT="${CODEX_SKILL_CREATOR_ROOT:-$HOME/.codex/skills/.system/skill-creator}"
 /opt/homebrew/bin/python3.14 \
-  /Users/stan/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
+  "$SKILL_CREATOR_ROOT/scripts/quick_validate.py" \
   .agent/skills/ship-browser-games
 git diff --check
 ```

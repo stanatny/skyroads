@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Work only on `feat/stellar-command-polish` in `/Users/stan/Developer/GitHub/skyroads/.worktrees/stellar-command-polish`; target PR branch is `main`.
+- Work only in the active `feat/stellar-command-polish` worktree; target PR branch is `main`.
 - No framework, runtime CDN, backend, database, account, or cross-device leaderboard.
 - Runtime must work both from repository-relative HTTP URLs and the macOS app’s bundled local-file URL.
 - Use classic deferred scripts; do not switch to ES modules.
