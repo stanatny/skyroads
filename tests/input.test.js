@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const {
   createMovementState,
   pressDirection,
@@ -16,6 +19,42 @@ const {
   hitboxHalfWidthForEnemy,
   findIntersectedWallLane,
 } = require('../src/input.js');
+
+function createGameLogicHarness() {
+  const root = path.resolve(__dirname, '..');
+  const sandbox = {
+    console,
+    navigator: { languages: ['en-US'], language: 'en-US' },
+    window: { innerWidth: 960, innerHeight: 600, addEventListener() {} },
+    document: { querySelector() { return null; }, addEventListener() {} },
+    performance: { now() { return 0; } },
+    requestAnimationFrame() {},
+  };
+  vm.createContext(sandbox);
+  for (const file of ['src/input.js', 'src/presentation.js', 'src/world-art.js']) {
+    vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
+  }
+  const gameSource = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
+  vm.runInContext(gameSource, sandbox, { filename: 'src/game.js' });
+  vm.runInContext(`
+    globalThis.__deaths = [];
+    die = (reason) => { __deaths.push(reason); };
+    shotBurstFx = () => {};
+    buildingBurstFx = () => {};
+    superMissileBlast = (segment) => {
+      const target = STATE.track[Math.floor(segment)];
+      if (!target) return;
+      for (let lane = 0; lane < CONFIG.LANES; lane++) {
+        if (target.lanes[lane] === LANE_TYPE.WALL_LOW || target.lanes[lane] === LANE_TYPE.WALL_HIGH) {
+          target.lanes[lane] = LANE_TYPE.ROAD;
+        }
+      }
+    };
+    sfxWallDown = () => {};
+    sfxEnemyDown = () => {};
+  `, sandbox);
+  return sandbox;
+}
 
 test('gameplay input is disabled while UI owns keyboard focus', () => {
   assert.equal(shouldHandleGameInput({ mode:'PLAYING', targetInsideAppUi:false, modalOpen:false }), true);
@@ -208,4 +247,121 @@ test('enemy hitboxes overlap at the exact rendered-width boundaries', () => {
   assert.equal(hitboxHalfWidthForEnemy('turret'), 0.26);
   assert.equal(intervalsOverlap(3, 0.14, 3.40, 0.26), true);
   assert.equal(intervalsOverlap(3, 0.14, 3.400001, 0.26), false);
+});
+
+test('hazard collision cutoffs remain exactly 600, 2000, and gap-safe 200', () => {
+  const sandbox = createGameLogicHarness();
+  const outcomes = JSON.parse(vm.runInContext(`(() => {
+    const collide = (type, height) => {
+      STATE.position = 0;
+      STATE.fuel = 100;
+      STATE.boostT = 0;
+      STATE.playerY = height;
+      STATE.track = [{ lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD), enemies: null }];
+      STATE.track[0].lanes[3] = type;
+      __deaths.length = 0;
+      checkCollisions(3, 3);
+      return __deaths[0] || null;
+    };
+    return JSON.stringify({
+      constants: [CONFIG.WALL_LOW_HEIGHT, CONFIG.WALL_HIGH_HEIGHT, CONFIG.GAP_SAFE_HEIGHT, CONFIG.FUEL_COLLECT_HEIGHT],
+      lowAt: collide(LANE_TYPE.WALL_LOW, 600),
+      lowAbove: collide(LANE_TYPE.WALL_LOW, 600 + Number.EPSILON * 4096),
+      highAt: collide(LANE_TYPE.WALL_HIGH, 2000),
+      highAbove: collide(LANE_TYPE.WALL_HIGH, 2000 + Number.EPSILON * 16384),
+      gapBelow: collide(LANE_TYPE.GAP, 200 - Number.EPSILON * 1024),
+      gapAt: collide(LANE_TYPE.GAP, 200),
+    });
+  })()`, sandbox));
+  assert.deepEqual(outcomes.constants, [600, 2000, 200, 600]);
+  assert.equal(outcomes.lowAt, 'wall');
+  assert.equal(outcomes.lowAbove, null);
+  assert.equal(outcomes.highAt, 'wall');
+  assert.equal(outcomes.highAbove, null);
+  assert.equal(outcomes.gapBelow, 'gap');
+  assert.equal(outcomes.gapAt, null);
+});
+
+test('full gaps cap at three and bridge runs remain two to five segments on a reachable lane', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const withRandom = (values, callback) => {
+      const previous = Math.random;
+      let index = 0;
+      Math.random = () => index < values.length ? values[index++] : 1;
+      try { return callback(); } finally { Math.random = previous; }
+    };
+    const makeBridge = (lengthRandom) => withRandom([1, 0, 1, 0.5, lengthRandom, 1], () => {
+      const gen = newGenState();
+      const originalSafeLane = gen.safeLane;
+      const segments = [generateSegment(2024, gen)];
+      while (gen.bridgeLeft > 0) segments.push(generateSegment(2024 + segments.length, gen));
+      const roadLanes = segments.map((segment) => segment.lanes
+        .map((type, lane) => type === LANE_TYPE.GAP ? null : lane).filter((lane) => lane !== null));
+      return { originalSafeLane, bridgeLane: gen.bridgeLane, roadLanes };
+    });
+    const gapGen = newGenState();
+    gapGen.gapRun = 2;
+    const capped = withRandom([0, 0], () => [
+      generateSegment(2024, gapGen),
+      generateSegment(2025, gapGen),
+    ]);
+    const landingLane = (safeLane, random) => {
+      const gen = newGenState();
+      gen.gapRun = CONFIG.MAX_GAP_RUN;
+      gen.safeLane = safeLane;
+      const segment = withRandom([random], () => generateSegment(2024, gen));
+      return segment.lanes.findIndex((type) => type === LANE_TYPE.FUEL);
+    };
+    return JSON.stringify({
+      constants: [CONFIG.MAX_GAP_RUN, CONFIG.FULL_GAP_MIN_INDEX, CONFIG.BRIDGE_MIN_INDEX],
+      shortest: makeBridge(0),
+      longest: makeBridge(0.999999),
+      cappedGapCounts: capped.map((segment) => segment.lanes.filter((type) => type === LANE_TYPE.GAP).length),
+      leftLanding: landingLane(0, 0.999999),
+      rightLanding: landingLane(6, 0),
+    });
+  })()`, sandbox));
+  assert.deepEqual(result.constants, [3, 100, 100]);
+  assert.equal(result.shortest.roadLanes.length, 2);
+  assert.equal(result.longest.roadLanes.length, 5);
+  for (const bridge of [result.shortest, result.longest]) {
+    assert.ok(Math.abs(bridge.bridgeLane - bridge.originalSafeLane) <= 1);
+    assert.ok(bridge.roadLanes.every((lanes) => lanes.length === 1 && lanes[0] === bridge.bridgeLane));
+  }
+  assert.deepEqual(result.cappedGapCounts, [7, 0]);
+  assert.ok(result.leftLanding >= 0 && result.leftLanding <= 2);
+  assert.ok(result.rightLanding >= 4 && result.rightLanding <= 6);
+});
+
+test('projectile wall behavior retains low-wall clearance, high blocking, and powered destruction', () => {
+  const sandbox = createGameLogicHarness();
+  const outcomes = JSON.parse(vm.runInContext(`(() => {
+    const fire = (wallType, kind, height, powered = false) => {
+      STATE.position = 0;
+      STATE.speed = 0;
+      STATE.tripleT = powered ? 1 : 0;
+      STATE.track = Array.from({ length: 20 }, (_, index) => ({
+        index, lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD), enemies: null,
+      }));
+      STATE.track[10].lanes[3] = wallType;
+      STATE.shots = [{ kind, lanePosition: 3, y: height, seg: 10.2 }];
+      advanceShots(0);
+      return { shots: STATE.shots.length, tile: STATE.track[10].lanes[3] };
+    };
+    return JSON.stringify({
+      lowAt: fire(LANE_TYPE.WALL_LOW, 'bullet', 600),
+      lowAbove: fire(LANE_TYPE.WALL_LOW, 'bullet', 600.001),
+      highAbove: fire(LANE_TYPE.WALL_HIGH, 'bullet', 2000.001),
+      missileLow: fire(LANE_TYPE.WALL_LOW, 'missile', 0),
+      missileHigh: fire(LANE_TYPE.WALL_HIGH, 'missile', 0),
+      poweredBullet: fire(LANE_TYPE.WALL_HIGH, 'bullet', 0, true),
+    });
+  })()`, sandbox));
+  assert.deepEqual(outcomes.lowAt, { shots: 0, tile: 'WALL_LOW' });
+  assert.deepEqual(outcomes.lowAbove, { shots: 1, tile: 'WALL_LOW' });
+  assert.deepEqual(outcomes.highAbove, { shots: 0, tile: 'WALL_HIGH' });
+  assert.deepEqual(outcomes.missileLow, { shots: 0, tile: 'ROAD' });
+  assert.deepEqual(outcomes.missileHigh, { shots: 0, tile: 'ROAD' });
+  assert.deepEqual(outcomes.poweredBullet, { shots: 0, tile: 'ROAD' });
 });

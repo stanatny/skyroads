@@ -927,6 +927,119 @@ function quad(ctx, p1, p2, p3, p4) {
   ctx.closePath();
 }
 
+function drawProceduralGapVoid(ctx, gapCorners, segIndex, lane) {
+  const { nearLeft, nearRight, farLeft, farRight } = gapCorners;
+  ctx.fillStyle = '#05050d';
+  quad(ctx, nearLeft, nearRight, farRight, farLeft); ctx.fill();
+  const pulse = canvasPulse(0.45, 0.35, 4, segIndex * 0.8);
+  ctx.fillStyle = 'rgba(255,80,90,' + (pulse * 0.9).toFixed(3) + ')';
+  for (const fraction of [0.25, 0.5, 0.75]) {
+    const edgeX = nearLeft.x + (nearRight.x - nearLeft.x) * fraction;
+    const edgeY = nearLeft.y + (nearRight.y - nearLeft.y) * fraction;
+    const farX = farLeft.x + (farRight.x - farLeft.x) * fraction;
+    const farY = farLeft.y + (farRight.y - farLeft.y) * fraction;
+    const size = Math.max(3, (nearRight.x - nearLeft.x) * 0.06);
+    const tipX = edgeX + (farX - edgeX) * 0.35;
+    const tipY = edgeY + (farY - edgeY) * 0.35;
+    ctx.beginPath();
+    ctx.moveTo(edgeX - size, edgeY);
+    ctx.lineTo(edgeX + size, edgeY);
+    ctx.lineTo(tipX, tipY);
+    ctx.closePath();
+    ctx.fill();
+  }
+  for (let index = 0; index < 5; index++) {
+    const hashA = Math.sin(segIndex * 127.1 + lane * 311.7 + index * 74.7) * 43758.5453;
+    const hashB = Math.sin(segIndex * 269.5 + lane * 183.3 + index * 41.9) * 28001.8384;
+    const lateral = hashA - Math.floor(hashA);
+    const phase = hashB - Math.floor(hashB);
+    const cycle = (visualAnimationTime() * 0.25 + phase) % 1;
+    const nearX = nearLeft.x + (nearRight.x - nearLeft.x) * lateral;
+    const nearY = nearLeft.y + (nearRight.y - nearLeft.y) * lateral;
+    const farX = farLeft.x + (farRight.x - farLeft.x) * lateral;
+    const farY = farLeft.y + (farRight.y - farLeft.y) * lateral;
+    const emberX = nearX + (farX - nearX) * cycle;
+    const emberY = nearY + (farY - nearY) * cycle;
+    const alpha = Math.sin(cycle * Math.PI) * 0.55;
+    const size = Math.max(1, (nearRight.x - nearLeft.x) * 0.018 * (1 - cycle * 0.5));
+    ctx.fillStyle = 'rgba(255,95,60,' + alpha.toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(emberX, emberY, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawProceduralGapEdges(ctx, gapCorners, segIndex) {
+  const pulse = canvasPulse(0.45, 0.35, 4, segIndex * 0.8);
+  ctx.strokeStyle = 'rgba(255,60,70,' + pulse.toFixed(3) + ')';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(gapCorners.nearLeft.x, gapCorners.nearLeft.y);
+  ctx.lineTo(gapCorners.nearRight.x, gapCorners.nearRight.y);
+  ctx.stroke();
+}
+
+function drawTessellatedGapEdges(ctx, gapCorners, atlasKey, maxInterval = 48) {
+  const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
+  const presentation = globalThis.Skyroads && globalThis.Skyroads.presentation;
+  const metadata = worldArt && worldArt.WORLD_ATLAS_MANIFEST && worldArt.WORLD_ATLAS_MANIFEST[atlasKey];
+  const image = presentation && typeof presentation.resolveWorldAtlas === 'function'
+    ? presentation.resolveWorldAtlas(STATE.visualAssets, atlasKey)
+    : null;
+  if (!worldArt || !metadata || !image) return false;
+
+  const { nearLeft, nearRight, farLeft, farRight } = gapCorners;
+  const boundaries = [
+    [nearLeft, nearRight],
+    [nearRight, farRight],
+    [farRight, farLeft],
+    [farLeft, nearLeft],
+  ];
+  const largestStep = Math.max(1, maxInterval - 1);
+  ctx.save();
+  try {
+    quad(ctx, nearLeft, nearRight, farRight, farLeft);
+    ctx.clip();
+    for (const [startPoint, endPoint] of boundaries) {
+      const deltaX = endPoint.x - startPoint.x;
+      const deltaY = endPoint.y - startPoint.y;
+      const length = Math.hypot(deltaX, deltaY);
+      if (length < 1) continue;
+      const count = length <= maxInterval ? 1 : Math.ceil(length / largestStep);
+      const step = length / count;
+      const angle = Math.atan2(deltaY, deltaX);
+      for (let index = 0; index < count; index++) {
+        const intervalStart = index * step - (index > 0 ? 0.5 : 0);
+        const intervalEnd = (index + 1) * step + (index < count - 1 ? 0.5 : 0);
+        const intervalWidth = intervalEnd - intervalStart;
+        const centerDistance = (intervalStart + intervalEnd) / 2;
+        const fraction = centerDistance / length;
+        const centerX = startPoint.x + deltaX * fraction;
+        const centerY = startPoint.y + deltaY * fraction;
+        const scale = startPoint.scale + (endPoint.scale - startPoint.scale) * fraction;
+        const zRel = CONFIG.CAMERA_DEPTH / Math.max(scale, Number.EPSILON);
+        const worldX = (centerX - STATE.width / 2) / (Math.max(scale, Number.EPSILON) * STATE.width / 2);
+        const moduleHeight = Math.max(2, Math.min(18, 120 * scale * STATE.height / 2));
+        drawWorldAtlasSprite(ctx, atlasKey, {
+          worldX,
+          zRel,
+          destination: {
+            x: centerX - intervalWidth / 2,
+            y: centerY - moduleHeight,
+            width: intervalWidth,
+            height: moduleHeight,
+          },
+          rotation: angle,
+          alpha: 1,
+        });
+      }
+    }
+  } finally {
+    ctx.restore();
+  }
+  return true;
+}
+
 // 渲染跑道：从远到近（画家算法）
 function renderTrack(ctx) {
   const track = STATE.track;
@@ -953,49 +1066,16 @@ function renderTrack(ctx) {
       const p4 = project(xL, 0, zFar);
       if (!p3.visible) continue;
       if (type === LANE_TYPE.GAP) {
-        // 缺口：深渊 + 醒目的红色警示描边（随全局时钟脉冲）+ 指向深渊的箭头纹
         if (!p1.visible) continue;
-        ctx.fillStyle = '#05050d';
-        quad(ctx, p1, p2, p3, p4); ctx.fill();
-        const pulse = canvasPulse(0.45, 0.35, 4, i * 0.8);
-        ctx.strokeStyle = 'rgba(255,60,70,' + pulse.toFixed(3) + ')';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-        // 箭头纹（▼ 指向缺口深处，相位与描边同步）
-        ctx.fillStyle = 'rgba(255,80,90,' + (pulse * 0.9).toFixed(3) + ')';
-        for (const f of [0.25, 0.5, 0.75]) {
-          const ex = p1.x + (p2.x - p1.x) * f;   // 近边缘点
-          const ey = p1.y + (p2.y - p1.y) * f;
-          const fx = p4.x + (p3.x - p4.x) * f;   // 对应远边缘点
-          const fy = p4.y + (p3.y - p4.y) * f;
-          const s = Math.max(3, (p2.x - p1.x) * 0.06);
-          const tx = ex + (fx - ex) * 0.35, ty = ey + (fy - ey) * 0.35;
-          ctx.beginPath();
-          ctx.moveTo(ex - s, ey); ctx.lineTo(ex + s, ey); ctx.lineTo(tx, ty);
-          ctx.closePath(); ctx.fill();
-        }
-        // 深渊余烬：暗红光点缓慢上升（由近缘飘向深处），
-        // 横向位置与相位均为 (segIndex, lane, k) 的确定性哈希，不用随机数
-        for (let k = 0; k < 5; k++) {
-          const hA = Math.sin(i * 127.1 + lane * 311.7 + k * 74.7) * 43758.5453;
-          const hB = Math.sin(i * 269.5 + lane * 183.3 + k * 41.9) * 28001.8384;
-          const fxE = hA - Math.floor(hA);             // 横向位置 0..1
-          const phE = hB - Math.floor(hB);             // 上升相位 0..1
-          const cyc = (visualAnimationTime() * 0.25 + phE) % 1;   // 上升循环：0 近缘 → 1 深处
-          const nx = p1.x + (p2.x - p1.x) * fxE;       // 近缘对应点
-          const ny = p1.y + (p2.y - p1.y) * fxE;
-          const dx = p4.x + (p3.x - p4.x) * fxE;       // 深处对应点
-          const dy = p4.y + (p3.y - p4.y) * fxE;
-          const emx = nx + (dx - nx) * cyc;
-          const emy = ny + (dy - ny) * cyc;
-          const emA = Math.sin(cyc * Math.PI) * 0.55;  // 两端淡入淡出
-          const emS = Math.max(1, (p2.x - p1.x) * 0.018 * (1 - cyc * 0.5));
-          ctx.fillStyle = 'rgba(255,95,60,' + emA.toFixed(3) + ')';
-          ctx.beginPath();
-          ctx.arc(emx, emy, emS, 0, Math.PI * 2);
-          ctx.fill();
+        const gapCorners = Object.freeze({
+          nearLeft: p1,
+          nearRight: p2,
+          farLeft: p4,
+          farRight: p3,
+        });
+        drawProceduralGapVoid(ctx, gapCorners, i, lane);
+        if (!drawTessellatedGapEdges(ctx, gapCorners, 'gapEdge', 48)) {
+          drawProceduralGapEdges(ctx, gapCorners, i);
         }
         continue;
       }
@@ -1055,6 +1135,23 @@ function renderTrack(ctx) {
 // 奖励道具渲染：悬浮在路面上低空的发光图标
 // 黄/青白锯齿闪电 = 超级加速；紫色沙漏 = 减速；青白星形 = 超级形态；红白马蹄磁铁 = 燃料吸附
 // 动画全部由 STATE.time + (segIndex, lane) 相位驱动，无每帧随机
+function drawPickupMetalRim(ctx, point, radius) {
+  ctx.fillStyle = '#111a31';
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius * 1.22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#30415f';
+  ctx.lineWidth = Math.max(1, radius * 0.10);
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius * 1.18, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(115,235,255,0.78)';
+  ctx.lineWidth = Math.max(1, radius * 0.07);
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius * 1.10, Math.PI * 1.15, Math.PI * 1.85);
+  ctx.stroke();
+}
+
 function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
   const cx = laneCenterX(lane);
   const zMid = (zNear + zFar) / 2;
@@ -1076,6 +1173,7 @@ function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
     glow.addColorStop(1, 'rgba(150,230,255,0)');
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.4, 0, Math.PI * 2); ctx.fill();
+    drawPickupMetalRim(ctx, p, R);
     // 锯齿闪电本体（经典 Z 形，整体轻微摆动 —— 确定性相位）
     ctx.save();
     ctx.translate(p.x, p.y);
@@ -1122,6 +1220,7 @@ function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
     glow.addColorStop(1, 'rgba(190,110,255,0)');
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.2, 0, Math.PI * 2); ctx.fill();
+    drawPickupMetalRim(ctx, p, R);
     const ringA = 0.5 + 0.4 * Math.sin(animationTime * 3 + phase);
     ctx.strokeStyle = 'rgba(210,150,255,' + ringA.toFixed(3) + ')';
     ctx.lineWidth = 1.5;
@@ -1147,6 +1246,7 @@ function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
     glow.addColorStop(1, 'rgba(120,240,255,0)');
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.2, 0, Math.PI * 2); ctx.fill();
+    drawPickupMetalRim(ctx, p, R);
     ctx.beginPath();
     for (let k = 0; k < 10; k++) {
       const a = spin * 0.6 + k * Math.PI / 5 - Math.PI / 2;
@@ -1175,6 +1275,7 @@ function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
     glow.addColorStop(1, 'rgba(255,110,110,0)');
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.0, 0, Math.PI * 2); ctx.fill();
+    drawPickupMetalRim(ctx, p, R);
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(Math.sin(animationTime * 2.2 + phase) * 0.10);   // 轻微摆动（确定性）
@@ -1241,7 +1342,7 @@ function drawWorldAtlasSprite(ctx, atlasKey, placement) {
   return true;
 }
 
-function enemySpriteDrawRect(worldArt, placement) {
+function worldSpriteDrawRect(worldArt, placement) {
   if (worldArt && typeof worldArt.worldSpriteDrawRect === 'function') {
     return worldArt.worldSpriteDrawRect({ projectPoint: project, ...placement });
   }
@@ -1422,7 +1523,7 @@ function drawEnemy(ctx, e, segIndex, zNear, zFar) {
     const geometry = worldArt && worldArt.WORLD_GEOMETRY
       ? worldArt.WORLD_GEOMETRY.drone
       : { worldWidth: 380, worldHeight: CONFIG.DRONE_HEIGHT - 140, baseY: 140 };
-    const destination = enemySpriteDrawRect(worldArt, {
+    const destination = worldSpriteDrawRect(worldArt, {
       worldX: cx, zRel: zMid, worldWidth: geometry.worldWidth, worldHeight: geometry.worldHeight,
       baseY: geometry.baseY + bob,
     });
@@ -1441,7 +1542,7 @@ function drawEnemy(ctx, e, segIndex, zNear, zFar) {
     : { worldWidth: (CONFIG.ROAD_WIDTH / CONFIG.LANES) * 0.68, worldHeight: CONFIG.TURRET_HEIGHT, baseY: 0 };
   const shape = turretProjection(lane, zNear, zFar);
   drawTurretFootprint(ctx, shape);
-  const destination = enemySpriteDrawRect(worldArt, {
+  const destination = worldSpriteDrawRect(worldArt, {
     worldX: cx, zRel: zMid,
     worldWidth: geometry.worldWidth, worldHeight: CONFIG.TURRET_HEIGHT, baseY: geometry.baseY,
   });
@@ -1521,12 +1622,46 @@ function renderShots(ctx) {
   }
 }
 
+function drawWallAtlas(ctx, category, lane, segIndex, zNear, zFar) {
+  const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
+  if (!worldArt || typeof worldArt.variantKey !== 'function') return false;
+  const geometry = worldArt.WORLD_GEOMETRY && worldArt.WORLD_GEOMETRY[category];
+  if (!geometry) return false;
+  const zMid = (zNear + zFar) / 2;
+  const worldX = laneCenterX(lane);
+  const destination = worldSpriteDrawRect(worldArt, {
+    worldX,
+    zRel: zMid,
+    worldWidth: geometry.worldWidth,
+    worldHeight: category === 'wallLow' ? CONFIG.WALL_LOW_HEIGHT : CONFIG.WALL_HIGH_HEIGHT,
+    baseY: geometry.baseY,
+  });
+  return drawWorldAtlasSprite(ctx, worldArt.variantKey(category, segIndex, lane), {
+    worldX,
+    zRel: zMid,
+    destination,
+    alpha: 1,
+  });
+}
+
+function renderWallLow(ctx, lane, segIndex, zNear, zFar) {
+  if (!drawWallAtlas(ctx, 'wallLow', lane, segIndex, zNear, zFar)) {
+    drawProceduralWallLow(ctx, lane, segIndex, zNear, zFar);
+  }
+}
+
+function renderWallHigh(ctx, lane, segIndex, zNear, zFar) {
+  if (!drawWallAtlas(ctx, 'wallHigh', lane, segIndex, zNear, zFar)) {
+    drawProceduralWallHigh(ctx, lane, segIndex, zNear, zFar);
+  }
+}
+
 // 矮墙（可跳过）：两侧金属立柱 + 中间红色能量场
 // 立柱：分面着色 + 铆钉 + 缩小版黄色警示条纹 + 顶部状态灯；
 // 能量场：半透明红 + 随 STATE.time 水平流动的竖直扫描线 + 远端淡影（深度感）。
 // 视觉语义：红 = 危险；低矮轮廓暗示"跳得过去"。
 // 碰撞判定不变：整个车道宽都算墙（能量场同样是实体屏障，语义合理）。
-function renderWallLow(ctx, lane, segIndex, zNear, zFar) {
+function drawProceduralWallLow(ctx, lane, segIndex, zNear, zFar) {
   const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
   const halfRoad = CONFIG.ROAD_WIDTH / 2;
   const xL = -halfRoad + lane * laneWidth + laneWidth * 0.10;
@@ -1632,7 +1767,7 @@ function renderWallLow(ctx, lane, segIndex, zNear, zFar) {
 
 // 高塔（不可跳过，必须变道）：暗红高塔 —— 收分轮廓 + 垂直棱线/肋骨 + 塔顶脉冲灯
 // 视觉语义：暗深红 + 逼近地平线的高度 + 与矮墙截然不同的轮廓 = "这个跳不过去"
-function renderWallHigh(ctx, lane, segIndex, zNear, zFar) {
+function drawProceduralWallHigh(ctx, lane, segIndex, zNear, zFar) {
   const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
   const halfRoad = CONFIG.ROAD_WIDTH / 2;
   const inB = laneWidth * 0.10, inT = laneWidth * 0.26;  // 底部/顶部内缩（收分造型）
@@ -1777,6 +1912,7 @@ function renderFuel(ctx, lane, segIndex, zNear, zFar) {
   glow.addColorStop(1, 'rgba(70,255,220,0)');
   ctx.fillStyle = glow;
   ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.6, 0, Math.PI * 2); ctx.fill();
+  drawPickupMetalRim(ctx, p, R);
   // 旋转晶体：六角形交替半径，近似 2D 旋转的刻面宝石
   const ang = animationTime * 1.6 + phase;
   ctx.beginPath();

@@ -12,6 +12,8 @@ function makeRecordingContext() {
   const gradient = { addColorStop() {} };
   const stateStack = [];
   let currentPath = [];
+  let currentTransform = [1, 0, 0, 1, 0, 0];
+  let currentClip = null;
   const target = {
     events: [],
     globalAlpha: 1,
@@ -24,11 +26,18 @@ function makeRecordingContext() {
         fillStyle: this.fillStyle,
         strokeStyle: this.strokeStyle,
         lineWidth: this.lineWidth,
+        transform: [...currentTransform],
+        clip: currentClip && currentClip.map((part) => [...part]),
       });
       this.events.push({ type: 'save' });
     },
     restore() {
-      Object.assign(this, stateStack.pop() || {});
+      const restored = stateStack.pop() || {};
+      currentTransform = restored.transform || [1, 0, 0, 1, 0, 0];
+      currentClip = restored.clip || null;
+      delete restored.transform;
+      delete restored.clip;
+      Object.assign(this, restored);
       this.events.push({ type: 'restore' });
     },
     beginPath() { currentPath = []; },
@@ -37,12 +46,45 @@ function makeRecordingContext() {
     closePath() { currentPath.push(['closePath']); },
     arc(...args) { currentPath.push(['arc', ...args]); },
     ellipse(...args) { currentPath.push(['ellipse', ...args]); },
+    rect(...args) { currentPath.push(['rect', ...args]); },
     fill() { this.events.push({ type: 'fill', style: this.fillStyle, path: currentPath.map((part) => [...part]) }); },
     stroke() { this.events.push({ type: 'stroke', style: this.strokeStyle, path: currentPath.map((part) => [...part]) }); },
-    translate(x, y) { this.events.push({ type: 'translate', x, y }); },
-    rotate(angle) { this.events.push({ type: 'rotate', angle }); },
+    clip() {
+      currentClip = currentPath.map((part) => [...part]);
+      this.events.push({ type: 'clip', path: currentClip.map((part) => [...part]) });
+    },
+    translate(x, y) {
+      const [a, b, c, d, e, f] = currentTransform;
+      currentTransform = [a, b, c, d, a * x + c * y + e, b * x + d * y + f];
+      this.events.push({ type: 'translate', x, y });
+    },
+    rotate(angle) {
+      const [a, b, c, d, e, f] = currentTransform;
+      const cosine = Math.cos(angle), sine = Math.sin(angle);
+      currentTransform = [
+        a * cosine + c * sine,
+        b * cosine + d * sine,
+        -a * sine + c * cosine,
+        -b * sine + d * cosine,
+        e,
+        f,
+      ];
+      this.events.push({ type: 'rotate', angle });
+    },
+    scale(x, y) {
+      const [a, b, c, d, e, f] = currentTransform;
+      currentTransform = [a * x, b * x, c * y, d * y, e, f];
+      this.events.push({ type: 'scale', x, y });
+    },
     drawImage(image, ...args) {
-      this.events.push({ type: 'drawImage', image: image && image.id, args, alpha: this.globalAlpha });
+      this.events.push({
+        type: 'drawImage',
+        image: image && image.id,
+        args,
+        alpha: this.globalAlpha,
+        transform: [...currentTransform],
+        clip: currentClip && currentClip.map((part) => [...part]),
+      });
     },
     createLinearGradient() { return gradient; },
     createRadialGradient() { return gradient; },
@@ -61,7 +103,7 @@ function makeRecordingContext() {
   });
 }
 
-function createHarness({ loaded = true } = {}) {
+function createHarness({ loaded = true, missing = [] } = {}) {
   const context = makeRecordingContext();
   const sandbox = {
     console,
@@ -79,7 +121,7 @@ function createHarness({ loaded = true } = {}) {
   const gameSource = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
   vm.runInContext(gameSource, sandbox, { filename: 'src/game.js' });
   const worldAssets = Object.keys(require('../src/world-art.js').WORLD_ATLAS_MANIFEST)
-    .map((key) => `${JSON.stringify(key)}: { loaded: ${loaded}, element: { id: ${JSON.stringify(key)} } }`)
+    .map((key) => `${JSON.stringify(key)}: { loaded: ${loaded && !missing.includes(key)}, element: { id: ${JSON.stringify(key)} } }`)
     .join(',');
   vm.runInContext(`
     STATE.width = 960;
@@ -100,7 +142,83 @@ function drawEnemy(harness, enemy, { segIndex = 20, zNear = 500, zFar = 550, tim
     STATE.reducedMotion = ${reduced};
     drawEnemy(__ctx, __enemy, ${segIndex}, ${zNear}, ${zFar});
   `, harness.sandbox);
-  return harness.context.events.map((event) => ({ ...event, path: event.path && event.path.map((part) => [...part]) }));
+  return harness.context.events.map((event) => ({
+    ...event,
+    path: event.path && event.path.map((part) => [...part]),
+    transform: event.transform && [...event.transform],
+    clip: event.clip && event.clip.map((part) => [...part]),
+  }));
+}
+
+function drawWall(harness, category, {
+  lane = 3, segIndex = 10, zNear = 500, zFar = 550,
+} = {}) {
+  harness.context.events.length = 0;
+  const randomCalls = vm.runInContext(`(() => {
+    const previousRandom = Math.random;
+    let calls = 0;
+    Math.random = () => { calls += 1; return 0.5; };
+    try {
+      ${category === 'wallLow' ? 'renderWallLow' : 'renderWallHigh'}(
+        __ctx, ${lane}, ${segIndex}, ${zNear}, ${zFar}
+      );
+      return calls;
+    } finally {
+      Math.random = previousRandom;
+    }
+  })()`, harness.sandbox);
+  return { events: harness.context.events.map((event) => ({ ...event })), randomCalls };
+}
+
+function renderGapFixture(harness, gapLanes, { segIndex = 10 } = {}) {
+  harness.context.events.length = 0;
+  harness.sandbox.__gapLanes = gapLanes;
+  const expectedPaths = JSON.parse(vm.runInContext(`JSON.stringify(__gapLanes.map((lane) => {
+    const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
+    const halfRoad = CONFIG.ROAD_WIDTH / 2;
+    const x0 = -halfRoad + lane * laneWidth;
+    const x1 = x0 + laneWidth;
+    const zNear = zRelOf(${segIndex});
+    const zFar = zRelOf(${segIndex} + 1);
+    const nearLeft = project(x0, 0, zNear);
+    const nearRight = project(x1, 0, zNear);
+    const farLeft = project(x0, 0, zFar);
+    const farRight = project(x1, 0, zFar);
+    return [
+      ['moveTo', nearLeft.x, nearLeft.y],
+      ['lineTo', nearRight.x, nearRight.y],
+      ['lineTo', farRight.x, farRight.y],
+      ['lineTo', farLeft.x, farLeft.y],
+      ['closePath'],
+    ];
+  }))`, harness.sandbox));
+  const randomCalls = vm.runInContext(`(() => {
+    STATE.position = 0;
+    STATE.track = Array.from({ length: CONFIG.RENDER_DISTANCE + 2 }, (_, index) => ({
+      index,
+      lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD),
+    }));
+    for (const lane of __gapLanes) STATE.track[${segIndex}].lanes[lane] = LANE_TYPE.GAP;
+    const previousRandom = Math.random;
+    let calls = 0;
+    Math.random = () => { calls += 1; return 0.5; };
+    try {
+      renderTrack(__ctx);
+      return calls;
+    } finally {
+      Math.random = previousRandom;
+    }
+  })()`, harness.sandbox);
+  return {
+    expectedPaths,
+    events: harness.context.events.map((event) => ({
+      ...event,
+      path: event.path && event.path.map((part) => [...part]),
+      transform: event.transform && [...event.transform],
+      clip: event.clip && event.clip.map((part) => [...part]),
+    })),
+    randomCalls,
+  };
 }
 
 function imageCalls(events) {
@@ -300,4 +418,153 @@ test('atlas renderer clamps alpha, skips exact-yaw blends, restores state, and c
   assert.equal(calls[2].args[0] - calls[1].args[0], 512);
   assert.ok(Math.abs(calls[1].alpha + calls[2].alpha - 0.8) < 1e-12);
   assert.equal(harness.context.globalAlpha, 1);
+});
+
+test('loaded low and high wall variants use exact perspective geometry and deterministic yaw frames', () => {
+  const harness = createHarness();
+  const cases = [
+    ['wallLow', 2, 10, 'barrierCrate', 0, 600],
+    ['wallLow', 3, 10, 'barrierRail', 3 * 512, 600],
+    ['wallLow', 4, 10, 'barrierCrate', 6 * 512, 600],
+    ['wallHigh', 2, 10, 'structureReactor', 0, 2000],
+    ['wallHigh', 3, 10, 'structureTower', 3 * 512, 2000],
+    ['wallHigh', 4, 10, 'structureReactor', 6 * 512, 2000],
+  ];
+  const zMid = 525;
+  const scale = 0.05 / zMid;
+  for (const [category, lane, segIndex, expectedImage, expectedSourceX, worldHeight] of cases) {
+    const { events, randomCalls } = drawWall(harness, category, { lane, segIndex });
+    const calls = imageCalls(events);
+    assert.equal(calls.length, 1, `${category} lane ${lane} must use one exact yaw frame`);
+    assert.equal(calls[0].image, expectedImage);
+    assert.equal(calls[0].args[0], expectedSourceX);
+    assert.deepEqual(calls[0].args.slice(1, 4), [0, 512, 512]);
+    assert.ok(Math.abs(calls[0].args[6] - scale * 576 * 960 / 2) < 1e-10);
+    assert.ok(Math.abs(calls[0].args[7] - scale * worldHeight * 600 / 2) < 1e-10);
+    const laneWorldX = (lane - 3) * 720;
+    assert.ok(Math.abs(bottomCenter(calls[0]).x - (480 + scale * laneWorldX * 480)) < 1e-10);
+    assert.ok(Math.abs(bottomCenter(calls[0]).y - (210 + scale * 2340 * 300)) < 1e-10);
+    assert.equal(randomCalls, 0, 'render-time variant choice must not consume gameplay randomness');
+  }
+
+  const nearYaw = imageCalls(drawWall(harness, 'wallLow', {
+    lane: 2, segIndex: 10, zNear: 500, zFar: 550,
+  }).events).map((call) => call.args[0]);
+  const farYaw = imageCalls(drawWall(harness, 'wallLow', {
+    lane: 2, segIndex: 10, zNear: 4000, zFar: 4050,
+  }).events).map((call) => call.args[0]);
+  assert.notDeepEqual(farYaw, nearYaw, 'the same lane must select a shallower yaw as depth increases');
+});
+
+test('each unavailable wall variant falls back procedurally without substituting its sibling atlas', () => {
+  const cases = [
+    ['wallLow', 2, 10, 'barrierCrate'],
+    ['wallLow', 3, 10, 'barrierRail'],
+    ['wallHigh', 2, 10, 'structureReactor'],
+    ['wallHigh', 3, 10, 'structureTower'],
+  ];
+  for (const [category, lane, segIndex, missing] of cases) {
+    const harness = createHarness({ missing: [missing] });
+    const { events } = drawWall(harness, category, { lane, segIndex });
+    assert.equal(imageCalls(events).length, 0, `${missing} must not be replaced by its loaded sibling`);
+    assert.ok(events.some((event) => event.type === 'fill'), `${missing} must retain a procedural fallback`);
+  }
+});
+
+test('far-to-near wall traversal preserves atlas depth order', () => {
+  const harness = createHarness();
+  harness.context.events.length = 0;
+  vm.runInContext(`
+    STATE.position = 0;
+    STATE.track = Array.from({ length: CONFIG.RENDER_DISTANCE + 2 }, (_, index) => ({
+      index,
+      lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD),
+    }));
+    STATE.track[10].lanes[3] = LANE_TYPE.WALL_LOW;
+    STATE.track[20].lanes[3] = LANE_TYPE.WALL_HIGH;
+    renderTrack(__ctx);
+  `, harness.sandbox);
+  assert.deepEqual(imageCalls(harness.context.events).map((call) => call.image), [
+    require('../src/world-art.js').variantKey('wallHigh', 20, 3),
+    require('../src/world-art.js').variantKey('wallLow', 10, 3),
+  ]);
+});
+
+test('tessellated gap modules preserve authoritative one-lane, bridge, and full-width quadrilaterals', () => {
+  for (const gapLanes of [[3], [0, 1, 2, 4, 5, 6], [0, 1, 2, 3, 4, 5, 6]]) {
+    const harness = createHarness();
+    const { expectedPaths, events, randomCalls } = renderGapFixture(harness, gapLanes);
+    const voidPaths = events
+      .filter((event) => event.type === 'fill' && event.style === '#05050d')
+      .map((event) => event.path);
+    assert.deepEqual(voidPaths, expectedPaths, 'decoration must not alter any projected opening corner');
+
+    const calls = imageCalls(events).filter((call) => call.image === 'gapEdge');
+    assert.ok(calls.length > 0, 'loaded gap atlas must decorate the projected boundaries');
+    const allowedClips = new Set(expectedPaths.map((pathValue) => JSON.stringify(pathValue)));
+    for (const call of calls) {
+      assert.ok(allowedClips.has(JSON.stringify(call.clip)), 'each module must be clipped to its exact gap quadrilateral');
+      assert.ok(call.args[6] <= 48 + 1e-9, 'no screen-space edge unit may exceed 48 CSS pixels');
+      const [a, b, c, d, e, f] = call.transform;
+      const dx = call.args[4];
+      const bottomY = call.args[5] + call.args[7];
+      for (const localX of [dx, dx + call.args[6]]) {
+        const x = a * localX + c * bottomY + e;
+        const y = b * localX + d * bottomY + f;
+        assert.ok(x >= -1e-9 && x <= 960 + 1e-9);
+        assert.ok(y >= -1e-9 && y <= 600 + 1e-9);
+      }
+    }
+    assert.equal(randomCalls, 0, 'gap decoration must not consume gameplay randomness');
+    assert.equal(harness.context.globalAlpha, 1);
+  }
+});
+
+test('adjoining gap modules overlap by no more than one pixel and leave no boundary seams', () => {
+  const harness = createHarness();
+  const { events } = renderGapFixture(harness, [0, 1, 2, 3, 4, 5, 6], { segIndex: 0 });
+  const unique = new Map();
+  for (const call of imageCalls(events).filter((event) => event.image === 'gapEdge')) {
+    const key = JSON.stringify([call.transform, call.args.slice(4)]);
+    unique.set(key, call);
+  }
+  const groups = new Map();
+  for (const call of unique.values()) {
+    const [a, b, c, d, e, f] = call.transform;
+    const leftX = a * call.args[4] + c * (call.args[5] + call.args[7]) + e;
+    const leftY = b * call.args[4] + d * (call.args[5] + call.args[7]) + f;
+    const rightX = a * (call.args[4] + call.args[6]) + c * (call.args[5] + call.args[7]) + e;
+    const rightY = b * (call.args[4] + call.args[6]) + d * (call.args[5] + call.args[7]) + f;
+    const width = Math.hypot(rightX - leftX, rightY - leftY);
+    const tangent = [(rightX - leftX) / width, (rightY - leftY) / width];
+    const midpoint = [(leftX + rightX) / 2, (leftY + rightY) / 2];
+    const center = midpoint[0] * tangent[0] + midpoint[1] * tangent[1];
+    const halfWidth = width / 2;
+    const normalOffset = midpoint[0] * -tangent[1] + midpoint[1] * tangent[0];
+    const groupKey = JSON.stringify([
+      call.clip,
+      Math.round(Math.atan2(b, a) * 1e8),
+      Math.round(normalOffset * 1e8),
+    ]);
+    const intervals = groups.get(groupKey) || [];
+    intervals.push([center - halfWidth, center + halfWidth]);
+    groups.set(groupKey, intervals);
+  }
+  assert.ok(groups.size > 0);
+  for (const [groupKey, intervals] of groups.entries()) {
+    intervals.sort((left, right) => left[0] - right[0]);
+    for (let index = 1; index < intervals.length; index++) {
+      const overlap = intervals[index - 1][1] - intervals[index][0];
+      assert.ok(overlap >= -1e-7, `gap edge seam of ${-overlap}px`);
+      assert.ok(overlap <= 1 + 1e-7, `gap edge overlap of ${overlap}px in ${groupKey}: ${JSON.stringify(intervals)}`);
+    }
+  }
+});
+
+test('missing gap atlas retains the procedural warning edge without atlas substitution', () => {
+  const harness = createHarness({ missing: ['gapEdge'] });
+  const { events } = renderGapFixture(harness, [3]);
+  assert.equal(imageCalls(events).filter((call) => call.image === 'gapEdge').length, 0);
+  assert.ok(events.some((event) => event.type === 'stroke'
+    && typeof event.style === 'string' && event.style.startsWith('rgba(255,60,70,')));
 });

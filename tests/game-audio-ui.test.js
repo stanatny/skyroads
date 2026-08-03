@@ -611,6 +611,74 @@ test('reduced-motion freezes pickup animation and suppresses random ship trails 
   assert.ok(renderShip(false).randomCalls > 0);
 });
 
+test('fuel and reward icons retain their silhouettes while sharing metal rims and environment reflection', () => {
+  const { sandbox } = makeGameUiSandbox();
+  const capture = (type) => JSON.parse(vm.runInContext(`(() => {
+    STATE.width = 960;
+    STATE.height = 600;
+    STATE.time = 1;
+    const events = [];
+    let currentPath = [];
+    const target = {
+      fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+      beginPath() { currentPath = []; },
+      moveTo(...args) { currentPath.push(['moveTo', ...args]); },
+      lineTo(...args) { currentPath.push(['lineTo', ...args]); },
+      closePath() { currentPath.push(['closePath']); },
+      arc(...args) { currentPath.push(['arc', ...args]); },
+      ellipse(...args) { currentPath.push(['ellipse', ...args]); },
+      fill() { events.push({ type: 'fill', style: typeof this.fillStyle === 'string' ? this.fillStyle : 'gradient', path: currentPath }); },
+      stroke() { events.push({ type: 'stroke', style: typeof this.strokeStyle === 'string' ? this.strokeStyle : 'gradient', path: currentPath }); },
+      fillRect(...args) { events.push({ type: 'fillRect', style: this.fillStyle, args }); },
+      createLinearGradient() {
+        return { addColorStop(offset, color) { events.push({ type: 'stop', offset, color }); } };
+      },
+      createRadialGradient() {
+        return { addColorStop(offset, color) { events.push({ type: 'stop', offset, color }); } };
+      },
+      save() {}, restore() {}, translate() {}, rotate() {}, fillText() {},
+    };
+    const context = new Proxy(target, {
+      get(object, key) { return key in object ? object[key] : () => {}; },
+      set(object, key, value) { object[key] = value; return true; },
+    });
+    ${type === 'FUEL'
+    ? 'renderFuel(context, 3, 10, 900, 1200);'
+    : `renderPickup(context, LANE_TYPE.${type}, 3, 10, 900, 1200);`}
+    return JSON.stringify(events);
+  })()`, sandbox));
+
+  const captures = Object.fromEntries(['FUEL', 'BOOST', 'SLOW', 'TRIPLE', 'MAGNET']
+    .map((type) => [type, capture(type)]));
+  for (const [type, events] of Object.entries(captures)) {
+    assert.ok(events.some((event) => event.type === 'fill' && event.style === '#111a31'), `${type} navy rim`);
+    assert.ok(events.some((event) => event.type === 'stroke'
+      && event.style === 'rgba(115,235,255,0.78)'), `${type} cyan environment reflection`);
+  }
+
+  const closedPolygonSizes = (events) => events
+    .filter((event) => event.type === 'fill' && event.path.at(-1)?.[0] === 'closePath')
+    .map((event) => event.path.filter((command) => command[0] === 'moveTo' || command[0] === 'lineTo').length);
+  assert.ok(closedPolygonSizes(captures.FUEL).includes(6), 'fuel keeps its six-point crystal');
+  assert.ok(closedPolygonSizes(captures.BOOST).includes(6), 'BOOST keeps its six-point bolt');
+  assert.equal(closedPolygonSizes(captures.SLOW).filter((size) => size === 3).length, 2, 'SLOW keeps two triangles');
+  assert.ok(closedPolygonSizes(captures.TRIPLE).includes(10), 'TRIPLE keeps its ten-point star');
+  assert.ok(captures.MAGNET.some((event) => event.type === 'stroke'
+    && event.path.map((command) => command[0]).join(',') === 'moveTo,lineTo,arc,lineTo'), 'MAGNET keeps its U core');
+  assert.equal(captures.MAGNET.filter((event) => event.type === 'fillRect').length, 2, 'MAGNET keeps two pole caps');
+
+  const semanticStops = {
+    FUEL: 'rgba(70,255,220,0.40)',
+    BOOST: 'rgba(255,240,130,',
+    SLOW: 'rgba(190,110,255,0.42)',
+    TRIPLE: 'rgba(120,240,255,0.45)',
+    MAGNET: 'rgba(255,110,110,0.40)',
+  };
+  for (const [type, expected] of Object.entries(semanticStops)) {
+    assert.ok(captures[type].some((event) => event.type === 'stop' && event.color.startsWith(expected)), `${type} semantic glow`);
+  }
+});
+
 test('reduced-motion freezes gap embers, ship navigation lights, energy dashes, and orbit effects', () => {
   const { sandbox } = makeGameUiSandbox();
   const capture = (renderer, reduced, time) => JSON.parse(vm.runInContext(`(() => {
