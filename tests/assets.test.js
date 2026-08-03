@@ -5,11 +5,83 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const { preloadVisualAssets, resolvePlayerShipFrame } = require('../src/presentation.js');
 
 const root = path.resolve(__dirname, '..');
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const WORLD_ATLAS_IDS = [
+  'drone-scout',
+  'drone-striker',
+  'turret-sentry',
+  'turret-heavy',
+  'barrier-rail',
+  'barrier-crate',
+  'structure-reactor',
+  'structure-tower',
+  'gap-edge',
+];
+const WORLD_ATLAS_PATHS = WORLD_ATLAS_IDS.map((id) => `assets/world/${id}.png`);
+const WORLD_RENDERER_SHA256 = 'e15cb4e2f0b1ddf18a001e09042c3875af5f74f29a2349935695602b8ef6a712';
+const WORLD_OUTPUT_HASHES = {
+  'assets/world/drone-scout.png': '069bb170fb605de78c924ab8983c09e1eddd2899a20ea794fa6c0ebc9b0e3bc1',
+  'assets/world/drone-striker.png': 'a4f775132ad64e15ac472f4939e3b818c46fcee0757e6a32174131c5ee13a872',
+  'assets/world/turret-sentry.png': '5642f2a677179923fac523bdc63b1c41430799d6e79e4b9c2a444d62a6b09ba2',
+  'assets/world/turret-heavy.png': '63912cd7406faee52cb27a0dd96e8f6f0c12341695f4d04f470b9a28674d134f',
+  'assets/world/barrier-rail.png': 'ec28a7233c5c1e17e6c2307491397ce1e022b857e9dac640bab18d33e16b65fc',
+  'assets/world/barrier-crate.png': '00948d25ba1d9eebbc9bd43e3112c0cbd8ea52a2c0f15df2e45363700f11b54f',
+  'assets/world/structure-reactor.png': '1495fffeb812f561d23be5c89fc603de3598c2990df9a04c1013e547673762cd',
+  'assets/world/structure-tower.png': '44dd46fddc6a04a220550cc9c9a699eae501e758bdf8d7cdc727f6eb2c50e25c',
+  'assets/world/gap-edge.png': '72d469cdac888c4dbde50f3a45823dc8cc0367a722ae92ee8ceced0a89ed5900',
+};
+const WORLD_SOURCE_HASHES = {
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/containers_B.mtl': 'bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/containers_B.obj': '2768e85d33c3253e658c7a1a14a9144c2ccc861a44aaaf1845f034f1c0e7f2fd',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/drill_structure.mtl': 'bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/drill_structure.obj': 'e8181916c9b8f0b08948e12c8b7a39a2d3a7b82f0d83498b988c08a9515e2a4b',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/spacebits_texture.png': 'f19fe5ced42f72104a3c2e9f15d591622723695dd461a380691a8a21ebb01ae9',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/structure_tall.mtl': 'bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/structure_tall.obj': '99811112971149909c38bfb286d38484e06678228e6476db797b75b94009e24c',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/terrain_low.mtl': 'bc5ba933f194e86177da5560ac535dbe82485e029f32d92566bc3260cd091a14',
+  'kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/terrain_low.obj': '10e1d8fe49028038bba3def7ea20e771efa7d57988592c7cdbc88d565a324f5e',
+  'quaternius/OBJ/Enemy_EyeDrone.mtl': 'b14e181d95f4c2ff09b03f15afeee1c7989fde2638ec862f2eabd93138a90b2a',
+  'quaternius/OBJ/Enemy_EyeDrone.obj': 'c0c0e9c7b0347dcbc22c862e43e67106f7032c081fabf62db1c328fa2eb28d87',
+  'quaternius/OBJ/Enemy_QuadShell.mtl': '6a3da0a19d0c3443af158c84c7713d476cbc6cbe3d49f2cd9085a62ed52c19d1',
+  'quaternius/OBJ/Enemy_QuadShell.obj': 'bf8650079aac176f2924d122932ee206345e4bb3b69ef7a2eccce3f08209cc3b',
+  'quaternius/OBJ/Prop_Barrel2_Closed.mtl': 'f60be363e5a207e294084b9883a3697d0ee5f4a1546faab339a47e060f2e1d48',
+  'quaternius/OBJ/Prop_Barrel2_Closed.obj': 'e9e205c2f7edd3436258056973f1139ee6ee75fe438ef199b79f924650aa8bd3',
+  'quaternius/OBJ/Prop_Crate_Large.mtl': 'fa13718900aaaa8d22dcbb1fa5dd140321c14a23646513885c729aeff6a441c1',
+  'quaternius/OBJ/Prop_Crate_Large.obj': '7ecccb65d1c328c05d10803b0c78c92ebf2ab20fd5b7b85c2aeced76bccec255',
+  'quaternius/OBJ/Prop_Crate_Tarp_Large.mtl': 'fa13718900aaaa8d22dcbb1fa5dd140321c14a23646513885c729aeff6a441c1',
+  'quaternius/OBJ/Prop_Crate_Tarp_Large.obj': '2cd1a32679df2c608562c9afbd7f40794bd18a4f534af4c71bd57a66b7f2e2a1',
+  'quaternius/OBJ/Prop_Mine.mtl': '6130165535beb5ac72a8620fdac603b89ed702bb239135a5466bbd26d5071147',
+  'quaternius/OBJ/Prop_Mine.obj': 'c24bef15e2ba615c2533e264bf135175eab19f9044c1430a5283460d91d377c4',
+  'quaternius/OBJ/Prop_SatelliteDish.mtl': 'fd12fb0d4d7f74ccb49c457226a97fc86b60927585cda02888e9d837e70e3074',
+  'quaternius/OBJ/Prop_SatelliteDish.obj': 'ae50567124bcca21882cc67fb36df2b4cfbc0f4d6c7772462233cfa9c638bdd7',
+  'quaternius/Textures/T_Enemies_BaseColor.png': '65ab96c4ed89e64d84ed453fd67dfd37027860d81b93fb2a5d5bb2e9e0e35df8',
+  'quaternius/Textures/T_Enemies_Emissive.png': 'da6ebc7bb22dc15a39a127bcf4ebdf27047274f0f1fb26ca31bb7fc93a46ed0c',
+  'quaternius/Textures/T_Enemies_Normal.png': '3e1f78e93b93df32828ee9a9389665e9ccbe330065a36f365267bd9e094d2187',
+  'quaternius/Textures/T_Enemies_ORM.png': 'c9b85f821df22954ca63cbeb09bc392bba4e12a3776c413886ea86b8457fd08d',
+  'quaternius/Textures/T_Props_Batch1_BaseColor.png': 'c0ea20e93b451f65a22a11bbfbc3542e2408f9d5c3f2ac3fd12304f1308106e9',
+  'quaternius/Textures/T_Props_Batch1_Normal.png': '3a0d462366e5d03ef13fb35efc97c38c2463c118a89e303d356bac54d941d4ee',
+  'quaternius/Textures/T_Props_Batch1_ORM.png': '021629ac29f3761db317303a862c731502cd3a1a207291011adac241f9f48fa0',
+  'quaternius/Textures/T_Props_Batch2_BaseColor.png': '8977c1d6ada0ce151552caaf44be0b533827627f0172e6c1912175ab314260cd',
+  'quaternius/Textures/T_Props_Batch2_Emissive.png': 'e9ebf8ddd7e4d6c156e084b4d6f00d0a8090f40f0e6e188385980cf1e8a95aa0',
+  'quaternius/Textures/T_Props_Batch2_Normal.png': '5dc16d40e5e92c956f0fdbeea346d2b6792f9f25b13addee5f33d984d75072aa',
+  'quaternius/Textures/T_Props_Batch2_ORM.png': '3b66c58f973d119f8501a38a3bf7743818a1559366ddc4bb5c54b23667d233f3',
+  'quaternius/Textures/T_Props_Crates_BaseColor.png': '79d604644b8ef63731735cfb29a4a9ded81598d20ecffe75e2af3fd9e18d255c',
+  'quaternius/Textures/T_Props_Crates_Normal.png': '9fe8aa4951198c0dd3e06a41cd7aca1e50e308c2629f620f4d5be53dfc835b21',
+  'quaternius/Textures/T_Props_Crates_ORM.png': 'a36b59d07082dde265f13689f0acaacfa0cfb22b4769a2dad1bad282a39bf795',
+  'quaternius/Textures/T_Trim_01_BaseColor.png': 'a8f3271be2aa9c450ef5ef85c15bf8bcaeeaa48f5fc616df12d1334a96e78605',
+  'quaternius/Textures/T_Trim_01_Normal.png': '1aec7ad47a642fc68216b5a3119341b7dca038c1fc9493df8a15ad4aa27ddbcf',
+  'quaternius/Textures/T_Trim_01_ORM.png': '6ab7ad231df22867652048ebfd602684a9072d45c483ca57df0fcd4cb2cb4feb',
+  'quaternius/Textures/T_Trim_02_BaseColor.png': '7b13c6a7d82b434314237c4b1930b8e12ddc69a70ffef28d73cbd178d3ff6293',
+  'quaternius/Textures/T_Trim_02_Normal.png': '7faaa7059192f43aded9cc2f93917dd54fd14545509c37318d4e6bf0a8104960',
+  'quaternius/Textures/T_Trim_02_ORM.png': '2a433e6a7fbcec375b5c5e5c7aa57dbe1fd23ca6592f48c52d09dde2d622aab8',
+  'quaternius/Textures/T_Trim_03_Dark.png': '758a95beccdc9f0621d8b8a283ee2593e04b56f1cd32776165ec85e1568e8eb8',
+  'quaternius/Textures/T_Trim_03_Normal.png': 'b2c3238cbe2586e44df0b00179adf85e5b7ac7fed1713ec0b807482245a30738',
+  'quaternius/Textures/T_Trim_03_ORM.png': 'c57134b5d496b39b955a87765ea32b93567b1ab494fe6b890de24c75dcfd6fe4',
+};
 
 function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath));
@@ -46,7 +118,7 @@ function sipsDimensions(relativePath) {
   };
 }
 
-function shipAlphaStats(relativePaths) {
+function pngAlphaStats(relativePaths) {
   const source = `
     import AppKit
     import Foundation
@@ -100,7 +172,7 @@ test('both player frames are decodable 512 by 384 transparent PNGs', () => {
 
 test('both player frames keep transparent zero-RGB padding on all four borders', () => {
   const relativePaths = ['assets/ship/player-neutral.png', 'assets/ship/player-thrust.png'];
-  for (const stats of shipAlphaStats(relativePaths)) {
+  for (const stats of pngAlphaStats(relativePaths)) {
     assert.deepEqual(stats.borders, { bottom: 0, left: 0, right: 0, top: 0 }, stats.path);
     assert.ok(stats.transparentPixels > 0, `${stats.path} must retain an alpha channel`);
     assert.equal(stats.hiddenRgbPixels, 0, `${stats.path} must not retain RGB under zero alpha`);
@@ -181,6 +253,8 @@ test('committed license copies are byte-identical to the recorded official files
     ['licenses/Kenney-UI-Pack-Sci-Fi-CC0.txt', '80e091ef18f6b88becb3b7c2306c159d16217ca620bfa21b7177582c72924221'],
     ['licenses/Phosphor-Icons-MIT.txt', 'b5b1f1da112d18ea2147decfd48ddc1bf2b5aeb6c265381579340e95b15a2bb2'],
     ['licenses/Orbitron-OFL-1.1.txt', 'ab609b0e110d622435ff337cdf233288556e011bbf9bd0550be98846c0630819'],
+    ['licenses/Quaternius-Sci-Fi-Essentials-CC0.txt', '2687fba65dca7bbd2f9ab2fb7a8c51dd0c7c8e9acd7579415612bec43f68b3f5'],
+    ['licenses/KayKit-Space-Base-Bits-CC0.txt', 'ab3bfedd06f2149bd9a3b78294c2797e039cdcf254979a8a4c83973a9900ea91'],
   ];
   for (const [relativePath, expectedHash] of officialLicenses) {
     assert.equal(sha256(relativePath), expectedHash, `${relativePath} must preserve the official bytes`);
@@ -225,6 +299,270 @@ test('the documented offline render contract pins renderer and derived output ha
     );
   }
   assert.match(recipe, /swift tools\/render-ship\.swift \\\n\s+--model .*Striker\.obj \\\n\s+--texture .*Striker_Blue\.png/);
+});
+
+test('the world manifest freezes the audited free OBJ recipes and seven-view geometry', () => {
+  const manifest = JSON.parse(read('tools/world-assets.json'));
+  assert.equal(manifest.version, 1);
+  assert.deepEqual(manifest.frame, {
+    width: 512,
+    height: 512,
+    yawDegrees: [-30, -20, -10, 0, 10, 20, 30],
+  });
+  assert.deepEqual(manifest.geometry, {
+    drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
+    turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0 },
+    wallLow: { worldWidth: 576, worldHeight: 600, baseY: 0 },
+    wallHigh: { worldWidth: 576, worldHeight: 2000, baseY: 0 },
+  });
+  assert.deepEqual(manifest.upstream.map(({ id, uploadId, archiveFilename, archiveSha256 }) => ({
+    id, uploadId, archiveFilename, archiveSha256,
+  })), [
+    {
+      id: 'quaternius-sci-fi-essentials-standard',
+      uploadId: 12009762,
+      archiveFilename: 'Sci-Fi Essentials Kit[Standard].zip',
+      archiveSha256: 'a08346d538aa39fbea9fa492e03620d1860fc6214eedd62a4f5db373ac6fca01',
+    },
+    {
+      id: 'kaykit-space-base-bits-free',
+      uploadId: 8609688,
+      archiveFilename: 'KayKit_Space_Base_Bits_1.0_FREE.zip',
+      archiveSha256: '4f8d3e2e90a74d9a0d5262e9e09daccac320f1bcfbe4fa2837559a8ad7b98c17',
+    },
+  ]);
+
+  const identity = { scale: 1, rotationDegrees: [0, 0, 0], translation: [0, 0, 0] };
+  const component = (model, textures, transform = identity) => ({
+    model,
+    material: model.replace(/\.obj$/, '.mtl'),
+    textures,
+    ...transform,
+  });
+  const quaterniusEnemy = [
+    'quaternius/Textures/T_Enemies_BaseColor.png',
+    'quaternius/Textures/T_Enemies_Emissive.png',
+    'quaternius/Textures/T_Enemies_Normal.png',
+    'quaternius/Textures/T_Enemies_ORM.png',
+  ];
+  const quaterniusCrates = [
+    'quaternius/Textures/T_Props_Crates_BaseColor.png',
+    'quaternius/Textures/T_Props_Crates_Normal.png',
+    'quaternius/Textures/T_Props_Crates_ORM.png',
+  ];
+  const quaterniusTrim = [
+    'quaternius/Textures/T_Trim_01_BaseColor.png',
+    'quaternius/Textures/T_Trim_01_Normal.png',
+    'quaternius/Textures/T_Trim_01_ORM.png',
+    'quaternius/Textures/T_Trim_02_BaseColor.png',
+    'quaternius/Textures/T_Trim_02_Normal.png',
+    'quaternius/Textures/T_Trim_02_ORM.png',
+    'quaternius/Textures/T_Trim_03_Dark.png',
+    'quaternius/Textures/T_Trim_03_Normal.png',
+    'quaternius/Textures/T_Trim_03_ORM.png',
+  ];
+  const quaterniusBatch1 = [
+    'quaternius/Textures/T_Props_Batch1_BaseColor.png',
+    'quaternius/Textures/T_Props_Batch1_Normal.png',
+    'quaternius/Textures/T_Props_Batch1_ORM.png',
+  ];
+  const quaterniusBatch2 = [
+    'quaternius/Textures/T_Props_Batch2_BaseColor.png',
+    'quaternius/Textures/T_Props_Batch2_Emissive.png',
+    'quaternius/Textures/T_Props_Batch2_Normal.png',
+    'quaternius/Textures/T_Props_Batch2_ORM.png',
+  ];
+  const kaykitTexture = ['kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/spacebits_texture.png'];
+  const expected = [
+    ['drone-scout', 'quaternius-sci-fi-essentials-standard', 'drone', [
+      component('quaternius/OBJ/Enemy_EyeDrone.obj', quaterniusEnemy),
+    ]],
+    ['drone-striker', 'quaternius-sci-fi-essentials-standard', 'drone', [
+      component('quaternius/OBJ/Enemy_QuadShell.obj', quaterniusEnemy),
+    ]],
+    ['turret-sentry', 'quaternius-sci-fi-essentials-standard', 'turret', [
+      component('quaternius/OBJ/Prop_Crate_Large.obj', quaterniusCrates),
+      component('quaternius/OBJ/Prop_SatelliteDish.obj', quaterniusTrim, {
+        scale: 0.62, rotationDegrees: [-12, 0, 0], translation: [0, 0.72, 0],
+      }),
+    ]],
+    ['turret-heavy', 'quaternius-sci-fi-essentials-standard', 'turret', [
+      component('quaternius/OBJ/Prop_Barrel2_Closed.obj', quaterniusBatch1),
+      component('quaternius/OBJ/Prop_Mine.obj', quaterniusBatch2, {
+        scale: 0.74, rotationDegrees: [0, 0, 0], translation: [0, 0.68, 0],
+      }),
+    ]],
+    ['barrier-rail', 'quaternius-sci-fi-essentials-standard', 'wallLow', [
+      component('quaternius/OBJ/Prop_Crate_Tarp_Large.obj', quaterniusCrates),
+    ]],
+    ['barrier-crate', 'kaykit-space-base-bits-free', 'wallLow', [
+      component('kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/containers_B.obj', kaykitTexture),
+    ]],
+    ['structure-reactor', 'kaykit-space-base-bits-free', 'wallHigh', [
+      component('kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/drill_structure.obj', kaykitTexture),
+    ]],
+    ['structure-tower', 'kaykit-space-base-bits-free', 'wallHigh', [
+      component('kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/structure_tall.obj', kaykitTexture),
+    ]],
+    ['gap-edge', 'kaykit-space-base-bits-free', 'gap', [
+      component('kaykit/KayKit_Space_Base_Bits_1.0_FREE/Assets/obj/terrain_low.obj', kaykitTexture),
+    ]],
+  ];
+  assert.deepEqual(manifest.assets.map(({ id, sourceFamily, category, components }) => [
+    id, sourceFamily, category, components,
+  ]), expected);
+  assert.deepEqual(manifest.assets.map(({ id }) => id), WORLD_ATLAS_IDS);
+  for (const asset of manifest.assets) assert.deepEqual(asset.hideNodes, []);
+
+  const sourcePaths = manifest.assets.flatMap(({ components }) => components.flatMap(({ model, material, textures }) => [
+    model, material, ...textures,
+  ]));
+  assert.deepEqual(Object.keys(manifest.sourceHashes).sort(), [...new Set(sourcePaths)].sort());
+  assert.deepEqual(manifest.sourceHashes, WORLD_SOURCE_HASHES);
+  for (const [sourcePath, hash] of Object.entries(manifest.sourceHashes)) {
+    assert.match(hash, /^[a-f0-9]{64}$/, `${sourcePath} must have an audited SHA-256`);
+    assert.equal(path.posix.isAbsolute(sourcePath), false, `${sourcePath} must be relative`);
+    assert.doesNotMatch(sourcePath, /(?:https?:|file:|\/Source(?:s| Edition)?\/|\.(?:blend|fbx|glb|gltf)$)/i);
+  }
+});
+
+test('the world renderer CLI rejects absolute, network, and source-edition manifest paths', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const usage = spawnSync('swift', [renderer], { cwd: root, encoding: 'utf8' });
+  assert.notEqual(usage.status, 0);
+  assert.match(usage.stderr, /Usage: render-world-assets\.swift --manifest WORLD_ASSETS\.json --source-root EXTRACTED --output OUTPUT/);
+
+  const original = JSON.parse(read('tools/world-assets.json'));
+  const cases = [
+    ['/tmp/Enemy_EyeDrone.obj', /absolute paths are forbidden/i],
+    ['https://example.invalid/Enemy_EyeDrone.obj', /network URLs are forbidden/i],
+    ['quaternius/Source/Enemy_EyeDrone.obj', /source-edition paths are forbidden/i],
+  ];
+  for (const [invalidPath, expectedMessage] of cases) {
+    const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-renderer-contract.'));
+    try {
+      const manifest = structuredClone(original);
+      manifest.assets[0].components[0].model = invalidPath;
+      const manifestPath = path.join(temporaryRoot, 'manifest.json');
+      fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+      const result = spawnSync('swift', [renderer,
+        '--manifest', manifestPath,
+        '--source-root', path.join(temporaryRoot, 'source'),
+        '--output', path.join(temporaryRoot, 'output'),
+      ], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0, `${invalidPath} must be rejected`);
+      assert.match(result.stderr, expectedMessage);
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the world renderer canonicalizes only isolated opaque one-bucket GPU noise', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-canonicalizer.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harness = `
+      import Foundation
+
+      func fixture(center: [UInt8], repeatedCenter: Bool = false, transparentNeighbor: Bool = false) -> [UInt8] {
+          let candidate: [UInt8] = [64, 48, 160, 255]
+          var pixels = [UInt8](repeating: 0, count: 3 * 3 * 4)
+          let neighbors: [[UInt8]] = [
+              [48, 32, 144, 255], [48, 32, 144, 255], candidate,
+              [48, 32, 144, 255], center, candidate,
+              [64, 32, 144, 255], candidate, [64, 48, 176, 255],
+          ]
+          for (index, color) in neighbors.enumerated() {
+              for channel in 0..<4 { pixels[index * 4 + channel] = color[channel] }
+          }
+          if repeatedCenter {
+              for channel in 0..<4 { pixels[channel] = center[channel] }
+          }
+          if transparentNeighbor { pixels[3] = 0 }
+          return pixels
+      }
+
+      let isolated = fixture(center: [64, 32, 160, 255])
+      var normalized = isolated
+      canonicalizeIsolatedOpaqueNoise(&normalized, width: 3, height: 3, bytesPerRow: 12)
+      precondition(Array(normalized[16..<20]) == [64, 48, 160, 255])
+      precondition(Array(normalized[0..<16]) == Array(isolated[0..<16]))
+      precondition(Array(normalized[20...]) == Array(isolated[20...]))
+
+      for protected in [
+          fixture(center: [48, 32, 144, 255], repeatedCenter: true),
+          fixture(center: [48, 32, 144, 255]),
+          fixture(center: [64, 32, 160, 255], transparentNeighbor: true),
+          fixture(center: [64, 32, 144, 255]),
+      ] {
+          var result = protected
+          canonicalizeIsolatedOpaqueNoise(&result, width: 3, height: 3, bytesPerRow: 12)
+          precondition(result == protected)
+      }
+    `;
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    const executablePath = path.join(temporaryRoot, 'canonicalizer-test');
+    fs.writeFileSync(harnessPath, harness);
+    const compile = spawnSync('swiftc', [
+      rendererLibraryPath, harnessPath, '-o', executablePath,
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(compile.status, 0, compile.stderr);
+    const run = spawnSync(executablePath, [], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('the nine committed world atlases are bounded transparent 3584 by 512 PNGs', () => {
+  let totalBytes = 0;
+  for (const relativePath of WORLD_ATLAS_PATHS) {
+    const bytes = assertPng(relativePath);
+    totalBytes += bytes.length;
+    assert.equal(sha256(relativePath), WORLD_OUTPUT_HASHES[relativePath], `${relativePath} must match its frozen render`);
+    assert.ok(bytes.length <= 2 * 1024 * 1024, `${relativePath} must not exceed 2 MiB`);
+    assert.deepEqual(sipsDimensions(relativePath), { width: 3584, height: 512 });
+  }
+  assert.ok(totalBytes <= 18 * 1024 * 1024, 'world atlases must not exceed 18 MiB in total');
+  for (const stats of pngAlphaStats(WORLD_ATLAS_PATHS)) {
+    assert.deepEqual(stats.borders, { bottom: 0, left: 0, right: 0, top: 0 }, stats.path);
+    assert.ok(stats.transparentPixels > 0, `${stats.path} must retain transparent padding`);
+    assert.equal(stats.hiddenRgbPixels, 0, `${stats.path} must clear RGB under zero alpha`);
+  }
+});
+
+test('world-art provenance pins official free archives, CC0 licenses, and reproduction command', () => {
+  const provenance = read('docs/assets/world-art.md').toString('utf8');
+  const notices = read('THIRD_PARTY_NOTICES.md').toString('utf8');
+  for (const value of [
+    'https://quaternius.com/packs/scifiessentialskit.html',
+    'https://kaylousberg.itch.io/space-base-bits',
+    '12009762',
+    '8609688',
+    'Sci-Fi Essentials Kit[Standard].zip',
+    'KayKit_Space_Base_Bits_1.0_FREE.zip',
+    'a08346d538aa39fbea9fa492e03620d1860fc6214eedd62a4f5db373ac6fca01',
+    '4f8d3e2e90a74d9a0d5262e9e09daccac320f1bcfbe4fa2837559a8ad7b98c17',
+    'CC0',
+    '[-30, -20, -10, 0, 10, 20, 30]',
+    'swift tools/render-world-assets.swift --manifest tools/world-assets.json --source-root "$WORLD_WORK_DIR/extracted" --output "$WORLD_WORK_DIR/render-a"',
+  ]) assert.match(provenance, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(sha256('tools/render-world-assets.swift'), WORLD_RENDERER_SHA256);
+  for (const document of [provenance, notices]) {
+    assert.ok(document.includes(WORLD_RENDERER_SHA256), 'world renderer hash must be frozen');
+    for (const [sourcePath, expectedHash] of Object.entries(WORLD_SOURCE_HASHES)) {
+      assert.ok(document.includes(sourcePath) && document.includes(expectedHash), `${sourcePath} provenance must be frozen`);
+    }
+    for (const [relativePath, expectedHash] of Object.entries(WORLD_OUTPUT_HASHES)) {
+      assert.ok(document.includes(relativePath) && document.includes(expectedHash), `${relativePath} output hash must be frozen`);
+    }
+  }
 });
 
 test('runtime HTML, CSS and JavaScript contain no remote URL dependency', () => {
