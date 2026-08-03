@@ -654,9 +654,11 @@ test('runtime HTML, CSS and JavaScript contain no remote URL dependency', () => 
 });
 
 test('visual preloading reports every local asset and requires both player frames', async () => {
+  const queuedPaths = [];
   class ImageSuccess {
     set src(value) {
       this.currentSrc = value;
+      queuedPaths.push(value);
       queueMicrotask(() => this.onload());
     }
   }
@@ -678,14 +680,107 @@ test('visual preloading reports every local asset and requires both player frame
   assert.equal(result.shipFramesReady, true);
   assert.equal(result.fallbackRequired, false);
   assert.equal(result.timedOut, false);
-  assert.equal(result.loadedCount, 11);
+  assert.equal(result.loadedCount, 20);
   assert.equal(result.failedCount, 0);
   assert.equal(result.assets.ship.neutral.loaded, true);
   assert.equal(result.assets.ship.thrust.loaded, true);
   assert.equal(Object.keys(result.assets.ui).length, 2);
   assert.equal(Object.keys(result.assets.icons).length, 6);
+  assert.deepEqual(queuedPaths.slice(-9), [
+    './assets/world/drone-scout.png',
+    './assets/world/drone-striker.png',
+    './assets/world/turret-sentry.png',
+    './assets/world/turret-heavy.png',
+    './assets/world/barrier-rail.png',
+    './assets/world/barrier-crate.png',
+    './assets/world/structure-reactor.png',
+    './assets/world/structure-tower.png',
+    './assets/world/gap-edge.png',
+  ]);
+  assert.deepEqual(result.world.loaded, [
+    'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
+    'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge',
+  ]);
+  assert.deepEqual(result.world.fallback, []);
+  assert.deepEqual(result.world.categoryReady, {
+    drone: true, turret: true, wallLow: true, wallHigh: true, gap: true,
+  });
+  assert.equal(Object.isFrozen(result.assets.world), true);
+  assert.equal(Object.isFrozen(result.world), true);
+  assert.equal(Object.isFrozen(result.world.loaded), true);
+  assert.equal(Object.isFrozen(result.world.fallback), true);
+  assert.equal(Object.isFrozen(result.world.categoryReady), true);
   assert.equal(result.assets.font.orbitron.loaded, true);
   assert.equal(addedFonts.length, 1);
+});
+
+test('world atlas fallback leaves independent variants and categories available', async () => {
+  class ImageWithMissingDroneScout {
+    set src(value) {
+      this.currentSrc = value;
+      queueMicrotask(() => value.includes('drone-scout') ? this.onerror() : this.onload());
+    }
+  }
+  const result = await preloadVisualAssets({
+    timeoutMs: 100,
+    ImageCtor: ImageWithMissingDroneScout,
+    FontFaceCtor: null,
+    fontSet: null,
+  });
+
+  assert.equal(result.fallbackRequired, false, 'world art must not change player-ship fallback');
+  assert.equal(result.assets.world.droneScout.loaded, false);
+  assert.equal(result.assets.world.droneStriker.loaded, true);
+  assert.deepEqual(result.world.fallback, ['droneScout']);
+  assert.deepEqual(result.world.categoryReady, {
+    drone: true, turret: true, wallLow: true, wallHigh: true, gap: true,
+  });
+});
+
+test('world atlas diagnostics mark only a fully unavailable category as not ready', async () => {
+  class ImageWithMissingLowWalls {
+    set src(value) {
+      this.currentSrc = value;
+      queueMicrotask(() => value.includes('barrier-') ? this.onerror() : this.onload());
+    }
+  }
+  const result = await preloadVisualAssets({
+    timeoutMs: 100,
+    ImageCtor: ImageWithMissingLowWalls,
+    FontFaceCtor: null,
+    fontSet: null,
+  });
+
+  assert.deepEqual(result.world.fallback, ['barrierRail', 'barrierCrate']);
+  assert.deepEqual(result.world.categoryReady, {
+    drone: true, turret: true, wallLow: false, wallHigh: true, gap: true,
+  });
+});
+
+test('all world atlas failures do not require the procedural player fallback', async () => {
+  class ImageWithMissingWorldArt {
+    set src(value) {
+      this.currentSrc = value;
+      queueMicrotask(() => value.includes('/world/') ? this.onerror() : this.onload());
+    }
+  }
+  const result = await preloadVisualAssets({
+    timeoutMs: 100,
+    ImageCtor: ImageWithMissingWorldArt,
+    FontFaceCtor: null,
+    fontSet: null,
+  });
+
+  assert.equal(result.shipFramesReady, true);
+  assert.equal(result.fallbackRequired, false);
+  assert.equal(result.world.loaded.length, 0);
+  assert.deepEqual(result.world.fallback, [
+    'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
+    'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge',
+  ]);
+  assert.deepEqual(result.world.categoryReady, {
+    drone: false, turret: false, wallLow: false, wallHigh: false, gap: false,
+  });
 });
 
 test('one missing required ship frame triggers procedural fallback without hiding optional success', async () => {
@@ -724,7 +819,7 @@ test('visual preloading returns deterministic failure diagnostics on timeout', a
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 11);
+  assert.equal(result.failedCount, 20);
 });
 
 test('timeout seals image handlers so late completion cannot mutate terminal diagnostics', async () => {
@@ -751,7 +846,7 @@ test('timeout seals image handlers so late completion cannot mutate terminal dia
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(JSON.stringify(result, (key, value) => key === 'element' ? undefined : value), frozenSnapshot);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 11);
+  assert.equal(result.failedCount, 20);
 });
 
 test('visual preloading survives an Image constructor security failure', async () => {
@@ -768,7 +863,7 @@ test('visual preloading survives an Image constructor security failure', async (
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 11);
+  assert.equal(result.failedCount, 20);
 });
 
 test('player frame selection uses thrust only when both frames are ready', () => {

@@ -118,6 +118,12 @@ function makeGameUiSandbox({
   windowObject.matchMedia = () => motionQuery;
 
   const audioContexts = [];
+  class FakeImage {
+    set src(value) {
+      this.currentSrc = value;
+      if (typeof this.onload === 'function') this.onload();
+    }
+  }
   class FakeAudioContext {
     constructor() {
       this.currentTime = 10;
@@ -188,11 +194,14 @@ function makeGameUiSandbox({
     performance: { now() { return 1000; } },
     requestAnimationFrame() {},
     setInterval() { return 1; },
+    setTimeout,
+    clearTimeout,
     fetch: async () => ({ ok: true, arrayBuffer: async () => ({}) }),
     MutationObserver: FakeMutationObserver,
+    Image: FakeImage,
   };
   vm.createContext(sandbox);
-  const files = ['i18n.js', 'leaderboard.js', 'presentation.js', 'input.js'];
+  const files = ['i18n.js', 'leaderboard.js', 'presentation.js', 'world-art.js', 'input.js'];
   if (loadAdaptiveAudio) files.push('audio.js');
   files.push('game.js');
   for (const file of files) {
@@ -208,6 +217,23 @@ function makeGameUiSandbox({
     dispatchOverlayMutation() { for (const callback of observerCallbacks) callback([]); },
   };
 }
+
+test('release diagnostics expose complete preferred world atlas readiness', async () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const diagnostics = await vm.runInContext('Skyroads.diagnostics.ready', sandbox);
+
+  assert.equal(diagnostics.scripts.worldArt, true);
+  assert.deepEqual(Array.from(diagnostics.visualAssets.world.loaded), [
+    'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
+    'barrierCrate', 'structureReactor', 'structureTower', 'gapEdge',
+  ]);
+  assert.deepEqual(Array.from(diagnostics.visualAssets.world.fallback), []);
+  assert.deepEqual({ ...diagnostics.visualAssets.world.categoryReady }, {
+    drone: true, turret: true, wallLow: true, wallHigh: true, gap: true,
+  });
+  assert.equal(Object.isFrozen(diagnostics.visualAssets.world), true);
+});
 
 function appUiTarget(elements, tagName = 'button') {
   const target = new FakeEventTarget(elements['app-ui'].ownerDocument, tagName);

@@ -1,6 +1,10 @@
 'use strict';
 
 (function attachPresentation(root) {
+  if (typeof module !== 'undefined' && module.exports && (!root.Skyroads || !root.Skyroads.worldArt)) {
+    try { require('./world-art.js'); } catch (_) {}
+  }
+
   function finiteDimension(value) {
     const dimension = Number(value);
     return Number.isFinite(dimension) && dimension > 0 ? dimension : 0;
@@ -87,7 +91,10 @@
     setTimeoutFn = root.setTimeout,
     clearTimeoutFn = root.clearTimeout,
   } = {}) {
-    const states = { ship: {}, ui: {}, icons: {}, font: {} };
+    const worldArt = root.Skyroads && root.Skyroads.worldArt;
+    const worldManifest = worldArt ? worldArt.WORLD_ATLAS_MANIFEST : {};
+    const worldKeys = Object.keys(worldManifest);
+    const states = { ship: {}, ui: {}, icons: {}, world: {}, font: {} };
     const pending = [];
     const imageTasks = [];
 
@@ -123,6 +130,7 @@
     for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.ship)) queueImage('ship', key, assetPath);
     for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.ui)) queueImage('ui', key, assetPath);
     for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.icons)) queueImage('icons', key, assetPath);
+    for (const [key, metadata] of Object.entries(worldManifest)) queueImage('world', key, metadata.path);
 
     const fontPath = VISUAL_ASSET_MANIFEST.font.orbitron;
     const fontState = { path: fontPath, loaded: false, element: null };
@@ -162,13 +170,25 @@
       ship: freezeAssetGroup(states.ship),
       ui: freezeAssetGroup(states.ui),
       icons: freezeAssetGroup(states.icons),
+      world: freezeAssetGroup(states.world),
       font: freezeAssetGroup(states.font),
     });
     const entries = Object.values(assets).flatMap((group) => Object.values(group));
     const loadedCount = entries.filter((entry) => entry.loaded).length;
     const shipFramesReady = assets.ship.neutral.loaded && assets.ship.thrust.loaded;
+    const world = Object.freeze({
+      loaded: Object.freeze(worldKeys.filter((key) => assets.world[key].loaded)),
+      fallback: Object.freeze(worldKeys.filter((key) => !assets.world[key].loaded)),
+      categoryReady: Object.freeze(Object.fromEntries(
+        ['drone', 'turret', 'wallLow', 'wallHigh', 'gap'].map((category) => [
+          category,
+          worldKeys.some((key) => worldManifest[key].category === category && assets.world[key].loaded),
+        ]),
+      )),
+    });
     return Object.freeze({
       assets,
+      world,
       shipFramesReady,
       fallbackRequired: !shipFramesReady,
       timedOut,
@@ -183,6 +203,12 @@
     if (!frames.neutral || !frames.thrust || !frames.neutral.loaded || !frames.thrust.loaded) return null;
     const frame = energized ? frames.thrust : frames.neutral;
     return frame.element || null;
+  }
+
+  function resolveWorldAtlas(visualAssets, atlasKey) {
+    if (!visualAssets || !visualAssets.assets || !visualAssets.assets.world) return null;
+    const atlas = visualAssets.assets.world[atlasKey];
+    return atlas && atlas.loaded ? atlas.element || null : null;
   }
 
   function playerVisualLayerPlan(visualAssets, {
@@ -813,6 +839,7 @@
     VISUAL_ASSET_MANIFEST,
     preloadVisualAssets,
     resolvePlayerShipFrame,
+    resolveWorldAtlas,
     playerVisualLayerPlan,
     computeHudLayout,
     canvasMetrics,

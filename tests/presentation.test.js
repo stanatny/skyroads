@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   computeShipDrawRect,
   fallbackShipLayout,
+  resolveWorldAtlas,
   playerVisualLayerPlan,
   canvasMotionPolicy,
   computeHudLayout,
@@ -52,6 +53,22 @@ test('loaded neutral and thrust frames retain charge boost and super layers in d
   const fallback = playerVisualLayerPlan(null, { chargeActive: true, boostActive: true, superActive: true });
   assert.equal(fallback.shipFrame, null);
   assert.deepEqual(fallback.layers, ['procedural-ship', 'super-surface', 'charge', 'boost-aura', 'super-aura']);
+});
+
+test('world atlas resolution isolates unavailable variants from loaded atlases', () => {
+  const scout = { id: 'drone-scout' };
+  const visualAssets = {
+    assets: {
+      world: {
+        droneScout: { loaded: true, element: scout },
+        droneStriker: { loaded: false, element: { id: 'missing' } },
+      },
+    },
+  };
+
+  assert.equal(resolveWorldAtlas(visualAssets, 'droneScout'), scout);
+  assert.equal(resolveWorldAtlas(visualAssets, 'droneStriker'), null);
+  assert.equal(resolveWorldAtlas(visualAssets, 'unknown'), null);
 });
 
 test('canvas reduced-motion policy keeps gameplay moving but steadies decorative effects', () => {

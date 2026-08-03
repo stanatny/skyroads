@@ -3868,6 +3868,7 @@ function installDiagnostics() {
         i18n: Boolean(globalThis.Skyroads.i18n),
         leaderboard: Boolean(globalThis.Skyroads.leaderboard),
         presentation: Boolean(presentation),
+        worldArt: Boolean(globalThis.Skyroads.worldArt),
         input: Boolean(globalThis.Skyroads.input),
         audio: Boolean(globalThis.Skyroads.audio),
         game: true,
@@ -3886,6 +3887,7 @@ function installDiagnostics() {
         timedOut: STATE.visualAssets.timedOut,
         loadedCount: STATE.visualAssets.loadedCount,
         failedCount: STATE.visualAssets.failedCount,
+        world: STATE.visualAssets.world,
       }) : null,
       audio: Object.freeze({ ...adaptiveAudioState() }),
     });
