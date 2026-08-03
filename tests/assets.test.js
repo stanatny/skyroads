@@ -5,12 +5,31 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const vm = require('node:vm');
 const { execFileSync, spawnSync } = require('node:child_process');
 const { preloadVisualAssets, resolvePlayerShipFrame } = require('../src/presentation.js');
 
 const root = path.resolve(__dirname, '..');
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const WORLD_ATLAS_IDS = [
+const UPRIGHT_ATLAS_IDS = [
+  'drone-scout',
+  'drone-striker',
+  'turret-sentry',
+  'turret-heavy',
+  'barrier-rail',
+  'barrier-crate',
+  'structure-pylon',
+  'structure-bastion',
+  'structure-reactor',
+  'structure-tower',
+  'corridor-low',
+  'corridor-medium',
+];
+const MANIFEST_RECIPE_IDS = [
+  ...UPRIGHT_ATLAS_IDS,
+  'gap-edge',
+];
+const LEGACY_COMMITTED_ATLAS_IDS = [
   'drone-scout',
   'drone-striker',
   'turret-sentry',
@@ -21,8 +40,9 @@ const WORLD_ATLAS_IDS = [
   'structure-tower',
   'gap-edge',
 ];
-const WORLD_ATLAS_PATHS = WORLD_ATLAS_IDS.map((id) => `assets/world/${id}.png`);
-const WORLD_RENDERER_SHA256 = '5fde628296a1369259c437e380c5b32e731ddd4b9d4c0c10735af786cce409d3';
+const LEGACY_COMMITTED_ATLAS_PATHS = LEGACY_COMMITTED_ATLAS_IDS
+  .map((id) => `assets/world/${id}.png`);
+const LEGACY_PROVENANCE_RENDERER_SHA256 = '5fde628296a1369259c437e380c5b32e731ddd4b9d4c0c10735af786cce409d3';
 const WORLD_OUTPUT_HASHES = {
   'assets/world/drone-scout.png': '9ab7c75a5eb1afe52950b064e8d453798be0df8c9bc600fdc9952e3d1106ed5d',
   'assets/world/drone-striker.png': '8065eadf564c7b17aa301bc3738afd7591ba8c8cae695de98c96532b86c99736',
@@ -403,19 +423,39 @@ test('the world renderer maps source material names to an orange-free neutral hi
   }
 });
 
-test('the world manifest freezes the audited free OBJ recipes and seven-view geometry', () => {
+test('the world manifest freezes the audited v3 layout, budgets, geometry, and thirteen recipes', () => {
   const manifest = JSON.parse(read('tools/world-assets.json'));
-  assert.equal(manifest.version, 2);
-  assert.deepEqual(manifest.frame, {
+  assert.equal(manifest.version, 3);
+  assert.deepEqual(manifest.frames.upright, {
+    width: 320,
+    height: 320,
+    yawDegrees: [-80, -55, -30, 0, 30, 55, 80],
+    pitchDegrees: [20, 55, 80],
+  });
+  assert.deepEqual(manifest.frames.roadEdge, {
     width: 512,
     height: 512,
     yawDegrees: [-30, -20, -10, 0, 10, 20, 30],
   });
+  assert.deepEqual(manifest.budgets.upright, {
+    maxFileBytes: 3145728,
+    maxCombinedBytes: 31457280,
+    maxDecodedBytes: 117440512,
+  });
+  assert.equal(manifest.budgets.roadEdge.maxFileBytes, 2 * 1024 * 1024,
+    'legacy road-edge files retain their separate 2 MiB ceiling');
+  assert.equal(manifest.budgets.roadEdge.maxDecodedBytes, 3584 * 512 * 4,
+    'the legacy road-edge decoded budget stays separate from upright matrices');
+  assert.equal(UPRIGHT_ATLAS_IDS.length * 2240 * 960 * 4, 103219200);
+  assert.ok(UPRIGHT_ATLAS_IDS.length * 2240 * 960 * 4 < manifest.budgets.upright.maxDecodedBytes);
   assert.deepEqual(manifest.geometry, {
-    drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
+    drone: { worldWidth: 432, worldHeight: 360, baseY: 140 },
     turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120 },
     wallLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
+    wallMedium: { worldWidth: 648, worldHeight: 1250, baseY: 0 },
     wallHigh: { worldWidth: 648, worldHeight: 2000, baseY: 0 },
+    corridorLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
+    corridorMedium: { worldWidth: 648, worldHeight: 1250, baseY: 0 },
   });
   assert.deepEqual(manifest.framing, {
     drone: { targetWidthRatio: 0.72, targetHeightRatio: 0.64, bottomPadding: 48 },
@@ -464,27 +504,27 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
   });
   const modularTexture = ['modular-space-kit/Models/OBJ format/Textures/colormap.png'];
   const expected = [
-    ['drone-scout', 'kenney-space-kit', 'drone', [
+    ['drone-scout', 'kenney-space-kit', 'upright', 'drone', [
       component('space-kit/Models/OBJ format/craft_speederA.obj', []),
-    ], []],
-    ['drone-striker', 'kenney-space-kit', 'drone', [
+    ], [], null],
+    ['drone-striker', 'kenney-space-kit', 'upright', 'drone', [
       component('space-kit/Models/OBJ format/craft_speederD.obj', []),
-    ], []],
-    ['turret-sentry', 'kenney-space-kit', 'turret', [
+    ], [], null],
+    ['turret-sentry', 'kenney-space-kit', 'upright', 'turret', [
       component('space-kit/Models/OBJ format/turret_single.obj', []),
-    ], ['turret']],
-    ['turret-heavy', 'kenney-space-kit', 'turret', [
+    ], ['turret'], null],
+    ['turret-heavy', 'kenney-space-kit', 'upright', 'turret', [
       component('space-kit/Models/OBJ format/turret_double.obj', []),
-    ], ['turret']],
-    ['barrier-rail', 'kenney-space-kit', 'wallLow', [
+    ], ['turret'], null],
+    ['barrier-rail', 'kenney-space-kit', 'upright', 'wallLow', [
       component('space-kit/Models/OBJ format/barrels_rail.obj', [], {
         scale: 0.72, rotationDegrees: [0, 0, 0], translation: [-0.44, 0, 0],
       }),
       component('space-kit/Models/OBJ format/barrels_rail.obj', [], {
         scale: 0.72, rotationDegrees: [0, 0, 0], translation: [0.44, 0, 0],
       }),
-    ], []],
-    ['barrier-crate', 'kenney-modular-space-kit', 'wallLow', [
+    ], [], null],
+    ['barrier-crate', 'kenney-modular-space-kit', 'upright', 'wallLow', [
       component('modular-space-kit/Models/OBJ format/gate-lasers.obj', modularTexture, {
         scale: 0.72, rotationDegrees: [0, 0, 0], translation: [-0.85, 0, 0],
       }),
@@ -494,8 +534,30 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
       component('modular-space-kit/Models/OBJ format/gate-lasers.obj', modularTexture, {
         scale: 0.72, rotationDegrees: [0, 0, 0], translation: [0.85, 0, 0],
       }),
-    ], []],
-    ['structure-reactor', 'kenney-space-kit', 'wallHigh', [
+    ], [], null],
+    ['structure-pylon', 'kenney-modular-space-kit', 'upright', 'wallMedium', [
+      component('modular-space-kit/Models/OBJ format/room-large.obj', modularTexture, {
+        scale: 0.8, rotationDegrees: [0, 0, 0], translation: [0, 0, 0],
+      }),
+      component('modular-space-kit/Models/OBJ format/gate-lasers.obj', modularTexture, {
+        scale: 0.74, rotationDegrees: [0, 0, 0], translation: [0, 0.78, 0],
+      }),
+    ], [], null],
+    ['structure-bastion', 'kenney-space-kit', 'upright', 'wallMedium', [
+      component('space-kit/Models/OBJ format/rocket_baseA.obj', [], {
+        scale: 0.78, rotationDegrees: [0, 0, 0], translation: [0, 0, 0],
+      }),
+      component('space-kit/Models/OBJ format/rocket_sidesA.obj', [], {
+        scale: 0.7, rotationDegrees: [0, 0, 0], translation: [-0.68, 0.62, 0],
+      }),
+      component('space-kit/Models/OBJ format/rocket_sidesA.obj', [], {
+        scale: 0.7, rotationDegrees: [0, 0, 0], translation: [0.68, 0.62, 0],
+      }),
+      component('modular-space-kit/Models/OBJ format/gate-lasers.obj', modularTexture, {
+        scale: 0.68, rotationDegrees: [0, 0, 0], translation: [0, 0.48, 0],
+      }),
+    ], [], null],
+    ['structure-reactor', 'kenney-space-kit', 'upright', 'wallHigh', [
       ...[-0.74, 0.74].flatMap((x) => [
         component('space-kit/Models/OBJ format/rocket_baseA.obj', [], {
           scale: 0.85, rotationDegrees: [0, 0, 0], translation: [x, 0, 0],
@@ -510,8 +572,8 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
           scale: 0.72, rotationDegrees: [0, 0, 0], translation: [x, 2.02, 0],
         }),
       ]),
-    ], []],
-    ['structure-tower', 'kenney-modular-space-kit', 'wallHigh', [
+    ], [], null],
+    ['structure-tower', 'kenney-modular-space-kit', 'upright', 'wallHigh', [
       component('modular-space-kit/Models/OBJ format/room-large.obj', modularTexture, {
         scale: 0.72, rotationDegrees: [0, 0, 0], translation: [0, 0, 0],
       }),
@@ -519,18 +581,40 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
         'modular-space-kit/Models/OBJ format/room-large.obj', modularTexture,
         { scale: 0.72, rotationDegrees: [0, 0, 0], translation: [0, y, 0] },
       )),
-    ], []],
-    ['gap-edge', 'kenney-space-kit', 'gap', [
+    ], [], null],
+    ['corridor-low', 'kenney-space-kit', 'upright', 'corridorLow', [
+      component('space-kit/Models/OBJ format/barrels_rail.obj', [], {
+        scale: 0.72, rotationDegrees: [0, 0, 0], translation: [-0.44, 0, 0],
+      }),
+      component('space-kit/Models/OBJ format/barrels_rail.obj', [], {
+        scale: 0.72, rotationDegrees: [0, 0, 0], translation: [0.44, 0, 0],
+      }),
+    ], [], {
+      plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 540, cyanBandY: [390],
+    }],
+    ['corridor-medium', 'kenney-modular-space-kit', 'upright', 'corridorMedium', [
+      component('modular-space-kit/Models/OBJ format/room-large.obj', modularTexture, {
+        scale: 0.78, rotationDegrees: [0, 0, 0], translation: [0, 0, 0],
+      }),
+      component('modular-space-kit/Models/OBJ format/gate-lasers.obj', modularTexture, {
+        scale: 0.7, rotationDegrees: [0, 0, 0], translation: [0, 0.72, 0],
+      }),
+    ], [], {
+      plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 1120, cyanBandY: [460, 910],
+    }],
+    ['gap-edge', 'kenney-space-kit', 'roadEdge', 'gap', [
       component('space-kit/Models/OBJ format/terrain_sideCliff.obj', [], {
         scale: 0.78, rotationDegrees: [0, 0, 0], translation: [-0.42, 0, 0],
       }),
       component('space-kit/Models/OBJ format/terrain_sideCliff.obj', [], {
         scale: 0.78, rotationDegrees: [0, 0, 0], translation: [0.42, 0, 0],
       }),
-    ], []],
+    ], [], null],
   ];
-  assert.deepEqual(manifest.assets.map(({ id, sourceFamily, category, components, hideNodes }) => [
-    id, sourceFamily, category, components, hideNodes,
+  assert.deepEqual(manifest.assets.map(({
+    id, sourceFamily, layout, category, components, hideNodes, generatedDetails = null,
+  }) => [
+    id, sourceFamily, layout, category, components, hideNodes, generatedDetails,
   ]), expected);
   const reactor = manifest.assets.find(({ id }) => id === 'structure-reactor');
   const fuelCenters = reactor.components
@@ -538,7 +622,16 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
     .map(({ translation }) => translation[0]);
   assert.ok(fuelCenters[1] - fuelCenters[0] >= 1.44,
     'the two normalized 2:1 fuel bodies at scale 0.72 must not overlap horizontally');
-  assert.deepEqual(manifest.assets.map(({ id }) => id), WORLD_ATLAS_IDS);
+  assert.deepEqual(manifest.assets.map(({ id }) => id), MANIFEST_RECIPE_IDS);
+  assert.deepEqual(manifest.assets.map(({ layout, category }) => [layout, category]), [
+    ['upright', 'drone'], ['upright', 'drone'],
+    ['upright', 'turret'], ['upright', 'turret'],
+    ['upright', 'wallLow'], ['upright', 'wallLow'],
+    ['upright', 'wallMedium'], ['upright', 'wallMedium'],
+    ['upright', 'wallHigh'], ['upright', 'wallHigh'],
+    ['upright', 'corridorLow'], ['upright', 'corridorMedium'],
+    ['roadEdge', 'gap'],
+  ]);
 
   const sourcePaths = manifest.assets.flatMap(({ components }) => components.flatMap(({ model, material, textures }) => [
     model, material, ...textures,
@@ -552,11 +645,310 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
   }
 });
 
+test('the upright renderer assembles deterministic pitch-major metadata from synthetic cells', () => {
+  const renderer = path.join(root, 'tools/render-world-assets.swift');
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'upright-atlas-contract.'));
+  try {
+    const rendererLibraryPath = path.join(temporaryRoot, 'Renderer.swift');
+    const rendererLibrary = fs.readFileSync(renderer, 'utf8')
+      .replace(/^#!.*\n/, '')
+      .replace(/\n#if !WORLD_CANONICALIZER_TEST[\s\S]*\n#endif\s*$/, '\n');
+    fs.writeFileSync(rendererLibraryPath, rendererLibrary);
+    const harnessPath = path.join(temporaryRoot, 'main.swift');
+    fs.writeFileSync(harnessPath, `
+      import Foundation
+
+      func expectRenderFailure(_ message: String, _ body: () throws -> Void) {
+          do {
+              try body()
+              preconditionFailure("expected renderer failure containing: \\(message)")
+          } catch let error as RenderError {
+              precondition(error.description.localizedCaseInsensitiveContains(message), error.description)
+          } catch {
+              preconditionFailure("unexpected error: \\(error)")
+          }
+      }
+
+      func replacing(
+          _ source: UprightAtlasMetadata,
+          atlasWidth: Int? = nil,
+          atlasHeight: Int? = nil,
+          pixelsPerWorldUnit: Double? = nil,
+          frames: [UprightFrameMetadata]? = nil
+      ) -> UprightAtlasMetadata {
+          UprightAtlasMetadata(
+              layout: source.layout,
+              atlasWidth: atlasWidth ?? source.atlasWidth,
+              atlasHeight: atlasHeight ?? source.atlasHeight,
+              frameWidth: source.frameWidth,
+              frameHeight: source.frameHeight,
+              yawDegrees: source.yawDegrees,
+              pitchDegrees: source.pitchDegrees,
+              worldBounds: source.worldBounds,
+              pixelsPerWorldUnit: pixelsPerWorldUnit ?? source.pixelsPerWorldUnit,
+              frames: frames ?? source.frames
+          )
+      }
+
+      let contract = UprightFrameContract(
+          width: 320,
+          height: 320,
+          yawDegrees: [-80, -55, -30, 0, 30, 55, 80],
+          pitchDegrees: [20, 55, 80]
+      )
+      let worldBounds = WorldBoundsMetadata(
+          minX: -216, maxX: 216,
+          minY: 140, maxY: 500,
+          minZ: -25, maxZ: 25
+      )
+      var cells: [UprightRenderedCell] = []
+      for pitchIndex in 0..<3 {
+          for yawIndex in 0..<7 {
+              var pixels = [UInt8](repeating: 0, count: 320 * 320 * 4)
+              let minX = 8 + yawIndex
+              let minY = 10 + pitchIndex * 2
+              let maxX = minX + 20 + yawIndex
+              let maxY = minY + 24 + pitchIndex
+              for y in (minY + 1)...maxY {
+                  for x in (minX + 1)...maxX {
+                      let offset = (y * 320 + x) * 4
+                      pixels[offset] = 32
+                      pixels[offset + 1] = 48
+                      pixels[offset + 2] = 64
+                      pixels[offset + 3] = 255
+                  }
+              }
+              let alphaOneOffset = (minY * 320 + minX) * 4
+              pixels[alphaOneOffset] = 1
+              pixels[alphaOneOffset + 1] = 1
+              pixels[alphaOneOffset + 2] = 1
+              pixels[alphaOneOffset + 3] = 1
+              let desiredTopLeftX = Double(40 + yawIndex) + 0.1234567
+              let desiredTopLeftY = Double(210 + pitchIndex) + 0.7654321
+              cells.append(UprightRenderedCell(
+                  pixels: pixels,
+                  projectedOrigin: PixelPoint(
+                      x: desiredTopLeftX * 2,
+                      y: (320 - desiredTopLeftY) * 2
+                  )
+              ))
+          }
+      }
+
+      let product = try makeUprightAtlas(
+          cells: cells,
+          frame: contract,
+          worldBounds: worldBounds,
+          pixelsPerWorldUnit: 2.3456789,
+          supersample: 2,
+          assetID: "drone-scout"
+      )
+      let metadata = product.metadata
+      precondition(metadata.atlasWidth == 2240)
+      precondition(metadata.atlasHeight == 960)
+      precondition(product.pixels.count == 2240 * 960 * 4)
+      precondition(metadata.frames.count == 21)
+      precondition(metadata.pixelsPerWorldUnit == 2.345679)
+      precondition(metadata.frames[0].origin == PixelPoint(x: 40.123457, y: 210.765432))
+
+      for pitchIndex in 0..<3 {
+          for yawIndex in 0..<7 {
+              let frameIndex = pitchIndex * 7 + yawIndex
+              let record = metadata.frames[frameIndex]
+              let source = record.source
+              let cellX = yawIndex * 320
+              let cellY = pitchIndex * 320
+              precondition(source.sx == cellX + 8 + yawIndex)
+              precondition(source.sy == cellY + 10 + pitchIndex * 2)
+              precondition(source.sw > 0 && source.sh > 0)
+              precondition(source.sx >= cellX && source.sx + source.sw <= cellX + 320)
+              precondition(source.sy >= cellY && source.sy + source.sh <= cellY + 320)
+              precondition(record.origin.x.isFinite && record.origin.y.isFinite)
+
+              let expectedX = Double(cellX + 40 + yawIndex) + 0.1234567
+              let expectedY = Double(cellY + 210 + pitchIndex) + 0.7654321
+              precondition(abs(record.origin.x - (expectedX * 1_000_000).rounded() / 1_000_000) < 0.0000001)
+              precondition(abs(record.origin.y - (expectedY * 1_000_000).rounded() / 1_000_000) < 0.0000001)
+              let croppedOriginX = (record.origin.x - Double(source.sx)) / metadata.pixelsPerWorldUnit
+              let croppedOriginY = (record.origin.y - Double(source.sy)) / metadata.pixelsPerWorldUnit
+              let reconstructedX = Double(source.sx) + croppedOriginX * metadata.pixelsPerWorldUnit
+              let reconstructedY = Double(source.sy) + croppedOriginY * metadata.pixelsPerWorldUnit
+              precondition(abs(reconstructedX - record.origin.x) < 0.0000001)
+              precondition(abs(reconstructedY - record.origin.y) < 0.0000001)
+          }
+      }
+      try validateUprightAtlasMetadata(
+          metadata,
+          expectedWorldBounds: worldBounds,
+          assetID: "drone-scout"
+      )
+
+      expectRenderFailure("21") {
+          _ = try makeUprightAtlas(
+              cells: Array(cells.dropLast()), frame: contract, worldBounds: worldBounds,
+              pixelsPerWorldUnit: 2, supersample: 2, assetID: "short"
+          )
+      }
+      var emptyCells = cells
+      emptyCells[0] = UprightRenderedCell(
+          pixels: [UInt8](repeating: 0, count: 320 * 320 * 4),
+          projectedOrigin: PixelPoint(x: 20, y: 20)
+      )
+      expectRenderFailure("alpha") {
+          _ = try makeUprightAtlas(
+              cells: emptyCells, frame: contract, worldBounds: worldBounds,
+              pixelsPerWorldUnit: 2, supersample: 2, assetID: "empty"
+          )
+      }
+
+      expectRenderFailure("21") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, frames: Array(metadata.frames.dropLast())),
+              expectedWorldBounds: worldBounds, assetID: "short-metadata"
+          )
+      }
+      var invalidFrames = metadata.frames
+      invalidFrames[0] = UprightFrameMetadata(
+          source: PixelRect(sx: 0, sy: 0, sw: 0, sh: 1),
+          origin: invalidFrames[0].origin
+      )
+      expectRenderFailure("non-empty") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, frames: invalidFrames),
+              expectedWorldBounds: worldBounds, assetID: "empty-source"
+          )
+      }
+      invalidFrames = metadata.frames
+      invalidFrames[0] = UprightFrameMetadata(
+          source: PixelRect(sx: 320, sy: 0, sw: 1, sh: 1),
+          origin: invalidFrames[0].origin
+      )
+      expectRenderFailure("own cell") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, frames: invalidFrames),
+              expectedWorldBounds: worldBounds, assetID: "outside-cell"
+          )
+      }
+      invalidFrames = metadata.frames
+      invalidFrames[0] = UprightFrameMetadata(
+          source: invalidFrames[0].source,
+          origin: PixelPoint(x: Double.nan, y: 1)
+      )
+      expectRenderFailure("finite") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, frames: invalidFrames),
+              expectedWorldBounds: worldBounds, assetID: "nan-origin"
+          )
+      }
+      expectRenderFailure("positive") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, pixelsPerWorldUnit: 0),
+              expectedWorldBounds: worldBounds, assetID: "zero-scale"
+          )
+      }
+      expectRenderFailure("2240x960") {
+          try validateUprightAtlasMetadata(
+              replacing(metadata, atlasWidth: 2239),
+              expectedWorldBounds: worldBounds, assetID: "wrong-dimensions"
+          )
+      }
+
+      let atlases = Dictionary(uniqueKeysWithValues: canonicalUprightIDs.map { ($0, metadata) })
+      let sourceHashes = ["fixture/source.obj": String(repeating: "a", count: 64)]
+      let outputHashes = Dictionary(uniqueKeysWithValues: canonicalUprightIDs.map {
+          ("\\($0).png", String(repeating: "b", count: 64))
+      })
+      let report = try encodeRendererReport(
+          rendererSha256: String(repeating: "c", count: 64),
+          sourceHashes: sourceHashes,
+          outputHashes: outputHashes,
+          uprightAtlases: atlases
+      )
+      let reportAgain = try encodeRendererReport(
+          rendererSha256: String(repeating: "c", count: 64),
+          sourceHashes: sourceHashes,
+          outputHashes: outputHashes,
+          uprightAtlases: atlases
+      )
+      precondition(report == reportAgain)
+      let javascript = try encodeUprightMetadataJavaScript(atlases)
+      let javascriptAgain = try encodeUprightMetadataJavaScript(atlases)
+      precondition(javascript == javascriptAgain)
+      let reportText = String(decoding: report, as: UTF8.self)
+      let javascriptText = String(decoding: javascript, as: UTF8.self)
+      precondition(reportText.contains("2.345679"))
+      precondition(!reportText.contains("2.3456789"))
+      precondition(javascriptText.contains("GENERATED_UPRIGHT_ATLAS_DATA"))
+      try report.write(
+          to: URL(fileURLWithPath: CommandLine.arguments[1]),
+          options: Data.WritingOptions.atomic
+      )
+      try javascript.write(
+          to: URL(fileURLWithPath: CommandLine.arguments[2]),
+          options: Data.WritingOptions.atomic
+      )
+    `);
+    const executablePath = path.join(temporaryRoot, 'upright-atlas-contract');
+    const compile = spawnSync('swiftc', [
+      '-warnings-as-errors', rendererLibraryPath, harnessPath, '-o', executablePath,
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(compile.status, 0, compile.stderr);
+    const reportPath = path.join(temporaryRoot, 'report.json');
+    const metadataPath = path.join(temporaryRoot, 'generated-upright-data.js');
+    const run = spawnSync(executablePath, [reportPath, metadataPath], { cwd: root, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+
+    const reportBytes = fs.readFileSync(reportPath);
+    const metadataBytes = fs.readFileSync(metadataPath);
+    const report = JSON.parse(reportBytes);
+    const metadataSource = metadataBytes.toString('utf8');
+    assert.deepEqual(Object.keys(report.uprightAtlases).sort(), [...UPRIGHT_ATLAS_IDS].sort());
+    assert.equal(report.uprightAtlases['drone-scout'].atlasWidth, 2240);
+    assert.equal(report.uprightAtlases['drone-scout'].atlasHeight, 960);
+    assert.equal(report.uprightAtlases['drone-scout'].frames.length, 21);
+    assert.deepEqual(Object.keys(report).sort(), [
+      'outputHashes', 'rendererSha256', 'sourceHashes', 'uprightAtlases',
+    ]);
+    assert.equal(metadataSource.includes(temporaryRoot), false, 'metadata must not leak temporary paths');
+    assert.equal(reportBytes.includes(Buffer.from(temporaryRoot)), false, 'report must not leak temporary paths');
+    assert.equal((metadataSource.match(/GENERATED_UPRIGHT_ATLAS_DATA/g) || []).length, 1);
+    let previousIndex = -1;
+    for (const id of UPRIGHT_ATLAS_IDS) {
+      const currentIndex = metadataSource.indexOf(JSON.stringify(id));
+      assert.ok(currentIndex > previousIndex, `${id} must use canonical manifest order in metadata JS`);
+      previousIndex = currentIndex;
+    }
+    const generated = vm.runInNewContext(`${metadataSource}\nGENERATED_UPRIGHT_ATLAS_DATA`, Object.create(null));
+    assert.deepEqual(Object.keys(generated), UPRIGHT_ATLAS_IDS);
+    assert.equal(JSON.stringify(generated), JSON.stringify(Object.fromEntries(
+      UPRIGHT_ATLAS_IDS.map((id) => [id, report.uprightAtlases[id]]),
+    )));
+    const assertDeepFrozen = (value) => {
+      assert.equal(Object.isFrozen(value), true);
+      for (const child of Object.values(value)) {
+        if (child && typeof child === 'object') assertDeepFrozen(child);
+      }
+    };
+    assertDeepFrozen(generated);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test('the world renderer CLI rejects forbidden paths in every manifest path field', () => {
   const renderer = path.join(root, 'tools/render-world-assets.swift');
   const usage = spawnSync('swift', [renderer], { cwd: root, encoding: 'utf8' });
   assert.notEqual(usage.status, 0);
-  assert.match(usage.stderr, /Usage: render-world-assets\.swift --manifest WORLD_ASSETS\.json --source-root EXTRACTED --output OUTPUT/);
+  assert.match(usage.stderr, /Usage: render-world-assets\.swift --manifest WORLD_ASSETS\.json --source-root EXTRACTED --output OUTPUT --metadata-js OUTPUT\.js/);
+  const duplicateFlag = spawnSync('swift', [renderer,
+    '--manifest', 'manifest.json',
+    '--source-root', 'source',
+    '--output', 'output-a',
+    '--metadata-js', 'metadata.js',
+    '--output', 'output-b',
+  ], { cwd: root, encoding: 'utf8' });
+  assert.notEqual(duplicateFlag.status, 0);
+  assert.match(duplicateFlag.stderr, /Usage:/);
 
   const original = JSON.parse(read('tools/world-assets.json'));
   const invalidPaths = [
@@ -591,6 +983,7 @@ test('the world renderer CLI rejects forbidden paths in every manifest path fiel
         '--manifest', manifestPath,
         '--source-root', sourceRoot,
         '--output', path.join(temporaryRoot, 'output'),
+        '--metadata-js', path.join(temporaryRoot, 'metadata.js'),
       ], { cwd: root, encoding: 'utf8' });
       assert.notEqual(result.status, 0, `${field}=${invalidPath} must be rejected`);
       assert.match(result.stderr, expectedMessage, `${field}=${invalidPath}`);
@@ -617,6 +1010,7 @@ test('the world renderer verifies each source-root license before accepting the 
           "--manifest", CommandLine.arguments[1],
           "--source-root", CommandLine.arguments[2],
           "--output", CommandLine.arguments[3],
+          "--metadata-js", CommandLine.arguments[4],
       ])
       _ = try loadAndValidateManifest(arguments: arguments)
       print("validated")
@@ -646,7 +1040,10 @@ test('the world renderer verifies each source-root license before accepting the 
     }
     const validManifestPath = path.join(temporaryRoot, 'valid-manifest.json');
     fs.writeFileSync(validManifestPath, `${JSON.stringify(manifest)}\n`);
-    const valid = spawnSync(executablePath, [validManifestPath, sourceRoot, path.join(temporaryRoot, 'output')], {
+    const metadataPath = path.join(temporaryRoot, 'metadata.js');
+    const valid = spawnSync(executablePath, [
+      validManifestPath, sourceRoot, path.join(temporaryRoot, 'output'), metadataPath,
+    ], {
       encoding: 'utf8',
     });
     assert.equal(valid.status, 0, valid.stderr);
@@ -655,7 +1052,9 @@ test('the world renderer verifies each source-root license before accepting the 
     manifest.upstream[0].licenseSource = 'space-kit/Models/OBJ format/craft_speederA.obj';
     const wrongManifestPath = path.join(temporaryRoot, 'wrong-manifest.json');
     fs.writeFileSync(wrongManifestPath, `${JSON.stringify(manifest)}\n`);
-    const wrong = spawnSync(executablePath, [wrongManifestPath, sourceRoot, path.join(temporaryRoot, 'output')], {
+    const wrong = spawnSync(executablePath, [
+      wrongManifestPath, sourceRoot, path.join(temporaryRoot, 'output'), metadataPath,
+    ], {
       encoding: 'utf8',
     });
     assert.notEqual(wrong.status, 0);
@@ -665,7 +1064,9 @@ test('the world renderer verifies each source-root license before accepting the 
     fs.rmSync(path.join(sourceRoot, 'modular-space-kit/License.txt'));
     const missingManifestPath = path.join(temporaryRoot, 'missing-manifest.json');
     fs.writeFileSync(missingManifestPath, `${JSON.stringify(manifest)}\n`);
-    const missing = spawnSync(executablePath, [missingManifestPath, sourceRoot, path.join(temporaryRoot, 'output')], {
+    const missing = spawnSync(executablePath, [
+      missingManifestPath, sourceRoot, path.join(temporaryRoot, 'output'), metadataPath,
+    ], {
       encoding: 'utf8',
     });
     assert.notEqual(missing.status, 0);
@@ -928,7 +1329,7 @@ test('the world renderer filters only exact hidden OBJ groups and rejects missin
 
 test('the nine committed world atlases are bounded transparent 3584 by 512 PNGs', () => {
   let totalBytes = 0;
-  for (const relativePath of WORLD_ATLAS_PATHS) {
+  for (const relativePath of LEGACY_COMMITTED_ATLAS_PATHS) {
     const bytes = assertPng(relativePath);
     totalBytes += bytes.length;
     assert.equal(sha256(relativePath), WORLD_OUTPUT_HASHES[relativePath], `${relativePath} must match its frozen render`);
@@ -944,7 +1345,7 @@ test('the nine committed world atlases are bounded transparent 3584 by 512 PNGs'
     gap: { width: 330, height: 120 },
   };
   const categories = ['drone', 'drone', 'turret', 'turret', 'wallLow', 'wallLow', 'wallHigh', 'wallHigh', 'gap'];
-  for (const [atlasIndex, stats] of pngAlphaStats(WORLD_ATLAS_PATHS).entries()) {
+  for (const [atlasIndex, stats] of pngAlphaStats(LEGACY_COMMITTED_ATLAS_PATHS).entries()) {
     assert.deepEqual(stats.borders, { bottom: 0, left: 0, right: 0, top: 0 }, stats.path);
     assert.deepEqual(stats.frameBorders, Array.from({ length: 7 }, () => ({ left: 0, right: 0 })), stats.path);
     assert.ok(stats.transparentPixels > 0, `${stats.path} must retain transparent padding`);
@@ -992,7 +1393,7 @@ test('all fourteen turret views overlap the independent weapon mount without cha
   const turretPaths = ['assets/world/turret-sentry.png', 'assets/world/turret-heavy.png'];
   for (const stats of pngAlphaStats(turretPaths)) {
     for (const [frameIndex, bounds] of stats.opaqueBounds.entries()) {
-      const bodyTopY = destinationTop + bounds.minY / manifest.frame.height * destinationHeight;
+      const bodyTopY = destinationTop + bounds.minY / manifest.frames.roadEdge.height * destinationHeight;
       const overlap = mountY - bodyTopY;
       assert.ok(overlap >= 5 && overlap <= 7,
         `${stats.path} frame ${frameIndex} projected mount overlap ${overlap.toFixed(3)}px must stay slight`);
@@ -1014,9 +1415,9 @@ test('world-art provenance pins official free archives, CC0 licenses, and reprod
     '[-30, -20, -10, 0, 10, 20, 30]',
     'swift tools/render-world-assets.swift --manifest tools/world-assets.json --source-root "$WORLD_WORK_DIR/extracted" --output "$WORLD_WORK_DIR/render-a"',
   ]) assert.match(provenance, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.equal(sha256('tools/render-world-assets.swift'), WORLD_RENDERER_SHA256);
   for (const document of [provenance, notices]) {
-    assert.ok(document.includes(WORLD_RENDERER_SHA256), 'world renderer hash must be frozen');
+    assert.ok(document.includes(LEGACY_PROVENANCE_RENDERER_SHA256),
+      'the old renderer hash must remain as legacy nine-atlas provenance until Task 7');
     for (const [sourcePath, expectedHash] of Object.entries(WORLD_SOURCE_HASHES)) {
       assert.ok(document.includes(sourcePath) && document.includes(expectedHash), `${sourcePath} provenance must be frozen`);
     }

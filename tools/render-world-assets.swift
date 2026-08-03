@@ -6,10 +6,33 @@ import Foundation
 import ImageIO
 import SceneKit
 
-struct FrameContract: Decodable {
+struct UprightFrameContract: Decodable, Equatable {
     let width: Int
     let height: Int
-    let yawDegrees: [Double]
+    let yawDegrees: [Int]
+    let pitchDegrees: [Int]
+}
+
+struct RoadEdgeFrameContract: Decodable, Equatable {
+    let width: Int
+    let height: Int
+    let yawDegrees: [Int]
+}
+
+struct FrameContracts: Decodable, Equatable {
+    let upright: UprightFrameContract
+    let roadEdge: RoadEdgeFrameContract
+}
+
+struct AtlasBudget: Decodable, Equatable {
+    let maxFileBytes: Int
+    let maxCombinedBytes: Int
+    let maxDecodedBytes: Int
+}
+
+struct BudgetContracts: Decodable, Equatable {
+    let upright: AtlasBudget
+    let roadEdge: AtlasBudget
 }
 
 struct GeometryDimensions: Decodable, Equatable {
@@ -27,10 +50,72 @@ struct FramingContract: Decodable, Equatable {
 
 // Keep these category dimensions byte-for-byte aligned with src/world-art.js.
 let WORLD_GEOMETRY: [String: GeometryDimensions] = [
-    "drone": GeometryDimensions(worldWidth: 380, worldHeight: 360, baseY: 140, weaponMountHeight: nil),
+    "drone": GeometryDimensions(worldWidth: 432, worldHeight: 360, baseY: 140, weaponMountHeight: nil),
     "turret": GeometryDimensions(worldWidth: 489.6, worldHeight: 1900, baseY: 0, weaponMountHeight: 1120),
     "wallLow": GeometryDimensions(worldWidth: 648, worldHeight: 600, baseY: 0, weaponMountHeight: nil),
+    "wallMedium": GeometryDimensions(worldWidth: 648, worldHeight: 1250, baseY: 0, weaponMountHeight: nil),
     "wallHigh": GeometryDimensions(worldWidth: 648, worldHeight: 2000, baseY: 0, weaponMountHeight: nil),
+    "corridorLow": GeometryDimensions(worldWidth: 648, worldHeight: 600, baseY: 0, weaponMountHeight: nil),
+    "corridorMedium": GeometryDimensions(worldWidth: 648, worldHeight: 1250, baseY: 0, weaponMountHeight: nil),
+]
+
+struct PixelRect: Codable, Equatable {
+    let sx: Int
+    let sy: Int
+    let sw: Int
+    let sh: Int
+}
+
+struct PixelPoint: Codable, Equatable {
+    let x: Double
+    let y: Double
+}
+
+struct UprightFrameMetadata: Codable, Equatable {
+    let source: PixelRect
+    let origin: PixelPoint
+}
+
+struct WorldBoundsMetadata: Codable, Equatable {
+    let minX: Double
+    let maxX: Double
+    let minY: Double
+    let maxY: Double
+    let minZ: Double
+    let maxZ: Double
+}
+
+struct UprightAtlasMetadata: Codable, Equatable {
+    let layout: String
+    let atlasWidth: Int
+    let atlasHeight: Int
+    let frameWidth: Int
+    let frameHeight: Int
+    let yawDegrees: [Int]
+    let pitchDegrees: [Int]
+    let worldBounds: WorldBoundsMetadata
+    let pixelsPerWorldUnit: Double
+    let frames: [UprightFrameMetadata]
+}
+
+struct UprightRenderedCell {
+    let pixels: [UInt8]
+    let projectedOrigin: PixelPoint
+}
+
+struct UprightAtlasProduct {
+    let pixels: [UInt8]
+    let metadata: UprightAtlasMetadata
+}
+
+let WORLD_BOUNDS: [String: WorldBoundsMetadata] = [
+    "drone": WorldBoundsMetadata(minX: -216, maxX: 216, minY: 140, maxY: 500, minZ: -25, maxZ: 25),
+    "turret": WorldBoundsMetadata(minX: -244.8, maxX: 244.8, minY: 0, maxY: 1900, minZ: -25, maxZ: 25),
+    "wallLow": WorldBoundsMetadata(minX: -324, maxX: 324, minY: 0, maxY: 600, minZ: -25, maxZ: 25),
+    "wallMedium": WorldBoundsMetadata(minX: -324, maxX: 324, minY: 0, maxY: 1250, minZ: -25, maxZ: 25),
+    "wallHigh": WorldBoundsMetadata(minX: -324, maxX: 324, minY: 0, maxY: 2000, minZ: -25, maxZ: 25),
+    "corridorLow": WorldBoundsMetadata(minX: -324, maxX: 324, minY: 0, maxY: 600, minZ: -25, maxZ: 25),
+    "corridorMedium": WorldBoundsMetadata(minX: -324, maxX: 324, minY: 0, maxY: 1250, minZ: -25, maxZ: 25),
 ]
 
 struct UpstreamRecord: Decodable {
@@ -54,17 +139,27 @@ struct ComponentRecipe: Decodable {
     let translation: [Double]
 }
 
+struct GeneratedDetails: Decodable, Equatable {
+    let plinthSize: [Double]
+    let conduitSize: [Double]
+    let conduitY: Double
+    let cyanBandY: [Double]
+}
+
 struct AssetRecipe: Decodable {
     let id: String
     let sourceFamily: String
+    let layout: String
     let category: String
     let components: [ComponentRecipe]
     let hideNodes: [String]
+    let generatedDetails: GeneratedDetails?
 }
 
 struct WorldManifest: Decodable {
     let version: Int
-    let frame: FrameContract
+    let frames: FrameContracts
+    let budgets: BudgetContracts
     let geometry: [String: GeometryDimensions]
     let framing: [String: FramingContract]
     let upstream: [UpstreamRecord]
@@ -76,15 +171,16 @@ struct Arguments {
     let manifest: URL
     let sourceRoot: URL
     let output: URL
+    let metadataJS: URL
 
     init(_ values: [String]) throws {
-        let usage = "Usage: render-world-assets.swift --manifest WORLD_ASSETS.json --source-root EXTRACTED --output OUTPUT"
-        guard values.count == 7 else { throw RenderError.usage(usage) }
+        let usage = "Usage: render-world-assets.swift --manifest WORLD_ASSETS.json --source-root EXTRACTED --output OUTPUT --metadata-js OUTPUT.js"
+        guard values.count == 9 else { throw RenderError.usage(usage) }
         var parsed: [String: String] = [:]
         var index = 1
         while index < values.count {
             let flag = values[index]
-            guard ["--manifest", "--source-root", "--output"].contains(flag),
+            guard ["--manifest", "--source-root", "--output", "--metadata-js"].contains(flag),
                   parsed[flag] == nil else {
                 throw RenderError.usage(usage)
             }
@@ -93,12 +189,14 @@ struct Arguments {
         }
         guard let manifestPath = parsed["--manifest"],
               let sourceRootPath = parsed["--source-root"],
-              let outputPath = parsed["--output"] else {
+              let outputPath = parsed["--output"],
+              let metadataJSPath = parsed["--metadata-js"] else {
             throw RenderError.usage(usage)
         }
         manifest = URL(fileURLWithPath: manifestPath).standardizedFileURL
         sourceRoot = URL(fileURLWithPath: sourceRootPath).standardizedFileURL
         output = URL(fileURLWithPath: outputPath).standardizedFileURL
+        metadataJS = URL(fileURLWithPath: metadataJSPath).standardizedFileURL
     }
 }
 
@@ -118,19 +216,72 @@ enum RenderError: Error, CustomStringConvertible {
     }
 }
 
-private let requiredIDs = [
+let canonicalUprightIDs = [
     "drone-scout",
     "drone-striker",
     "turret-sentry",
     "turret-heavy",
     "barrier-rail",
     "barrier-crate",
+    "structure-pylon",
+    "structure-bastion",
     "structure-reactor",
     "structure-tower",
+    "corridor-low",
+    "corridor-medium",
+]
+private let requiredIDs = canonicalUprightIDs + [
     "gap-edge",
 ]
 
-private let requiredYaw = [-30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0]
+private let requiredFrames = FrameContracts(
+    upright: UprightFrameContract(
+        width: 320,
+        height: 320,
+        yawDegrees: [-80, -55, -30, 0, 30, 55, 80],
+        pitchDegrees: [20, 55, 80]
+    ),
+    roadEdge: RoadEdgeFrameContract(
+        width: 512,
+        height: 512,
+        yawDegrees: [-30, -20, -10, 0, 10, 20, 30]
+    )
+)
+private let requiredBudgets = BudgetContracts(
+    upright: AtlasBudget(
+        maxFileBytes: 3_145_728,
+        maxCombinedBytes: 31_457_280,
+        maxDecodedBytes: 117_440_512
+    ),
+    roadEdge: AtlasBudget(
+        maxFileBytes: 2_097_152,
+        maxCombinedBytes: 18_874_368,
+        maxDecodedBytes: 7_340_032
+    )
+)
+private let requiredRecipeContracts: [(String, String, String)] = [
+    ("drone-scout", "upright", "drone"),
+    ("drone-striker", "upright", "drone"),
+    ("turret-sentry", "upright", "turret"),
+    ("turret-heavy", "upright", "turret"),
+    ("barrier-rail", "upright", "wallLow"),
+    ("barrier-crate", "upright", "wallLow"),
+    ("structure-pylon", "upright", "wallMedium"),
+    ("structure-bastion", "upright", "wallMedium"),
+    ("structure-reactor", "upright", "wallHigh"),
+    ("structure-tower", "upright", "wallHigh"),
+    ("corridor-low", "upright", "corridorLow"),
+    ("corridor-medium", "upright", "corridorMedium"),
+    ("gap-edge", "roadEdge", "gap"),
+]
+private let requiredGeneratedDetails: [String: GeneratedDetails] = [
+    "corridor-low": GeneratedDetails(
+        plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 540, cyanBandY: [390]
+    ),
+    "corridor-medium": GeneratedDetails(
+        plinthSize: [648, 36, 50], conduitSize: [36, 36, 50], conduitY: 1120, cyanBandY: [460, 910]
+    ),
+]
 private let requiredFraming: [String: FramingContract] = [
     "drone": FramingContract(targetWidthRatio: 0.72, targetHeightRatio: 0.64, bottomPadding: 48),
     "turret": FramingContract(targetWidthRatio: 0.76, targetHeightRatio: 0.86, bottomPadding: 36),
@@ -188,22 +339,34 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
     } catch {
         throw RenderError.validation("Could not decode manifest: \(error)")
     }
-    guard manifest.version == 2 else {
-        throw RenderError.validation("Manifest version must be 2")
+    guard manifest.version == 3 else {
+        throw RenderError.validation("Manifest version must be 3")
     }
-    guard manifest.frame.width == 512,
-          manifest.frame.height == 512,
-          manifest.frame.yawDegrees == requiredYaw else {
-        throw RenderError.validation("Atlas frame contract must be seven 512x512 views at -30...30 degrees")
+    guard manifest.frames == requiredFrames else {
+        throw RenderError.validation("Manifest frames must match the strict upright and roadEdge contracts")
+    }
+    guard manifest.budgets == requiredBudgets else {
+        throw RenderError.validation("Manifest budgets must match the strict upright and roadEdge limits")
     }
     guard manifest.geometry == WORLD_GEOMETRY else {
         throw RenderError.validation("Manifest geometry does not match WORLD_GEOMETRY")
     }
     guard manifest.framing == requiredFraming else {
-        throw RenderError.validation("Manifest framing does not match the five canonical category contracts")
+        throw RenderError.validation("Manifest legacy framing does not match the five canonical category contracts")
     }
     guard manifest.assets.map(\.id) == requiredIDs else {
-        throw RenderError.validation("Manifest must contain the nine world atlases in runtime order")
+        throw RenderError.validation("Manifest must contain the thirteen world recipes in canonical order")
+    }
+    guard manifest.assets.count == requiredRecipeContracts.count else {
+        throw RenderError.validation("Manifest recipe contract count is invalid")
+    }
+    for (index, asset) in manifest.assets.enumerated() {
+        let expected = requiredRecipeContracts[index]
+        guard asset.id == expected.0,
+              asset.layout == expected.1,
+              asset.category == expected.2 else {
+            throw RenderError.validation("Manifest recipe layout/category mismatch at index \(index)")
+        }
     }
     guard Set(manifest.assets.map(\.sourceFamily)).isSubset(of: Set(manifest.upstream.map(\.id))) else {
         throw RenderError.validation("Every asset source family must have an upstream record")
@@ -252,14 +415,44 @@ func loadAndValidateManifest(arguments: Arguments) throws -> WorldManifest {
         guard !asset.components.isEmpty else {
             throw RenderError.validation("\(asset.id) must contain at least one component")
         }
-        guard manifest.framing[asset.category] != nil else {
-            throw RenderError.validation("\(asset.id) has no canonical framing category")
+        if asset.layout == "upright" {
+            guard manifest.geometry[asset.category] != nil,
+                  WORLD_BOUNDS[asset.category] != nil else {
+                throw RenderError.validation("\(asset.id) has no upright geometry/world-bounds category")
+            }
+        } else {
+            guard asset.layout == "roadEdge", manifest.framing[asset.category] != nil else {
+                throw RenderError.validation("\(asset.id) has no legacy roadEdge framing category")
+            }
+        }
+        let expectedDetails = requiredGeneratedDetails[asset.id]
+        guard asset.generatedDetails == expectedDetails else {
+            throw RenderError.validation("\(asset.id) has invalid generatedDetails")
+        }
+        if let details = asset.generatedDetails {
+            let sizes = details.plinthSize + details.conduitSize
+            guard details.plinthSize.count == 3,
+                  details.conduitSize.count == 3,
+                  sizes.allSatisfy({ $0.isFinite && $0 > 0 }),
+                  details.conduitY.isFinite,
+                  !details.cyanBandY.isEmpty,
+                  details.cyanBandY.allSatisfy(\.isFinite),
+                  let geometry = manifest.geometry[asset.category],
+                  details.conduitY >= geometry.baseY,
+                  details.conduitY <= geometry.baseY + geometry.worldHeight,
+                  details.cyanBandY.allSatisfy({
+                      $0 >= geometry.baseY && $0 <= geometry.baseY + geometry.worldHeight
+                  }) else {
+                throw RenderError.validation("\(asset.id) has non-finite or out-of-bounds generatedDetails")
+            }
         }
         for component in asset.components {
             guard component.rotationDegrees.count == 3,
                   component.translation.count == 3,
                   component.scale.isFinite,
-                  component.scale > 0 else {
+                  component.scale > 0,
+                  component.rotationDegrees.allSatisfy(\.isFinite),
+                  component.translation.allSatisfy(\.isFinite) else {
                 throw RenderError.validation("\(asset.id) has an invalid component transform")
             }
             for sourcePath in [component.model, component.material] + component.textures {
@@ -557,7 +750,7 @@ func addHostileDetails(to turntable: SCNNode, category: String) throws {
     }
 }
 
-func buildTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
+func buildAssembly(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
     let assembly = SCNNode()
     var sourceTemplates: [String: SCNNode] = [:]
     for component in asset.components {
@@ -573,6 +766,11 @@ func buildTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
         }
         assembly.addChildNode(componentNode)
     }
+    return assembly
+}
+
+func buildRoadEdgeTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
+    let assembly = try buildAssembly(asset: asset, sourceRoot: sourceRoot)
     let (minimum, maximum) = try usableBounds(of: assembly, label: asset.id)
     let width = Double(maximum.x - minimum.x)
     let height = Double(maximum.y - minimum.y)
@@ -590,6 +788,136 @@ func buildTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
     let turntable = SCNNode()
     turntable.addChildNode(assembly)
     try addHostileDetails(to: turntable, category: asset.category)
+    return turntable
+}
+
+func addWorldBox(
+    to node: SCNNode,
+    size: [Double],
+    position: SCNVector3,
+    material: SCNMaterial,
+    chamferRadius: Double = 0
+) {
+    let box = SCNBox(
+        width: CGFloat(size[0]),
+        height: CGFloat(size[1]),
+        length: CGFloat(size[2]),
+        chamferRadius: CGFloat(chamferRadius)
+    )
+    box.materials = [material]
+    let detail = SCNNode(geometry: box)
+    detail.position = position
+    node.addChildNode(detail)
+}
+
+func addUprightDetails(to turntable: SCNNode, asset: AssetRecipe) throws {
+    guard let dimensions = WORLD_GEOMETRY[asset.category],
+          let bounds = WORLD_BOUNDS[asset.category] else {
+        throw RenderError.validation("\(asset.id) has no declared upright geometry")
+    }
+    let cyan = flatMaterial(srgb(0x68, 0xe8, 0xff), emission: srgb(0x68, 0xe8, 0xff))
+    let orange = flatMaterial(srgb(0xff, 0x8a, 0x42), emission: srgb(0xff, 0x8a, 0x42))
+    let steel = flatMaterial(srgb(0x64, 0x78, 0x8e))
+    let seamHeight = max(6, min(dimensions.worldHeight * 0.018, 18))
+    let seamDepth = 8.0
+    let seamYRatio = asset.category == "drone" ? 0.48 : 0.34
+    addWorldBox(
+        to: turntable,
+        size: [dimensions.worldWidth * 0.48, seamHeight, seamDepth],
+        position: SCNVector3(
+            0,
+            dimensions.baseY + dimensions.worldHeight * seamYRatio,
+            bounds.maxZ + seamDepth / 2
+        ),
+        material: cyan,
+        chamferRadius: seamHeight / 2
+    )
+
+    let lightRadius = max(5, min(dimensions.worldHeight * 0.018, 18))
+    for (index, side) in [-1.0, 1.0].enumerated() {
+        let sphere = SCNSphere(radius: CGFloat(lightRadius))
+        sphere.segmentCount = 16
+        sphere.materials = [index == 0 ? cyan : orange]
+        let light = SCNNode(geometry: sphere)
+        light.position = SCNVector3(
+            side * dimensions.worldWidth * 0.22,
+            dimensions.baseY + dimensions.worldHeight * seamYRatio,
+            bounds.maxZ + lightRadius * 0.72
+        )
+        turntable.addChildNode(light)
+    }
+
+    if asset.category == "wallHigh" {
+        let gold = flatMaterial(srgb(0xff, 0xd6, 0x6b), emission: srgb(0xff, 0xd6, 0x6b))
+        let beaconRadius = 18.0
+        let beacon = SCNSphere(radius: CGFloat(beaconRadius))
+        beacon.segmentCount = 20
+        beacon.materials = [gold]
+        let beaconNode = SCNNode(geometry: beacon)
+        beaconNode.position = SCNVector3(0, bounds.maxY - beaconRadius, 0)
+        turntable.addChildNode(beaconNode)
+    }
+
+    if let details = asset.generatedDetails {
+        addWorldBox(
+            to: turntable,
+            size: details.plinthSize,
+            position: SCNVector3(0, dimensions.baseY + details.plinthSize[1] / 2, 0),
+            material: steel,
+            chamferRadius: min(details.plinthSize[1], details.plinthSize[2]) * 0.12
+        )
+        let conduitInset = dimensions.worldWidth / 2 - details.conduitSize[0] / 2
+        for side in [-1.0, 1.0] {
+            addWorldBox(
+                to: turntable,
+                size: details.conduitSize,
+                position: SCNVector3(side * conduitInset, details.conduitY, 0),
+                material: cyan,
+                chamferRadius: min(details.conduitSize[0], details.conduitSize[1]) * 0.25
+            )
+        }
+        for bandY in details.cyanBandY {
+            addWorldBox(
+                to: turntable,
+                size: [dimensions.worldWidth * 0.72, 12, 6],
+                position: SCNVector3(0, bandY, bounds.maxZ + 3),
+                material: cyan,
+                chamferRadius: 6
+            )
+        }
+    }
+}
+
+func buildUprightTurntable(asset: AssetRecipe, sourceRoot: URL) throws -> SCNNode {
+    guard let dimensions = WORLD_GEOMETRY[asset.category] else {
+        throw RenderError.validation("\(asset.id) has no upright geometry")
+    }
+    let assembly = try buildAssembly(asset: asset, sourceRoot: sourceRoot)
+    let (minimum, maximum) = try usableBounds(of: assembly, label: asset.id)
+    let sourceWidth = Double(maximum.x - minimum.x)
+    let sourceHeight = Double(maximum.y - minimum.y)
+    let sourceDepth = Double(maximum.z - minimum.z)
+    let scaleX = dimensions.worldWidth / sourceWidth
+    let scaleY = dimensions.worldHeight / sourceHeight
+    guard [sourceWidth, sourceHeight, sourceDepth, scaleX, scaleY].allSatisfy({ $0.isFinite && $0 > 0 }) else {
+        throw RenderError.load("\(asset.id) has non-finite or zero armor bounds")
+    }
+    let centered = SCNNode()
+    assembly.position = SCNVector3(
+        -(minimum.x + maximum.x) / 2,
+        -minimum.y,
+        -(minimum.z + maximum.z) / 2
+    )
+    centered.addChildNode(assembly)
+
+    let normalizedArmor = SCNNode()
+    normalizedArmor.scale = SCNVector3(scaleX, scaleY, scaleX)
+    normalizedArmor.position = SCNVector3(0, dimensions.baseY, 0)
+    normalizedArmor.addChildNode(centered)
+
+    let turntable = SCNNode()
+    turntable.addChildNode(normalizedArmor)
+    try addUprightDetails(to: turntable, asset: asset)
     return turntable
 }
 
@@ -630,7 +958,7 @@ func addLighting(to scene: SCNScene) {
     scene.rootNode.addChildNode(hostileNode)
 }
 
-func addCamera(to scene: SCNScene) -> SCNNode {
+func addRoadEdgeCamera(to scene: SCNScene) -> SCNNode {
     let target = SCNNode()
     target.position = SCNVector3(0, 0.42, 0)
     scene.rootNode.addChildNode(target)
@@ -653,6 +981,45 @@ func addCamera(to scene: SCNScene) -> SCNNode {
     return cameraNode
 }
 
+func addUprightCamera(
+    to scene: SCNScene,
+    worldBounds: WorldBoundsMetadata,
+    frame: UprightFrameContract
+) throws -> (cameraNode: SCNNode, target: SCNNode, pixelsPerWorldUnit: Double, distance: Double) {
+    let centerY = (worldBounds.minY + worldBounds.maxY) / 2
+    let halfWidth = (worldBounds.maxX - worldBounds.minX) / 2
+    let halfHeight = (worldBounds.maxY - worldBounds.minY) / 2
+    let halfDepth = (worldBounds.maxZ - worldBounds.minZ) / 2
+    let radius = sqrt(halfWidth * halfWidth + halfHeight * halfHeight + halfDepth * halfDepth)
+    let orthographicScale = radius * 2 / 0.78
+    let pixelsPerWorldUnit = Double(frame.height) / orthographicScale
+    let distance = max(radius * 4, 1_000)
+    guard [centerY, radius, orthographicScale, pixelsPerWorldUnit, distance]
+        .allSatisfy({ $0.isFinite }), radius > 0, pixelsPerWorldUnit > 0 else {
+        throw RenderError.render("Upright camera has invalid world bounds")
+    }
+
+    let target = SCNNode()
+    target.position = SCNVector3(0, centerY, 0)
+    scene.rootNode.addChildNode(target)
+
+    let camera = SCNCamera()
+    camera.usesOrthographicProjection = true
+    camera.orthographicScale = orthographicScale
+    camera.zNear = 0.1
+    camera.zFar = distance * 3
+    camera.wantsHDR = false
+    camera.exposureOffset = 0
+    camera.whitePoint = 1
+    let cameraNode = SCNNode()
+    cameraNode.camera = camera
+    let lookAt = SCNLookAtConstraint(target: target)
+    lookAt.isGimbalLockEnabled = true
+    cameraNode.constraints = [lookAt]
+    scene.rootNode.addChildNode(cameraNode)
+    return (cameraNode, target, pixelsPerWorldUnit, distance)
+}
+
 func cgImage(from image: NSImage, expectedWidth: Int, expectedHeight: Int) throws -> CGImage {
     var proposed = NSRect(origin: .zero, size: image.size)
     guard let result = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil),
@@ -663,18 +1030,18 @@ func cgImage(from image: NSImage, expectedWidth: Int, expectedHeight: Int) throw
     return result
 }
 
-func renderFrames(
+func renderRoadEdgeFrames(
     asset: AssetRecipe,
     sourceRoot: URL,
-    frame: FrameContract
+    frame: RoadEdgeFrameContract
 ) throws -> [CGImage] {
     let scene = SCNScene()
     scene.background.contents = NSColor.clear
     scene.lightingEnvironment.intensity = 0
-    let turntable = try buildTurntable(asset: asset, sourceRoot: sourceRoot)
+    let turntable = try buildRoadEdgeTurntable(asset: asset, sourceRoot: sourceRoot)
     scene.rootNode.addChildNode(turntable)
     addLighting(to: scene)
-    let cameraNode = addCamera(to: scene)
+    let cameraNode = addRoadEdgeCamera(to: scene)
 
     let renderer = SCNRenderer(device: nil, options: nil)
     renderer.scene = scene
@@ -688,7 +1055,7 @@ func renderFrames(
     let renderWidth = frame.width * supersample
     let renderHeight = frame.height * supersample
     for yaw in frame.yawDegrees {
-        turntable.eulerAngles.y = CGFloat(yaw * radiansPerDegree)
+        turntable.eulerAngles.y = CGFloat(Double(yaw) * radiansPerDegree)
         let image = renderer.snapshot(
             atTime: 0,
             with: CGSize(width: renderWidth, height: renderHeight),
@@ -697,6 +1064,63 @@ func renderFrames(
         frames.append(try cgImage(from: image, expectedWidth: renderWidth, expectedHeight: renderHeight))
     }
     return frames
+}
+
+func renderUprightCells(
+    asset: AssetRecipe,
+    sourceRoot: URL,
+    frame: UprightFrameContract,
+    worldBounds: WorldBoundsMetadata
+) throws -> (cells: [UprightRenderedCell], pixelsPerWorldUnit: Double) {
+    let scene = SCNScene()
+    scene.background.contents = NSColor.clear
+    scene.lightingEnvironment.intensity = 0
+    let turntable = try buildUprightTurntable(asset: asset, sourceRoot: sourceRoot)
+    scene.rootNode.addChildNode(turntable)
+    addLighting(to: scene)
+    let camera = try addUprightCamera(to: scene, worldBounds: worldBounds, frame: frame)
+
+    let renderer = SCNRenderer(device: nil, options: nil)
+    renderer.scene = scene
+    renderer.pointOfView = camera.cameraNode
+    renderer.autoenablesDefaultLighting = false
+    renderer.isJitteringEnabled = false
+    guard renderer.prepare(scene, shouldAbortBlock: nil) else {
+        throw RenderError.render("SceneKit could not prepare \(asset.id) before snapshot rendering")
+    }
+
+    let renderWidth = frame.width * supersample
+    let renderHeight = frame.height * supersample
+    var cells: [UprightRenderedCell] = []
+    cells.reserveCapacity(frame.yawDegrees.count * frame.pitchDegrees.count)
+    for pitch in frame.pitchDegrees {
+        let pitchRadians = Double(pitch) * radiansPerDegree
+        camera.cameraNode.position = SCNVector3(
+            0,
+            camera.target.position.y + camera.distance * sin(pitchRadians),
+            camera.distance * cos(pitchRadians)
+        )
+        for yaw in frame.yawDegrees {
+            turntable.eulerAngles.y = CGFloat(Double(yaw) * radiansPerDegree)
+            let image = renderer.snapshot(
+                atTime: 0,
+                with: CGSize(width: renderWidth, height: renderHeight),
+                antialiasingMode: .multisampling4X
+            )
+            let cgFrame = try cgImage(from: image, expectedWidth: renderWidth, expectedHeight: renderHeight)
+            let pixels = try downsampledPremultipliedRGBA(
+                cgFrame,
+                width: frame.width,
+                height: frame.height
+            )
+            let projected = renderer.projectPoint(SCNVector3Zero)
+            cells.append(UprightRenderedCell(
+                pixels: pixels,
+                projectedOrigin: PixelPoint(x: Double(projected.x), y: Double(projected.y))
+            ))
+        }
+    }
+    return (cells, camera.pixelsPerWorldUnit)
 }
 
 func rasterizedPremultipliedRGBA(_ image: CGImage) throws -> [UInt8] {
@@ -715,6 +1139,29 @@ func rasterizedPremultipliedRGBA(_ image: CGImage) throws -> [UInt8] {
         throw RenderError.render("Could not rasterize SceneKit frame")
     }
     context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    return pixels
+}
+
+func downsampledPremultipliedRGBA(_ image: CGImage, width: Int, height: Int) throws -> [UInt8] {
+    guard width > 0, height > 0 else {
+        throw RenderError.render("Could not downsample a frame to non-positive dimensions")
+    }
+    let bytesPerRow = width * 4
+    var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
+    let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+    guard let context = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: bitmapInfo
+    ) else {
+        throw RenderError.render("Could not create the upright downsample canvas")
+    }
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
     return pixels
 }
 
@@ -797,7 +1244,7 @@ func bottomBandAnchoredFrames(
 
 func canonicallyFrame(
     _ images: [CGImage],
-    frame: FrameContract,
+    frame: RoadEdgeFrameContract,
     framing: FramingContract,
     assetID: String
 ) throws -> [[UInt8]] {
@@ -984,9 +1431,368 @@ func quantizedPremultipliedChannel(_ value: UInt8, alpha: UInt8) -> UInt8 {
     return UInt8(min(Int(alpha), nearestFourBitBucket))
 }
 
-func makeAtlas(
+func roundedToSixPlaces(_ value: Double) -> Double {
+    let rounded = (value * 1_000_000).rounded() / 1_000_000
+    return rounded == 0 ? 0 : rounded
+}
+
+func validateUprightAtlasMetadata(
+    _ metadata: UprightAtlasMetadata,
+    expectedWorldBounds: WorldBoundsMetadata,
+    assetID: String
+) throws {
+    guard metadata.layout == "upright" else {
+        throw RenderError.validation("\(assetID) metadata layout must be upright")
+    }
+    guard metadata.atlasWidth == 2_240,
+          metadata.atlasHeight == 960,
+          metadata.frameWidth == 320,
+          metadata.frameHeight == 320 else {
+        throw RenderError.validation("\(assetID) upright metadata must use 2240x960 with 320x320 cells")
+    }
+    guard metadata.yawDegrees == requiredFrames.upright.yawDegrees,
+          metadata.pitchDegrees == requiredFrames.upright.pitchDegrees else {
+        throw RenderError.validation("\(assetID) upright metadata has invalid yaw/pitch arrays")
+    }
+    let boundsValues = [
+        metadata.worldBounds.minX, metadata.worldBounds.maxX,
+        metadata.worldBounds.minY, metadata.worldBounds.maxY,
+        metadata.worldBounds.minZ, metadata.worldBounds.maxZ,
+    ]
+    guard boundsValues.allSatisfy(\.isFinite),
+          metadata.worldBounds == expectedWorldBounds else {
+        throw RenderError.validation("\(assetID) upright metadata has invalid world bounds")
+    }
+    guard metadata.pixelsPerWorldUnit.isFinite,
+          metadata.pixelsPerWorldUnit > 0 else {
+        throw RenderError.validation("\(assetID) pixelsPerWorldUnit must be finite and positive")
+    }
+    guard roundedToSixPlaces(metadata.pixelsPerWorldUnit) == metadata.pixelsPerWorldUnit else {
+        throw RenderError.validation("\(assetID) pixelsPerWorldUnit must be rounded to six places")
+    }
+    guard metadata.frames.count == 21 else {
+        throw RenderError.validation("\(assetID) upright metadata must contain exactly 21 frames")
+    }
+    for (frameIndex, record) in metadata.frames.enumerated() {
+        guard record.source.sw > 0, record.source.sh > 0 else {
+            throw RenderError.validation("\(assetID) frame \(frameIndex) source must be non-empty")
+        }
+        let column = frameIndex % 7
+        let row = frameIndex / 7
+        let cellMinX = column * metadata.frameWidth
+        let cellMinY = row * metadata.frameHeight
+        let cellMaxX = cellMinX + metadata.frameWidth
+        let cellMaxY = cellMinY + metadata.frameHeight
+        guard record.source.sx >= cellMinX,
+              record.source.sy >= cellMinY,
+              record.source.sx + record.source.sw <= cellMaxX,
+              record.source.sy + record.source.sh <= cellMaxY else {
+            throw RenderError.validation("\(assetID) frame \(frameIndex) source must stay inside its own cell")
+        }
+        guard record.origin.x.isFinite, record.origin.y.isFinite else {
+            throw RenderError.validation("\(assetID) frame \(frameIndex) origin must be finite")
+        }
+        guard roundedToSixPlaces(record.origin.x) == record.origin.x,
+              roundedToSixPlaces(record.origin.y) == record.origin.y else {
+            throw RenderError.validation("\(assetID) frame \(frameIndex) origin must be rounded to six places")
+        }
+    }
+}
+
+func validateTransparentUprightCellPadding(
+    _ pixels: [UInt8],
+    width: Int,
+    height: Int,
+    assetID: String,
+    frameIndex: Int
+) throws {
+    let bytesPerRow = width * 4
+    guard width > 0, height > 0, pixels.count == bytesPerRow * height else {
+        throw RenderError.render("\(assetID) frame \(frameIndex) has wrong cell dimensions")
+    }
+    for x in 0..<width {
+        let top = pixels[x * 4 + 3]
+        let bottom = pixels[(height - 1) * bytesPerRow + x * 4 + 3]
+        guard top == 0, bottom == 0 else {
+            throw RenderError.render("\(assetID) frame \(frameIndex) has alpha on a cell edge")
+        }
+    }
+    for y in 0..<height {
+        let left = pixels[y * bytesPerRow + 3]
+        let right = pixels[y * bytesPerRow + (width - 1) * 4 + 3]
+        guard left == 0, right == 0 else {
+            throw RenderError.render("\(assetID) frame \(frameIndex) has alpha on a cell edge")
+        }
+    }
+}
+
+func makeUprightAtlas(
+    cells: [UprightRenderedCell],
+    frame: UprightFrameContract,
+    worldBounds: WorldBoundsMetadata,
+    pixelsPerWorldUnit: Double,
+    supersample: Int,
+    assetID: String
+) throws -> UprightAtlasProduct {
+    guard frame == requiredFrames.upright else {
+        throw RenderError.render("\(assetID) must use the strict 7x3 upright frame contract")
+    }
+    let frameCount = frame.yawDegrees.count * frame.pitchDegrees.count
+    guard cells.count == frameCount, frameCount == 21 else {
+        throw RenderError.render("\(assetID) must contain exactly 21 pitch-major cells")
+    }
+    guard supersample > 0 else {
+        throw RenderError.render("\(assetID) supersample must be positive")
+    }
+    guard pixelsPerWorldUnit.isFinite, pixelsPerWorldUnit > 0 else {
+        throw RenderError.render("\(assetID) pixelsPerWorldUnit must be finite and positive")
+    }
+    let atlasWidth = frame.width * frame.yawDegrees.count
+    let atlasHeight = frame.height * frame.pitchDegrees.count
+    guard atlasWidth == 2_240, atlasHeight == 960 else {
+        throw RenderError.render("\(assetID) upright atlas must be 2240x960")
+    }
+    let cellBytesPerRow = frame.width * 4
+    let atlasBytesPerRow = atlasWidth * 4
+    var atlasPixels = [UInt8](repeating: 0, count: atlasBytesPerRow * atlasHeight)
+    var records: [UprightFrameMetadata] = []
+    records.reserveCapacity(frameCount)
+
+    for (frameIndex, cell) in cells.enumerated() {
+        guard cell.pixels.count == cellBytesPerRow * frame.height else {
+            throw RenderError.render("\(assetID) frame \(frameIndex) has wrong cell dimensions")
+        }
+        guard cell.projectedOrigin.x.isFinite, cell.projectedOrigin.y.isFinite else {
+            throw RenderError.render("\(assetID) frame \(frameIndex) projected origin must be finite")
+        }
+        var normalized = cell.pixels
+        for pixelOffset in stride(from: 0, to: normalized.count, by: 4) {
+            let alpha = normalized[pixelOffset + 3]
+            if alpha == 0 {
+                normalized[pixelOffset] = 0
+                normalized[pixelOffset + 1] = 0
+                normalized[pixelOffset + 2] = 0
+            } else {
+                normalized[pixelOffset] = quantizedPremultipliedChannel(normalized[pixelOffset], alpha: alpha)
+                normalized[pixelOffset + 1] = quantizedPremultipliedChannel(
+                    normalized[pixelOffset + 1], alpha: alpha
+                )
+                normalized[pixelOffset + 2] = quantizedPremultipliedChannel(
+                    normalized[pixelOffset + 2], alpha: alpha
+                )
+            }
+        }
+        canonicalizeIsolatedOpaqueNoise(
+            &normalized,
+            width: frame.width,
+            height: frame.height,
+            bytesPerRow: cellBytesPerRow
+        )
+        try validateTransparentUprightCellPadding(
+            normalized,
+            width: frame.width,
+            height: frame.height,
+            assetID: assetID,
+            frameIndex: frameIndex
+        )
+        _ = try alphaBounds(
+            normalized,
+            width: frame.width,
+            height: frame.height,
+            bytesPerRow: cellBytesPerRow,
+            threshold: 16
+        )
+        let runtimeBounds = try alphaBounds(
+            normalized,
+            width: frame.width,
+            height: frame.height,
+            bytesPerRow: cellBytesPerRow,
+            threshold: 1
+        )
+        let column = frameIndex % frame.yawDegrees.count
+        let row = frameIndex / frame.yawDegrees.count
+        let cellOffsetX = column * frame.width
+        let cellOffsetY = row * frame.height
+        for cellY in 0..<frame.height {
+            let sourceStart = cellY * cellBytesPerRow
+            let destinationStart = (cellOffsetY + cellY) * atlasBytesPerRow + cellOffsetX * 4
+            atlasPixels.replaceSubrange(
+                destinationStart..<(destinationStart + cellBytesPerRow),
+                with: normalized[sourceStart..<(sourceStart + cellBytesPerRow)]
+            )
+        }
+
+        let localOriginX = cell.projectedOrigin.x / Double(supersample)
+        let topLeftY = Double(frame.height) - cell.projectedOrigin.y / Double(supersample)
+        let absoluteOrigin = PixelPoint(
+            x: roundedToSixPlaces(Double(cellOffsetX) + localOriginX),
+            y: roundedToSixPlaces(Double(cellOffsetY) + topLeftY)
+        )
+        records.append(UprightFrameMetadata(
+            source: PixelRect(
+                sx: cellOffsetX + runtimeBounds.minX,
+                sy: cellOffsetY + runtimeBounds.minY,
+                sw: runtimeBounds.width,
+                sh: runtimeBounds.height
+            ),
+            origin: absoluteOrigin
+        ))
+    }
+
+    let roundedBounds = WorldBoundsMetadata(
+        minX: roundedToSixPlaces(worldBounds.minX),
+        maxX: roundedToSixPlaces(worldBounds.maxX),
+        minY: roundedToSixPlaces(worldBounds.minY),
+        maxY: roundedToSixPlaces(worldBounds.maxY),
+        minZ: roundedToSixPlaces(worldBounds.minZ),
+        maxZ: roundedToSixPlaces(worldBounds.maxZ)
+    )
+    let metadata = UprightAtlasMetadata(
+        layout: "upright",
+        atlasWidth: atlasWidth,
+        atlasHeight: atlasHeight,
+        frameWidth: frame.width,
+        frameHeight: frame.height,
+        yawDegrees: frame.yawDegrees,
+        pitchDegrees: frame.pitchDegrees,
+        worldBounds: roundedBounds,
+        pixelsPerWorldUnit: roundedToSixPlaces(pixelsPerWorldUnit),
+        frames: records
+    )
+    try validateUprightAtlasMetadata(
+        metadata,
+        expectedWorldBounds: roundedBounds,
+        assetID: assetID
+    )
+    return UprightAtlasProduct(pixels: atlasPixels, metadata: metadata)
+}
+
+func encodePremultipliedPNG(
+    pixels sourcePixels: [UInt8],
+    width: Int,
+    height: Int,
+    assetID: String,
+    maxFileBytes: Int
+) throws -> Data {
+    let bytesPerRow = width * 4
+    guard width > 0,
+          height > 0,
+          sourcePixels.count == bytesPerRow * height else {
+        throw RenderError.write("Could not encode \(assetID).png with invalid geometry")
+    }
+    for index in stride(from: 0, to: sourcePixels.count, by: 4) {
+        let alpha = sourcePixels[index + 3]
+        if alpha == 0 {
+            guard sourcePixels[index] == 0,
+                  sourcePixels[index + 1] == 0,
+                  sourcePixels[index + 2] == 0 else {
+                throw RenderError.render("\(assetID) contains hidden RGB")
+            }
+        }
+        guard sourcePixels[index] <= alpha,
+              sourcePixels[index + 1] <= alpha,
+              sourcePixels[index + 2] <= alpha else {
+            throw RenderError.render("\(assetID) contains non-premultiplied color")
+        }
+    }
+    var pixels = sourcePixels
+    let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+    guard let context = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: bitmapInfo
+    ), let image = context.makeImage() else {
+        throw RenderError.write("Could not create atlas canvas for \(assetID)")
+    }
+    let bitmap = NSBitmapImageRep(cgImage: image)
+    guard bitmap.pixelsWide == width,
+          bitmap.pixelsHigh == height,
+          let png = bitmap.representation(using: .png, properties: [.compressionFactor: 1]) else {
+        throw RenderError.write("Could not encode \(assetID).png")
+    }
+    guard png.count <= maxFileBytes else {
+        throw RenderError.write("\(assetID).png exceeds \(maxFileBytes) bytes")
+    }
+    return png
+}
+
+private struct RendererReport: Encodable {
+    let rendererSha256: String
+    let sourceHashes: [String: String]
+    let outputHashes: [String: String]
+    let uprightAtlases: [String: UprightAtlasMetadata]
+}
+
+func deterministicJSON<T: Encodable>(_ value: T) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    do {
+        return try encoder.encode(value)
+    } catch {
+        throw RenderError.write("Could not encode deterministic JSON: \(error)")
+    }
+}
+
+func validateCanonicalUprightMetadataKeys(_ atlases: [String: UprightAtlasMetadata]) throws {
+    guard Set(atlases.keys) == Set(canonicalUprightIDs), atlases.count == canonicalUprightIDs.count else {
+        throw RenderError.validation("uprightAtlases must contain the twelve canonical IDs")
+    }
+}
+
+func encodeRendererReport(
+    rendererSha256: String,
+    sourceHashes: [String: String],
+    outputHashes: [String: String],
+    uprightAtlases: [String: UprightAtlasMetadata]
+) throws -> Data {
+    try validateCanonicalUprightMetadataKeys(uprightAtlases)
+    return try deterministicJSON(RendererReport(
+        rendererSha256: rendererSha256,
+        sourceHashes: sourceHashes,
+        outputHashes: outputHashes,
+        uprightAtlases: uprightAtlases
+    ))
+}
+
+func encodeUprightMetadataJavaScript(_ atlases: [String: UprightAtlasMetadata]) throws -> Data {
+    try validateCanonicalUprightMetadataKeys(atlases)
+    var lines = [
+        "const GENERATED_UPRIGHT_ATLAS_DATA = (() => {",
+        "  const deepFreeze = (value) => {",
+        "    if (value && typeof value === 'object' && !Object.isFrozen(value)) {",
+        "      for (const child of Object.values(value)) deepFreeze(child);",
+        "      Object.freeze(value);",
+        "    }",
+        "    return value;",
+        "  };",
+        "  return deepFreeze({",
+    ]
+    for (index, id) in canonicalUprightIDs.enumerated() {
+        guard let metadata = atlases[id] else {
+            throw RenderError.validation("Missing upright metadata for \(id)")
+        }
+        let encoded = try deterministicJSON(metadata)
+        guard let object = String(data: encoded, encoding: .utf8) else {
+            throw RenderError.write("Could not encode metadata JavaScript for \(id)")
+        }
+        let comma = index + 1 == canonicalUprightIDs.count ? "" : ","
+        lines.append("    \(String(reflecting: id)): \(object)\(comma)")
+    }
+    lines.append(contentsOf: [
+        "  });",
+        "})();",
+        "",
+    ])
+    return Data(lines.joined(separator: "\n").utf8)
+}
+
+func makeRoadEdgeAtlas(
     frames: [CGImage],
-    frame: FrameContract,
+    frame: RoadEdgeFrameContract,
     framing: FramingContract,
     assetID: String
 ) throws -> Data {
@@ -1085,45 +1891,143 @@ func makeAtlas(
     return png
 }
 
-func renderAll(arguments: Arguments, manifest: WorldManifest) throws -> [String: String] {
-    try FileManager.default.createDirectory(at: arguments.output, withIntermediateDirectories: true)
-    var hashes: [String: String] = [:]
-    var totalBytes = 0
+struct RenderAllResult {
+    let outputHashes: [String: String]
+    let uprightAtlases: [String: UprightAtlasMetadata]
+}
+
+private struct PreparedAtlas {
+    let id: String
+    let layout: String
+    let png: Data
+}
+
+func renderAll(arguments: Arguments, manifest: WorldManifest) throws -> RenderAllResult {
+    let uprightAssets = manifest.assets.filter { $0.layout == "upright" }
+    let roadEdgeAssets = manifest.assets.filter { $0.layout == "roadEdge" }
+    let uprightDecodedBytes = uprightAssets.count * 2_240 * 960 * 4
+    let roadEdgeDecodedBytes = roadEdgeAssets.count * 3_584 * 512 * 4
+    guard uprightDecodedBytes == 103_219_200,
+          uprightDecodedBytes <= manifest.budgets.upright.maxDecodedBytes else {
+        throw RenderError.write("Decoded upright atlases exceed the 112 MiB budget")
+    }
+    guard roadEdgeDecodedBytes <= manifest.budgets.roadEdge.maxDecodedBytes else {
+        throw RenderError.write("Decoded roadEdge atlases exceed their separate budget")
+    }
+
+    var prepared: [PreparedAtlas] = []
+    var uprightAtlases: [String: UprightAtlasMetadata] = [:]
     for asset in manifest.assets {
-        let png = try autoreleasepool {
-            let frames = try renderFrames(asset: asset, sourceRoot: arguments.sourceRoot, frame: manifest.frame)
-            guard let framing = manifest.framing[asset.category] else {
-                throw RenderError.validation("\(asset.id) has no canonical framing contract")
+        if asset.layout == "upright" {
+            guard let worldBounds = WORLD_BOUNDS[asset.category] else {
+                throw RenderError.validation("\(asset.id) has no upright world bounds")
             }
-            return try makeAtlas(frames: frames, frame: manifest.frame, framing: framing, assetID: asset.id)
+            let rendered: (Data, UprightAtlasMetadata) = try autoreleasepool {
+                let raw = try renderUprightCells(
+                    asset: asset,
+                    sourceRoot: arguments.sourceRoot,
+                    frame: manifest.frames.upright,
+                    worldBounds: worldBounds
+                )
+                let product = try makeUprightAtlas(
+                    cells: raw.cells,
+                    frame: manifest.frames.upright,
+                    worldBounds: worldBounds,
+                    pixelsPerWorldUnit: raw.pixelsPerWorldUnit,
+                    supersample: supersample,
+                    assetID: asset.id
+                )
+                try validateUprightAtlasMetadata(
+                    product.metadata,
+                    expectedWorldBounds: worldBounds,
+                    assetID: asset.id
+                )
+                let png = try encodePremultipliedPNG(
+                    pixels: product.pixels,
+                    width: product.metadata.atlasWidth,
+                    height: product.metadata.atlasHeight,
+                    assetID: asset.id,
+                    maxFileBytes: manifest.budgets.upright.maxFileBytes
+                )
+                return (png, product.metadata)
+            }
+            prepared.append(PreparedAtlas(id: asset.id, layout: asset.layout, png: rendered.0))
+            uprightAtlases[asset.id] = rendered.1
+        } else {
+            guard let framing = manifest.framing[asset.category] else {
+                throw RenderError.validation("\(asset.id) has no legacy roadEdge framing contract")
+            }
+            let png = try autoreleasepool {
+                let frames = try renderRoadEdgeFrames(
+                    asset: asset,
+                    sourceRoot: arguments.sourceRoot,
+                    frame: manifest.frames.roadEdge
+                )
+                return try makeRoadEdgeAtlas(
+                    frames: frames,
+                    frame: manifest.frames.roadEdge,
+                    framing: framing,
+                    assetID: asset.id
+                )
+            }
+            guard png.count <= manifest.budgets.roadEdge.maxFileBytes else {
+                throw RenderError.write("\(asset.id).png exceeds the roadEdge file budget")
+            }
+            prepared.append(PreparedAtlas(id: asset.id, layout: asset.layout, png: png))
         }
-        totalBytes += png.count
-        let outputURL = arguments.output.appendingPathComponent("\(asset.id).png")
+    }
+
+    try validateCanonicalUprightMetadataKeys(uprightAtlases)
+    let uprightCompressedBytes = prepared
+        .filter { $0.layout == "upright" }
+        .reduce(0) { $0 + $1.png.count }
+    let roadEdgeCompressedBytes = prepared
+        .filter { $0.layout == "roadEdge" }
+        .reduce(0) { $0 + $1.png.count }
+    guard uprightCompressedBytes <= manifest.budgets.upright.maxCombinedBytes else {
+        throw RenderError.write("Compressed upright atlases exceed the 30 MiB budget")
+    }
+    guard roadEdgeCompressedBytes <= manifest.budgets.roadEdge.maxCombinedBytes else {
+        throw RenderError.write("Compressed roadEdge atlases exceed their separate legacy total budget")
+    }
+
+    let metadataJavaScript = try encodeUprightMetadataJavaScript(uprightAtlases)
+    do {
+        try FileManager.default.createDirectory(at: arguments.output, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: arguments.metadataJS.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try metadataJavaScript.write(to: arguments.metadataJS, options: .atomic)
+    } catch {
+        throw RenderError.write("Could not write metadata JavaScript: \(error)")
+    }
+
+    var outputHashes: [String: String] = [:]
+    for atlas in prepared {
+        let outputURL = arguments.output.appendingPathComponent("\(atlas.id).png")
         do {
-            try png.write(to: outputURL, options: .atomic)
+            try atlas.png.write(to: outputURL, options: .atomic)
         } catch {
             throw RenderError.write("Could not write \(outputURL.path): \(error)")
         }
-        hashes["\(asset.id).png"] = sha256Hex(png)
+        outputHashes["\(atlas.id).png"] = sha256Hex(atlas.png)
     }
-    guard totalBytes <= 18 * 1024 * 1024 else {
-        throw RenderError.write("World atlases exceed 18 MiB in total")
-    }
-    return hashes
+    return RenderAllResult(outputHashes: outputHashes, uprightAtlases: uprightAtlases)
 }
 
 #if !WORLD_CANONICALIZER_TEST
 do {
     let arguments = try Arguments(CommandLine.arguments)
     let manifest = try loadAndValidateManifest(arguments: arguments)
-    let outputHashes = try renderAll(arguments: arguments, manifest: manifest)
+    let rendered = try renderAll(arguments: arguments, manifest: manifest)
     let rendererURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-    let result: [String: Any] = [
-        "rendererSha256": try sha256Hex(at: rendererURL),
-        "sourceHashes": manifest.sourceHashes,
-        "outputHashes": outputHashes,
-    ]
-    let encoded = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+    let encoded = try encodeRendererReport(
+        rendererSha256: try sha256Hex(at: rendererURL),
+        sourceHashes: manifest.sourceHashes,
+        outputHashes: rendered.outputHashes,
+        uprightAtlases: rendered.uprightAtlases
+    )
     guard let line = String(data: encoded, encoding: .utf8) else {
         throw RenderError.write("Could not encode renderer report")
     }

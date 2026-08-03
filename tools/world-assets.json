@@ -1,15 +1,38 @@
 {
-  "version": 2,
-  "frame": {
-    "width": 512,
-    "height": 512,
-    "yawDegrees": [-30, -20, -10, 0, 10, 20, 30]
+  "version": 3,
+  "frames": {
+    "upright": {
+      "width": 320,
+      "height": 320,
+      "yawDegrees": [-80, -55, -30, 0, 30, 55, 80],
+      "pitchDegrees": [20, 55, 80]
+    },
+    "roadEdge": {
+      "width": 512,
+      "height": 512,
+      "yawDegrees": [-30, -20, -10, 0, 10, 20, 30]
+    }
+  },
+  "budgets": {
+    "upright": {
+      "maxFileBytes": 3145728,
+      "maxCombinedBytes": 31457280,
+      "maxDecodedBytes": 117440512
+    },
+    "roadEdge": {
+      "maxFileBytes": 2097152,
+      "maxCombinedBytes": 18874368,
+      "maxDecodedBytes": 7340032
+    }
   },
   "geometry": {
-    "drone": { "worldWidth": 380, "worldHeight": 360, "baseY": 140 },
+    "drone": { "worldWidth": 432, "worldHeight": 360, "baseY": 140 },
     "turret": { "worldWidth": 489.6, "worldHeight": 1900, "baseY": 0, "weaponMountHeight": 1120 },
     "wallLow": { "worldWidth": 648, "worldHeight": 600, "baseY": 0 },
-    "wallHigh": { "worldWidth": 648, "worldHeight": 2000, "baseY": 0 }
+    "wallMedium": { "worldWidth": 648, "worldHeight": 1250, "baseY": 0 },
+    "wallHigh": { "worldWidth": 648, "worldHeight": 2000, "baseY": 0 },
+    "corridorLow": { "worldWidth": 648, "worldHeight": 600, "baseY": 0 },
+    "corridorMedium": { "worldWidth": 648, "worldHeight": 1250, "baseY": 0 }
   },
   "framing": {
     "drone": { "targetWidthRatio": 0.72, "targetHeightRatio": 0.64, "bottomPadding": 48 },
@@ -71,7 +94,7 @@
   },
   "assets": [
     {
-      "id": "drone-scout", "sourceFamily": "kenney-space-kit", "category": "drone",
+      "id": "drone-scout", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "drone",
       "components": [{
         "model": "space-kit/Models/OBJ format/craft_speederA.obj",
         "material": "space-kit/Models/OBJ format/craft_speederA.mtl",
@@ -80,7 +103,7 @@
       "hideNodes": []
     },
     {
-      "id": "drone-striker", "sourceFamily": "kenney-space-kit", "category": "drone",
+      "id": "drone-striker", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "drone",
       "components": [{
         "model": "space-kit/Models/OBJ format/craft_speederD.obj",
         "material": "space-kit/Models/OBJ format/craft_speederD.mtl",
@@ -89,7 +112,7 @@
       "hideNodes": []
     },
     {
-      "id": "turret-sentry", "sourceFamily": "kenney-space-kit", "category": "turret",
+      "id": "turret-sentry", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "turret",
       "components": [{
         "model": "space-kit/Models/OBJ format/turret_single.obj",
         "material": "space-kit/Models/OBJ format/turret_single.mtl",
@@ -98,7 +121,7 @@
       "hideNodes": ["turret"]
     },
     {
-      "id": "turret-heavy", "sourceFamily": "kenney-space-kit", "category": "turret",
+      "id": "turret-heavy", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "turret",
       "components": [{
         "model": "space-kit/Models/OBJ format/turret_double.obj",
         "material": "space-kit/Models/OBJ format/turret_double.mtl",
@@ -107,7 +130,7 @@
       "hideNodes": ["turret"]
     },
     {
-      "id": "barrier-rail", "sourceFamily": "kenney-space-kit", "category": "wallLow",
+      "id": "barrier-rail", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "wallLow",
       "components": [
         {
           "model": "space-kit/Models/OBJ format/barrels_rail.obj",
@@ -123,7 +146,7 @@
       "hideNodes": []
     },
     {
-      "id": "barrier-crate", "sourceFamily": "kenney-modular-space-kit", "category": "wallLow",
+      "id": "barrier-crate", "sourceFamily": "kenney-modular-space-kit", "layout": "upright", "category": "wallLow",
       "components": [
         {
           "model": "modular-space-kit/Models/OBJ format/gate-lasers.obj",
@@ -147,7 +170,52 @@
       "hideNodes": []
     },
     {
-      "id": "structure-reactor", "sourceFamily": "kenney-space-kit", "category": "wallHigh",
+      "id": "structure-pylon", "sourceFamily": "kenney-modular-space-kit", "layout": "upright", "category": "wallMedium",
+      "components": [
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.8, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/gate-lasers.obj",
+          "material": "modular-space-kit/Models/OBJ format/gate-lasers.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.74, "rotationDegrees": [0, 0, 0], "translation": [0, 0.78, 0]
+        }
+      ],
+      "hideNodes": []
+    },
+    {
+      "id": "structure-bastion", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "wallMedium",
+      "components": [
+        {
+          "model": "space-kit/Models/OBJ format/rocket_baseA.obj",
+          "material": "space-kit/Models/OBJ format/rocket_baseA.mtl",
+          "textures": [], "scale": 0.78, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
+        },
+        {
+          "model": "space-kit/Models/OBJ format/rocket_sidesA.obj",
+          "material": "space-kit/Models/OBJ format/rocket_sidesA.mtl",
+          "textures": [], "scale": 0.7, "rotationDegrees": [0, 0, 0], "translation": [-0.68, 0.62, 0]
+        },
+        {
+          "model": "space-kit/Models/OBJ format/rocket_sidesA.obj",
+          "material": "space-kit/Models/OBJ format/rocket_sidesA.mtl",
+          "textures": [], "scale": 0.7, "rotationDegrees": [0, 0, 0], "translation": [0.68, 0.62, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/gate-lasers.obj",
+          "material": "modular-space-kit/Models/OBJ format/gate-lasers.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.68, "rotationDegrees": [0, 0, 0], "translation": [0, 0.48, 0]
+        }
+      ],
+      "hideNodes": []
+    },
+    {
+      "id": "structure-reactor", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "wallHigh",
       "components": [
         { "model": "space-kit/Models/OBJ format/rocket_baseA.obj", "material": "space-kit/Models/OBJ format/rocket_baseA.mtl", "textures": [], "scale": 0.85, "rotationDegrees": [0, 0, 0], "translation": [-0.74, 0, 0] },
         { "model": "space-kit/Models/OBJ format/rocket_sidesA.obj", "material": "space-kit/Models/OBJ format/rocket_sidesA.mtl", "textures": [], "scale": 0.80, "rotationDegrees": [0, 0, 0], "translation": [-0.74, 0.72, 0] },
@@ -161,7 +229,7 @@
       "hideNodes": []
     },
     {
-      "id": "structure-tower", "sourceFamily": "kenney-modular-space-kit", "category": "wallHigh",
+      "id": "structure-tower", "sourceFamily": "kenney-modular-space-kit", "layout": "upright", "category": "wallHigh",
       "components": [
         {
           "model": "modular-space-kit/Models/OBJ format/room-large.obj",
@@ -203,7 +271,53 @@
       "hideNodes": []
     },
     {
-      "id": "gap-edge", "sourceFamily": "kenney-space-kit", "category": "gap",
+      "id": "corridor-low", "sourceFamily": "kenney-space-kit", "layout": "upright", "category": "corridorLow",
+      "components": [
+        {
+          "model": "space-kit/Models/OBJ format/barrels_rail.obj",
+          "material": "space-kit/Models/OBJ format/barrels_rail.mtl",
+          "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [-0.44, 0, 0]
+        },
+        {
+          "model": "space-kit/Models/OBJ format/barrels_rail.obj",
+          "material": "space-kit/Models/OBJ format/barrels_rail.mtl",
+          "textures": [], "scale": 0.72, "rotationDegrees": [0, 0, 0], "translation": [0.44, 0, 0]
+        }
+      ],
+      "hideNodes": [],
+      "generatedDetails": {
+        "plinthSize": [648, 36, 50],
+        "conduitSize": [36, 36, 50],
+        "conduitY": 540,
+        "cyanBandY": [390]
+      }
+    },
+    {
+      "id": "corridor-medium", "sourceFamily": "kenney-modular-space-kit", "layout": "upright", "category": "corridorMedium",
+      "components": [
+        {
+          "model": "modular-space-kit/Models/OBJ format/room-large.obj",
+          "material": "modular-space-kit/Models/OBJ format/room-large.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.78, "rotationDegrees": [0, 0, 0], "translation": [0, 0, 0]
+        },
+        {
+          "model": "modular-space-kit/Models/OBJ format/gate-lasers.obj",
+          "material": "modular-space-kit/Models/OBJ format/gate-lasers.mtl",
+          "textures": ["modular-space-kit/Models/OBJ format/Textures/colormap.png"],
+          "scale": 0.7, "rotationDegrees": [0, 0, 0], "translation": [0, 0.72, 0]
+        }
+      ],
+      "hideNodes": [],
+      "generatedDetails": {
+        "plinthSize": [648, 36, 50],
+        "conduitSize": [36, 36, 50],
+        "conduitY": 1120,
+        "cyanBandY": [460, 910]
+      }
+    },
+    {
+      "id": "gap-edge", "sourceFamily": "kenney-space-kit", "layout": "roadEdge", "category": "gap",
       "components": [
         {
           "model": "space-kit/Models/OBJ format/terrain_sideCliff.obj",
