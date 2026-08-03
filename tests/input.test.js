@@ -204,6 +204,8 @@ test('projectile at a floating position returns an integer wall lane', () => {
 test('enemy hitboxes overlap at the exact rendered-width boundaries', () => {
   assert.equal(hitboxHalfWidthForEnemy('drone'), 0.22);
   assert.equal(intervalsOverlap(3, 0.14, 3.36, 0.22), true);
+  assert.equal(intervalsOverlap(3, 0.14, 3.360001, 0.22), false);
   assert.equal(hitboxHalfWidthForEnemy('turret'), 0.26);
   assert.equal(intervalsOverlap(3, 0.14, 3.40, 0.26), true);
+  assert.equal(intervalsOverlap(3, 0.14, 3.400001, 0.26), false);
 });

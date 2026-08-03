@@ -235,6 +235,12 @@ test('release diagnostics expose complete preferred world atlas readiness', asyn
   assert.equal(Object.isFrozen(diagnostics.visualAssets.world), true);
 });
 
+test('drone direction telegraphs keep the exact reaction and movement windows', () => {
+  const { sandbox } = makeGameUiSandbox();
+  const timing = vm.runInContext('({ warn: CONFIG.DRONE_WARN_TIME, move: CONFIG.DRONE_MOVE_TIME })', sandbox);
+  assert.deepEqual({ ...timing }, { warn: 0.6, move: 0.4 });
+});
+
 function appUiTarget(elements, tagName = 'button') {
   const target = new FakeEventTarget(elements['app-ui'].ownerDocument, tagName);
   target.closest = (selector) => selector === '#app-ui' ? elements['app-ui'] : null;

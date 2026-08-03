@@ -838,11 +838,20 @@ function maybePlaceEnemy(lanes, gen, index, d, guaranteedLane) {
   const spots = laneIndices().filter(l => l !== guaranteedLane && lanes[l] === LANE_TYPE.ROAD);
   if (spots.length === 0) return null;
   const lane = spots[Math.floor(Math.random() * spots.length)];
+  const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
   if (d > 0.3 && Math.random() < 0.35) {
-    return { type: 'turret', lane: lane, phase: Math.random() * Math.PI * 2 };
+    return {
+      type: 'turret', lane: lane, spawnLane: lane,
+      visualVariant: worldArt && typeof worldArt.variantKey === 'function'
+        ? worldArt.variantKey('turret', index, lane) : null,
+      phase: Math.random() * Math.PI * 2,
+    };
   }
   return {
-    type: 'drone', lane: lane, phase: Math.random() * Math.PI * 2,
+    type: 'drone', lane: lane, spawnLane: lane,
+    visualVariant: worldArt && typeof worldArt.variantKey === 'function'
+      ? worldArt.variantKey('drone', index, lane) : null,
+    phase: Math.random() * Math.PI * 2,
     // 换道状态机：rest（停留 restT 秒）→ warn（预警，车道不动）→ move（平滑滑向 toLane）
     state: 'rest', fromLane: lane, toLane: lane,
     moveT: 1, warnT: 0, restT: 1 + Math.random() * 2.5,
@@ -1038,7 +1047,7 @@ function renderTrack(ctx) {
     }
     // 敌人（独立实体，不占 LANE_TYPE）：与障碍同遍按深度排序渲染
     if (seg.enemies) {
-      for (const e of seg.enemies) renderEnemy(ctx, e, i, zNear, zFar);
+      for (const e of seg.enemies) drawEnemy(ctx, e, i, zNear, zFar);
     }
   }
 }
@@ -1195,149 +1204,257 @@ function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
 }
 
 // ---- 敌人渲染（与 checkCollisions / advanceShots 共用 enemyLane() 连续位置）----
-// drone：紫/橙悬浮圆盘 + 4 叶旋转桨 + 悬浮 bob（高度 500，可跳过/空中射击击落）
-//   预警期（warn）：红/白急促闪烁 + 原地小幅抖动 + 向目标车道倾斜（预告移动方向）
-//   移动期（move）：平滑滑向相邻车道（enemyLane 插值）+ 侧倾
-// turret：暗紫重型炮塔（高度 1900，跳不过）+ 炮管朝玩家方向倾转 + 警示灯
-function renderEnemy(ctx, e, segIndex, zNear, zFar) {
-  const lane = enemyLane(e);
+// 图集负责机体；阴影、换道预警、炮管和炮口仍按世界坐标投影，因此素材降级不会改变玩法语义。
+function drawWorldAtlasSprite(ctx, atlasKey, placement) {
+  const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
+  const presentation = globalThis.Skyroads && globalThis.Skyroads.presentation;
+  if (!worldArt || !presentation || typeof presentation.resolveWorldAtlas !== 'function') return false;
+  const metadata = worldArt.WORLD_ATLAS_MANIFEST && worldArt.WORLD_ATLAS_MANIFEST[atlasKey];
+  const image = presentation.resolveWorldAtlas(STATE.visualAssets, atlasKey);
+  if (!metadata || !image || !placement || !placement.destination) return false;
+  const plan = worldArt.buildSpriteDrawPlan({ metadata, ...placement });
+  const destination = plan.destination;
+  if (destination.width < 1 || destination.height < 1
+    || destination.x + destination.width <= 0 || destination.x >= STATE.width
+    || destination.y + destination.height <= 0 || destination.y >= STATE.height) return true;
+
+  const rotation = Number.isFinite(placement.rotation) ? placement.rotation : 0;
+  const dx = rotation === 0 ? destination.x : -destination.width / 2;
+  const dy = rotation === 0 ? destination.y : -destination.height;
+  ctx.save();
+  try {
+    if (rotation !== 0) {
+      ctx.translate(destination.x + destination.width / 2, destination.y + destination.height);
+      ctx.rotate(rotation);
+    }
+    ctx.globalAlpha = Math.max(0, Math.min(1, plan.alpha * (1 - plan.mix)));
+    ctx.drawImage(image, plan.lower.sx, plan.lower.sy, plan.lower.sw, plan.lower.sh,
+      dx, dy, destination.width, destination.height);
+    if (plan.mix > 0) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, plan.alpha * plan.mix));
+      ctx.drawImage(image, plan.upper.sx, plan.upper.sy, plan.upper.sw, plan.upper.sh,
+        dx, dy, destination.width, destination.height);
+    }
+  } finally {
+    ctx.restore();
+  }
+  return true;
+}
+
+function enemySpriteDrawRect(worldArt, placement) {
+  if (worldArt && typeof worldArt.worldSpriteDrawRect === 'function') {
+    return worldArt.worldSpriteDrawRect({ projectPoint: project, ...placement });
+  }
+  const left = project(placement.worldX - placement.worldWidth / 2, placement.baseY, placement.zRel);
+  const right = project(placement.worldX + placement.worldWidth / 2, placement.baseY, placement.zRel);
+  const bottom = project(placement.worldX, placement.baseY, placement.zRel);
+  const top = project(placement.worldX, placement.baseY + placement.worldHeight, placement.zRel);
+  const width = Math.abs(right.x - left.x);
+  const height = Math.abs(bottom.y - top.y);
+  return { x: bottom.x - width / 2, y: bottom.y - height, width, height };
+}
+
+function drawDroneShadow(ctx, cx, zMid) {
+  const ground = project(cx, 0, zMid);
+  if (!ground.visible) return;
+  const unit = ground.scale * STATE.width / 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  ctx.beginPath();
+  ctx.ellipse(ground.x, ground.y, 150 * unit, 38 * unit, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawDroneDirectionCues(ctx, e, cx, zMid, destination) {
+  if (e.state !== 'warn') return;
+  const direction = Math.sign(e.toLane - e.fromLane);
+  if (direction === 0) return;
+  const landing = project(laneCenterX(e.toLane), 0, zMid);
+  const body = project(cx, CONFIG.DRONE_HEIGHT + 90, zMid);
+  if (!landing.visible || !body.visible) return;
+  const unit = landing.scale * STATE.width / 2;
+  const pulse = canvasPulse(0.62, 0.28, 14, e.phase);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, pulse));
+  ctx.strokeStyle = '#ff6b83';
+  ctx.lineWidth = Math.max(1.5, 16 * unit);
+  ctx.beginPath();
+  ctx.ellipse(landing.x, landing.y, Math.max(4, 105 * unit), Math.max(2, 30 * unit), 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const size = Math.max(5, Math.min(18, destination.width * 0.32));
+  const anchorX = body.x + direction * Math.max(size, destination.width * 0.6);
+  const anchorY = destination.y + destination.height * 0.28;
+  ctx.fillStyle = '#fff4f7';
+  ctx.beginPath();
+  ctx.moveTo(anchorX + direction * size, anchorY);
+  ctx.lineTo(anchorX - direction * size * 0.55, anchorY - size * 0.72);
+  ctx.lineTo(anchorX - direction * size * 0.55, anchorY + size * 0.72);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawProceduralDrone(ctx, e, { cx, zMid, animationTime, bob, tiltDir }) {
+  const warn = e.state === 'warn';
+  const p = project(cx, 300 + bob, zMid);
+  if (!p.visible) return;
+  const unit = p.scale * STATE.width / 2;
+  const radius = Math.max(2, 190 * unit);
+  const jx = warn ? Math.sin(animationTime * 47 + e.phase) * 0.06 * radius : 0;
+  const jy = warn ? Math.sin(animationTime * 39 + e.phase * 1.7) * 0.04 * radius : 0;
+  ctx.save();
+  ctx.translate(p.x + jx, p.y + jy);
+  ctx.rotate(tiltDir * (warn ? 0.30 : 0.18));
+  const angle = animationTime * 18 + e.phase;
+  ctx.strokeStyle = 'rgba(220,200,255,0.75)';
+  ctx.lineWidth = Math.max(1, radius * 0.09);
+  ctx.beginPath();
+  for (let k = 0; k < 4; k++) {
+    const blade = angle + k * Math.PI / 2;
+    ctx.moveTo(0, -radius * 0.42);
+    ctx.lineTo(Math.cos(blade) * radius * 1.25, -radius * 0.42 + Math.sin(blade) * radius * 0.30);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#3a2a5a';
+  ctx.beginPath(); ctx.arc(0, -radius * 0.42, radius * 0.16, 0, Math.PI * 2); ctx.fill();
+  const hull = ctx.createLinearGradient(0, -radius * 0.5, 0, radius * 0.5);
+  hull.addColorStop(0, '#a06ae0'); hull.addColorStop(0.55, '#6a3aa8'); hull.addColorStop(1, '#3a1f66');
+  ctx.fillStyle = hull;
+  ctx.beginPath(); ctx.ellipse(0, 0, radius, radius * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(230,210,255,0.7)';
+  ctx.lineWidth = 1.2; ctx.stroke();
+  const coreAlpha = 0.6 + 0.4 * Math.sin(animationTime * 5 + e.phase);
+  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 0.42);
+  core.addColorStop(0, 'rgba(255,170,70,' + (0.95 * coreAlpha).toFixed(3) + ')');
+  core.addColorStop(1, 'rgba(255,120,40,0)');
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.arc(0, 0, radius * 0.42, 0, Math.PI * 2); ctx.fill();
+  if (warn) {
+    const flash = canvasPulse(0.5, 0.5, 20, e.phase);
+    ctx.fillStyle = 'rgba(255,50,55,' + (0.40 * flash).toFixed(3) + ')';
+    ctx.beginPath(); ctx.ellipse(0, 0, radius, radius * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,245,245,' + (0.9 * flash).toFixed(3) + ')';
+    ctx.lineWidth = Math.max(1.5, radius * 0.06);
+    ctx.beginPath(); ctx.ellipse(0, 0, radius * 1.05, radius * 0.47, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function turretProjection(lane, zNear, zFar) {
+  const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
+  const halfRoad = CONFIG.ROAD_WIDTH / 2;
+  const inBottom = laneWidth * 0.16;
+  const inTop = laneWidth * 0.30;
+  const xLb = -halfRoad + lane * laneWidth + inBottom;
+  const xRb = -halfRoad + (lane + 1) * laneWidth - inBottom;
+  const xLt = -halfRoad + lane * laneWidth + inTop;
+  const xRt = -halfRoad + (lane + 1) * laneWidth - inTop;
+  const height = CONFIG.TURRET_HEIGHT;
+  return {
+    xLt, xRt, height,
+    b1: project(xLb, 0, zNear), b2: project(xRb, 0, zNear),
+    b3: project(xRb, 0, zFar), b4: project(xLb, 0, zFar),
+    t1: project(xLt, height, zNear), t2: project(xRt, height, zNear),
+    t3: project(xRt, height, zFar), t4: project(xLt, height, zFar),
+  };
+}
+
+function drawTurretFootprint(ctx, shape) {
+  if (!shape.b1.visible || !shape.b2.visible || !shape.b3.visible || !shape.b4.visible) return;
+  ctx.fillStyle = 'rgba(0,0,0,0.34)';
+  quad(ctx, shape.b1, shape.b2, shape.b3, shape.b4); ctx.fill();
+}
+
+function drawProceduralTurret(ctx, shape) {
+  const { b1, b2, b3, b4, t1, t2, t3, t4 } = shape;
+  if (!b1.visible || !t1.visible || !t3.visible) return;
+  if (b3.visible) {
+    ctx.fillStyle = '#1c0f2e';
+    quad(ctx, b2, b3, t3, t2); ctx.fill();
+    quad(ctx, b1, b4, t4, t1); ctx.fill();
+  }
+  ctx.fillStyle = '#4a2a6a'; quad(ctx, t1, t2, t3, t4); ctx.fill();
+  ctx.fillStyle = '#2e1a4a'; quad(ctx, b1, b2, t2, t1); ctx.fill();
+  ctx.strokeStyle = 'rgba(150,90,200,0.55)';
+  ctx.lineWidth = Math.max(1, (b2.x - b1.x) * 0.03);
+  ctx.beginPath();
+  for (const fraction of [0.3, 0.7]) {
+    ctx.moveTo(b1.x + (b2.x - b1.x) * fraction, b1.y + (b2.y - b1.y) * fraction);
+    ctx.lineTo(t1.x + (t2.x - t1.x) * fraction, t1.y + (t2.y - t1.y) * fraction);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(190,120,240,0.6)';
+  ctx.lineWidth = 1.5; quad(ctx, b1, b2, t2, t1); ctx.stroke();
+}
+
+function drawTurretWeapon(ctx, e, cx, shape, animationTime, zNear) {
+  const mount = project((shape.xLt + shape.xRt) / 2, shape.height, zNear);
+  if (!mount.visible) return;
+  const unit = mount.scale * STATE.width / 2;
+  const direction = Math.sign(playerWorldX() - cx) || 1;
+  const tilt = direction * 0.55;
+  const barrelLength = 340 * unit;
+  const muzzleX = mount.x + Math.sin(tilt) * barrelLength;
+  const muzzleY = mount.y - Math.cos(tilt) * barrelLength * 0.5;
+  ctx.strokeStyle = '#120a20';
+  ctx.lineWidth = Math.max(2, 70 * unit);
+  ctx.beginPath(); ctx.moveTo(mount.x, mount.y); ctx.lineTo(muzzleX, muzzleY); ctx.stroke();
+  ctx.strokeStyle = '#5a3a80';
+  ctx.lineWidth = Math.max(1, 40 * unit);
+  ctx.beginPath(); ctx.moveTo(mount.x, mount.y); ctx.lineTo(muzzleX, muzzleY); ctx.stroke();
+  const blink = 0.5 + 0.5 * Math.sin(animationTime * 9 + e.phase);
+  ctx.fillStyle = 'rgba(255,60,70,' + (0.35 + 0.6 * blink).toFixed(3) + ')';
+  ctx.beginPath(); ctx.arc(muzzleX, muzzleY, Math.max(1.5, 40 * unit), 0, Math.PI * 2); ctx.fill();
+}
+
+function drawEnemy(ctx, e, segIndex, zNear, zFar) {
+  const lane = enemyLane(e); // 单帧只求值一次：渲染、提示与碰撞共享同一连续车道。
   const cx = laneCenterX(lane);
   const zMid = (zNear + zFar) / 2;
   const animationTime = visualAnimationTime();
+  const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
+
   if (e.type === 'drone') {
-    const warn = e.state === 'warn';
+    const warning = e.state === 'warn';
     const moving = e.state === 'move';
-    const tiltDir = (warn || moving) ? Math.sign(e.toLane - e.fromLane) : 0;
+    const direction = (warning || moving) ? Math.sign(e.toLane - e.fromLane) : 0;
     const bob = Math.sin(animationTime * 2.2 + e.phase) * 40;
-    const yC = 300 + bob;                          // 圆盘中心高度（顶部 ≈ 500）
-    // 地面投影
-    const g = project(cx, 0, zMid);
-    if (g.visible) {
-      const gu = g.scale * STATE.width / 2;
-      ctx.fillStyle = 'rgba(0,0,0,0.30)';
-      ctx.beginPath();
-      ctx.ellipse(g.x, g.y, 150 * gu, 38 * gu, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    const p = project(cx, yC, zMid);
-    if (!p.visible) return;
-    const u = p.scale * STATE.width / 2;
-    const R = Math.max(2, 190 * u);
-    // 预警原地抖动（确定性高频 sin 小幅偏移，禁随机）
-    const jx = warn ? Math.sin(animationTime * 47 + e.phase) * 0.06 * R : 0;
-    const jy = warn ? Math.sin(animationTime * 39 + e.phase * 1.7) * 0.04 * R : 0;
-    ctx.save();
-    ctx.translate(p.x + jx, p.y + jy);
-    ctx.rotate(tiltDir * (warn ? 0.30 : 0.18));    // 向目标车道方向倾斜
-    // 旋转桨叶（4 叶，ang = time×18 + phase，确定性高速旋转）
-    const ang = animationTime * 18 + e.phase;
-    ctx.strokeStyle = 'rgba(220,200,255,0.75)';
-    ctx.lineWidth = Math.max(1, R * 0.09);
-    ctx.beginPath();
-    for (let k = 0; k < 4; k++) {
-      const a = ang + k * Math.PI / 2;
-      ctx.moveTo(0, -R * 0.42);
-      ctx.lineTo(Math.cos(a) * R * 1.25, -R * 0.42 + Math.sin(a) * R * 0.30);
-    }
-    ctx.stroke();
-    // 桨毂
-    ctx.fillStyle = '#3a2a5a';
-    ctx.beginPath(); ctx.arc(0, -R * 0.42, R * 0.16, 0, Math.PI * 2); ctx.fill();
-    // 圆盘机体（紫色金属渐变）
-    const hull = ctx.createLinearGradient(0, -R * 0.5, 0, R * 0.5);
-    hull.addColorStop(0, '#a06ae0');
-    hull.addColorStop(0.55, '#6a3aa8');
-    hull.addColorStop(1, '#3a1f66');
-    ctx.fillStyle = hull;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, R, R * 0.42, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(230,210,255,0.7)';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    // 橙色能量核心（呼吸辉光）
-    const coreA = 0.6 + 0.4 * Math.sin(animationTime * 5 + e.phase);
-    const core = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.42);
-    core.addColorStop(0, 'rgba(255,170,70,' + (0.95 * coreA).toFixed(3) + ')');
-    core.addColorStop(1, 'rgba(255,120,40,0)');
-    ctx.fillStyle = core;
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.42, 0, Math.PI * 2); ctx.fill();
-    // 预警闪烁：红光罩 + 白闪描边（sin×20 急促闪烁，一眼可读"它要动了"）
-    if (warn) {
-      const fl = 0.5 + 0.5 * Math.sin(animationTime * 20 + e.phase);
-      ctx.fillStyle = 'rgba(255,50,55,' + (0.40 * fl).toFixed(3) + ')';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, R, R * 0.42, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,245,245,' + (0.9 * fl).toFixed(3) + ')';
-      ctx.lineWidth = Math.max(1.5, R * 0.06);
-      ctx.beginPath();
-      ctx.ellipse(0, 0, R * 1.05, R * 0.47, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.restore();
-  } else {
-    // turret：暗紫重型炮塔（收分柱体 + 顶部炮座 + 追踪炮管 + 警示灯）
-    const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
-    const halfRoad = CONFIG.ROAD_WIDTH / 2;
-    const inB = laneWidth * 0.16, inT = laneWidth * 0.30;
-    const xLb = -halfRoad + lane * laneWidth + inB;
-    const xRb = -halfRoad + (lane + 1) * laneWidth - inB;
-    const xLt = -halfRoad + lane * laneWidth + inT;
-    const xRt = -halfRoad + (lane + 1) * laneWidth - inT;
-    const H = CONFIG.TURRET_HEIGHT;
-    const b1 = project(xLb, 0, zNear), b2 = project(xRb, 0, zNear);
-    const t1 = project(xLt, H, zNear), t2 = project(xRt, H, zNear);
-    const t3 = project(xRt, H, zFar),  t4 = project(xLt, H, zFar);
-    const b3 = project(xRb, 0, zFar),  b4 = project(xLb, 0, zFar);
-    if (!b1.visible || !t1.visible || !t3.visible) return;
-    if (b3.visible) {                              // 侧面（深暗紫）
-      ctx.fillStyle = '#1c0f2e';
-      quad(ctx, b2, b3, t3, t2); ctx.fill();
-      quad(ctx, b1, b4, t4, t1); ctx.fill();
-    }
-    ctx.fillStyle = '#4a2a6a';                     // 顶面
-    quad(ctx, t1, t2, t3, t4); ctx.fill();
-    ctx.fillStyle = '#2e1a4a';                     // 正面（暗紫梯形）
-    quad(ctx, b1, b2, t2, t1); ctx.fill();
-    ctx.strokeStyle = 'rgba(150,90,200,0.55)';     // 装甲棱线
-    ctx.lineWidth = Math.max(1, (b2.x - b1.x) * 0.03);
-    ctx.beginPath();
-    for (const f of [0.3, 0.7]) {
-      ctx.moveTo(b1.x + (b2.x - b1.x) * f, b1.y + (b2.y - b1.y) * f);
-      ctx.lineTo(t1.x + (t2.x - t1.x) * f, t1.y + (t2.y - t1.y) * f);
-    }
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(190,120,240,0.6)';     // 外轮廓亮边
-    ctx.lineWidth = 1.5;
-    quad(ctx, b1, b2, t2, t1); ctx.stroke();
-    // 炮管：自塔顶炮座朝玩家车道方向倾转（追踪感）
-    const xm = (xLt + xRt) / 2;
-    const mount = project(xm, H, zNear);
-    if (mount.visible) {
-      const mu = mount.scale * STATE.width / 2;
-      const dir = Math.sign(playerWorldX() - cx) || 1;
-      const tilt = dir * 0.55;                     // 朝玩家侧倾
-      const bl = 340 * mu;                         // 炮管长
-      ctx.strokeStyle = '#120a20';
-      ctx.lineWidth = Math.max(2, 70 * mu);
-      ctx.beginPath();
-      ctx.moveTo(mount.x, mount.y);
-      ctx.lineTo(mount.x + Math.sin(tilt) * bl, mount.y - Math.cos(tilt) * bl * 0.5);
-      ctx.stroke();
-      ctx.strokeStyle = '#5a3a80';
-      ctx.lineWidth = Math.max(1, 40 * mu);
-      ctx.beginPath();
-      ctx.moveTo(mount.x, mount.y);
-      ctx.lineTo(mount.x + Math.sin(tilt) * bl, mount.y - Math.cos(tilt) * bl * 0.5);
-      ctx.stroke();
-      // 炮口警示灯（急促红闪 = 危险）
-      const blink = 0.5 + 0.5 * Math.sin(animationTime * 9 + e.phase);
-      const mx = mount.x + Math.sin(tilt) * bl, my = mount.y - Math.cos(tilt) * bl * 0.5;
-      ctx.fillStyle = 'rgba(255,60,70,' + (0.35 + 0.6 * blink).toFixed(3) + ')';
-      ctx.beginPath(); ctx.arc(mx, my, Math.max(1.5, 40 * mu), 0, Math.PI * 2); ctx.fill();
-    }
+    const geometry = worldArt && worldArt.WORLD_GEOMETRY
+      ? worldArt.WORLD_GEOMETRY.drone
+      : { worldWidth: 380, worldHeight: CONFIG.DRONE_HEIGHT - 140, baseY: 140 };
+    const destination = enemySpriteDrawRect(worldArt, {
+      worldX: cx, zRel: zMid, worldWidth: geometry.worldWidth, worldHeight: geometry.worldHeight,
+      baseY: geometry.baseY + bob,
+    });
+    drawDroneShadow(ctx, cx, zMid);
+    const drawn = drawWorldAtlasSprite(ctx, e.visualVariant, {
+      worldX: cx, zRel: zMid, destination, alpha: 1,
+      rotation: direction * (warning ? 0.30 : (moving ? 0.18 : 0)),
+    });
+    if (!drawn) drawProceduralDrone(ctx, e, { cx, zMid, animationTime, bob, tiltDir: direction });
+    drawDroneDirectionCues(ctx, e, cx, zMid, destination);
+    return;
   }
+
+  const geometry = worldArt && worldArt.WORLD_GEOMETRY
+    ? worldArt.WORLD_GEOMETRY.turret
+    : { worldWidth: (CONFIG.ROAD_WIDTH / CONFIG.LANES) * 0.68, worldHeight: CONFIG.TURRET_HEIGHT, baseY: 0 };
+  const shape = turretProjection(lane, zNear, zFar);
+  drawTurretFootprint(ctx, shape);
+  const destination = enemySpriteDrawRect(worldArt, {
+    worldX: cx, zRel: zMid,
+    worldWidth: geometry.worldWidth, worldHeight: CONFIG.TURRET_HEIGHT, baseY: geometry.baseY,
+  });
+  const drawn = drawWorldAtlasSprite(ctx, e.visualVariant, {
+    worldX: cx, zRel: zMid, destination, alpha: 1,
+  });
+  if (!drawn) drawProceduralTurret(ctx, shape);
+  drawTurretWeapon(ctx, e, cx, shape, animationTime, zNear);
+}
+
+// Compatibility entry point for older diagnostics and local test harnesses.
+function renderEnemy(ctx, e, segIndex, zNear, zFar) {
+  return drawEnemy(ctx, e, segIndex, zNear, zFar);
 }
 
 // ---- 弹道渲染：子弹 = 青白曳光短束；导弹 = 小型火箭 + 橙焰 + 尾烟 ----
