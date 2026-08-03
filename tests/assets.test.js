@@ -22,7 +22,7 @@ const WORLD_ATLAS_IDS = [
   'gap-edge',
 ];
 const WORLD_ATLAS_PATHS = WORLD_ATLAS_IDS.map((id) => `assets/world/${id}.png`);
-const WORLD_RENDERER_SHA256 = '9096815858ca5450baaef09d08a2bf5d4eba37d648d28209bee05521e1045259';
+const WORLD_RENDERER_SHA256 = '6215a2e3c61a35e3cba1bb0b2a3af10b2073a4ea5eb287ce230126b0984ef6f0';
 const WORLD_OUTPUT_HASHES = {
   'assets/world/drone-scout.png': '069bb170fb605de78c924ab8983c09e1eddd2899a20ea794fa6c0ebc9b0e3bc1',
   'assets/world/drone-striker.png': 'a4f775132ad64e15ac472f4939e3b818c46fcee0757e6a32174131c5ee13a872',
@@ -328,8 +328,8 @@ test('the world manifest freezes the audited free OBJ recipes and seven-view geo
   assert.deepEqual(manifest.geometry, {
     drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
     turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0 },
-    wallLow: { worldWidth: 576, worldHeight: 600, baseY: 0 },
-    wallHigh: { worldWidth: 576, worldHeight: 2000, baseY: 0 },
+    wallLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
+    wallHigh: { worldWidth: 648, worldHeight: 2000, baseY: 0 },
   });
   assert.deepEqual(manifest.upstream.map(({ id, uploadId, archiveFilename, archiveSha256 }) => ({
     id, uploadId, archiveFilename, archiveSha256,

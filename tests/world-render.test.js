@@ -439,7 +439,7 @@ test('loaded low and high wall variants use exact perspective geometry and deter
     assert.equal(calls[0].image, expectedImage);
     assert.equal(calls[0].args[0], expectedSourceX);
     assert.deepEqual(calls[0].args.slice(1, 4), [0, 512, 512]);
-    assert.ok(Math.abs(calls[0].args[6] - scale * 576 * 960 / 2) < 1e-10);
+    assert.ok(Math.abs(calls[0].args[6] - scale * 648 * 960 / 2) < 1e-10);
     assert.ok(Math.abs(calls[0].args[7] - scale * worldHeight * 600 / 2) < 1e-10);
     const laneWorldX = (lane - 3) * 720;
     assert.ok(Math.abs(bottomCenter(calls[0]).x - (480 + scale * laneWorldX * 480)) < 1e-10);

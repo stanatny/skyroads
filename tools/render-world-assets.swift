@@ -22,8 +22,8 @@ struct GeometryDimensions: Decodable, Equatable {
 let WORLD_GEOMETRY: [String: GeometryDimensions] = [
     "drone": GeometryDimensions(worldWidth: 380, worldHeight: 360, baseY: 140),
     "turret": GeometryDimensions(worldWidth: 489.6, worldHeight: 1900, baseY: 0),
-    "wallLow": GeometryDimensions(worldWidth: 576, worldHeight: 600, baseY: 0),
-    "wallHigh": GeometryDimensions(worldWidth: 576, worldHeight: 2000, baseY: 0),
+    "wallLow": GeometryDimensions(worldWidth: 648, worldHeight: 600, baseY: 0),
+    "wallHigh": GeometryDimensions(worldWidth: 648, worldHeight: 2000, baseY: 0),
 ]
 
 struct UpstreamRecord: Decodable {

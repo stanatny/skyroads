@@ -43,8 +43,8 @@ test('the atlas manifest and geometry are the frozen seven-view contract', () =>
   assert.deepEqual(WORLD_GEOMETRY, {
     drone: { worldWidth: 380, worldHeight: 360, baseY: 140 },
     turret: { worldWidth: 489.6, worldHeight: 1900, baseY: 0 },
-    wallLow: { worldWidth: 576, worldHeight: 600, baseY: 0 },
-    wallHigh: { worldWidth: 576, worldHeight: 2000, baseY: 0 },
+    wallLow: { worldWidth: 648, worldHeight: 600, baseY: 0 },
+    wallHigh: { worldWidth: 648, worldHeight: 2000, baseY: 0 },
   });
   for (const value of [YAW_DEGREES, WORLD_ATLAS_MANIFEST, WORLD_GEOMETRY, ...Object.values(WORLD_ATLAS_MANIFEST), ...Object.values(WORLD_GEOMETRY)]) {
     assert.equal(Object.isFrozen(value), true);

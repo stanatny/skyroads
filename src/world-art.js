@@ -22,8 +22,8 @@
   const WORLD_GEOMETRY = Object.freeze({
     drone: Object.freeze({ worldWidth: 380, worldHeight: 360, baseY: 140 }),
     turret: Object.freeze({ worldWidth: 489.6, worldHeight: 1900, baseY: 0 }),
-    wallLow: Object.freeze({ worldWidth: 576, worldHeight: 600, baseY: 0 }),
-    wallHigh: Object.freeze({ worldWidth: 576, worldHeight: 2000, baseY: 0 }),
+    wallLow: Object.freeze({ worldWidth: 648, worldHeight: 600, baseY: 0 }),
+    wallHigh: Object.freeze({ worldWidth: 648, worldHeight: 2000, baseY: 0 }),
   });
 
   function selectYawBlend({ worldX = 0, zRel = 1 } = {}) {

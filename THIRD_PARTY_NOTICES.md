@@ -68,7 +68,7 @@ The repository's project license applies only to original project code and artwo
   - `assets/world/turret-sentry.png` — SHA-256 `5642f2a677179923fac523bdc63b1c41430799d6e79e4b9c2a444d62a6b09ba2`
   - `assets/world/turret-heavy.png` — SHA-256 `63912cd7406faee52cb27a0dd96e8f6f0c12341695f4d04f470b9a28674d134f`
   - `assets/world/barrier-rail.png` — SHA-256 `ec28a7233c5c1e17e6c2307491397ce1e022b857e9dac640bab18d33e16b65fc`
-- Modifications: the audited models and textures were normalized, assembled where declared in the manifest, recolored and lit with the common hostile palette, and rendered into seven-view transparent atlases. Renderer SHA-256: `9096815858ca5450baaef09d08a2bf5d4eba37d648d28209bee05521e1045259`. See `docs/assets/world-art.md`.
+- Modifications: the audited models and textures were normalized, assembled where declared in the manifest, recolored and lit with the common hostile palette, and rendered into seven-view transparent atlases. Renderer SHA-256: `6215a2e3c61a35e3cba1bb0b2a3af10b2073a4ea5eb287ce230126b0984ef6f0`. See `docs/assets/world-art.md`.
 
 ## KayKit — Space Base Bits Free
 
@@ -92,7 +92,7 @@ The repository's project license applies only to original project code and artwo
   - `assets/world/structure-reactor.png` — SHA-256 `1495fffeb812f561d23be5c89fc603de3598c2990df9a04c1013e547673762cd`
   - `assets/world/structure-tower.png` — SHA-256 `44dd46fddc6a04a220550cc9c9a699eae501e758bdf8d7cdc727f6eb2c50e25c`
   - `assets/world/gap-edge.png` — SHA-256 `72d469cdac888c4dbde50f3a45823dc8cc0367a722ae92ee8ceced0a89ed5900`
-- Modifications: the audited models and texture atlas were normalized, recolored and lit with the common hostile palette, and rendered into seven-view transparent atlases. The gap edge is one short modular unit for runtime repetition. Renderer SHA-256: `9096815858ca5450baaef09d08a2bf5d4eba37d648d28209bee05521e1045259`. See `docs/assets/world-art.md`.
+- Modifications: the audited models and texture atlas were normalized, recolored and lit with the common hostile palette, and rendered into seven-view transparent atlases. The gap edge is one short modular unit for runtime repetition. Renderer SHA-256: `6215a2e3c61a35e3cba1bb0b2a3af10b2073a4ea5eb287ce230126b0984ef6f0`. See `docs/assets/world-art.md`.
 
 ## Kenney — UI Pack: Sci-Fi 2.0
 
