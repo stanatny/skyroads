@@ -23,6 +23,8 @@ const {
 
 const {
   OBSTACLE_HEIGHTS,
+  nominalSpeed,
+  selectRunLength,
   wallHeight,
   isWallType,
 } = globalThis.Skyroads.obstacles;
@@ -627,6 +629,18 @@ const LANE_TYPE = {
   MAGNET: 'MAGNET',          // 红白马蹄磁铁：MAGNET_DURATION(8)s 吸附 ±2 车道燃料
 };
 
+const RUN_TUNING = Object.freeze({
+  minIndex: 100,
+  chanceBase: 0.08,
+  chanceDifficulty: 0.08,
+  mediumRatioBase: 0.35,
+  mediumRatioDifficulty: 0.30,
+  approachSegments: 10,
+  landingSegments: 10,
+  mediumApproachSegments: 10,
+  highApproachSegments: 15,
+});
+
 // 全部车道索引 [0..LANES-1]（消除任何针对 3 车道的硬编码）
 function laneIndices() {
   const a = [];
@@ -643,6 +657,15 @@ function newGenState() {
     gapRun: 0,               // 已连续全缺口的段数（0 = 不在全缺口中）
     bridgeLeft: 0,           // 当前窄桥还剩几段（0 = 不在窄桥中）
     bridgeLane: midLane(),   // 窄桥的桥车道
+    runLane: -1,
+    runType: null,
+    runLeft: 0,
+    runLength: 0,
+    runIndex: 0,
+    runId: null,
+    landingLane: -1,
+    landingLeft: 0,
+    clearStreak: new Array(CONFIG.LANES).fill(0),
     sinceFuel: 0,            // 距上次放置燃料的段数
     sincePickup: 0,          // 距上次放置道具的段数
     pickupCycle: 0,          // 道具轮换指针（BOOST→SLOW→TRIPLE→AMMO 循环）
@@ -658,20 +681,75 @@ function placeFuel(lanes, lane) {
   if (lanes[lane] === LANE_TYPE.ROAD) lanes[lane] = LANE_TYPE.FUEL;
 }
 
-// 簇内非保证车道的随机填充：WALL_LOW / WALL_HIGH / GAP / ROAD
+function wallTypeForApproach(gen, lane, d, tierRoll = Math.random()) {
+  const highRatio = 0.15 + 0.45 * d;
+  const mediumRatio = 0.25 + 0.25 * d;
+  if (gen.clearStreak[lane] >= RUN_TUNING.highApproachSegments && tierRoll < highRatio) {
+    return LANE_TYPE.WALL_HIGH;
+  }
+  if (
+    gen.clearStreak[lane] >= RUN_TUNING.mediumApproachSegments
+    && tierRoll < highRatio + mediumRatio
+  ) {
+    return LANE_TYPE.WALL_MEDIUM;
+  }
+  return LANE_TYPE.WALL_LOW;
+}
+
+// 簇内非保证车道的随机填充：WALL_LOW / WALL_MEDIUM / WALL_HIGH / GAP / ROAD
 // 障碍密度与高塔占比随难度 d 提升（低难度多为可跳过的矮墙）
-function fillClusterLanes(lanes, clusterLane, d) {
+function fillClusterLanes(lanes, gen, clusterLane, d) {
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     if (lane === clusterLane) continue;
     const r = Math.random();
     if (r < 0.30 + 0.35 * d) {                  // 墙的总概率
-      const highRatio = 0.15 + 0.45 * d;        // 其中高塔占比
-      lanes[lane] = Math.random() < highRatio ? LANE_TYPE.WALL_HIGH : LANE_TYPE.WALL_LOW;
+      lanes[lane] = wallTypeForApproach(gen, lane, d);
     } else if (r < 0.45 + 0.45 * d) {           // GAP 概率 = 0.15 + 0.10d
       lanes[lane] = LANE_TYPE.GAP;
     }
     // 否则保持 ROAD
   }
+}
+
+function finalizeGeneratedSegment(gen, segment) {
+  const enemyLanes = new Set((segment.enemies || []).map((enemy) => Math.round(enemy.lane)));
+  for (let lane = 0; lane < CONFIG.LANES; lane++) {
+    const type = segment.lanes[lane];
+    const clear = type !== LANE_TYPE.GAP
+      && !isWallType(type)
+      && !enemyLanes.has(lane);
+    gen.clearStreak[lane] = clear ? gen.clearStreak[lane] + 1 : 0;
+  }
+  return segment;
+}
+
+function emitRunSegment(index, gen) {
+  const lanes = new Array(CONFIG.LANES).fill(LANE_TYPE.ROAD);
+  const runIndex = gen.runIndex;
+  lanes[gen.runLane] = gen.runType;
+  const segment = {
+    index,
+    lanes,
+    corridor: {
+      id: gen.runId,
+      lane: gen.runLane,
+      type: gen.runType,
+      index: runIndex,
+      length: gen.runLength,
+    },
+  };
+  gen.runIndex++;
+  gen.runLeft--;
+  if (gen.runLeft === 0) {
+    gen.landingLane = gen.runLane;
+    gen.landingLeft = RUN_TUNING.landingSegments;
+    gen.runLane = -1;
+    gen.runType = null;
+    gen.runLength = 0;
+    gen.runIndex = 0;
+    gen.runId = null;
+  }
+  return finalizeGeneratedSegment(gen, segment);
 }
 
 // 生成单个 segment，依据生成器状态推进状态机
@@ -685,14 +763,17 @@ function generateSegment(index, gen) {
       lanes[Math.floor(Math.random() * CONFIG.LANES)] = LANE_TYPE.FUEL;
       gen.sinceFuel = 0;
     }
-    return { index, lanes };
+    return finalizeGeneratedSegment(gen, { index, lanes });
   }
 
   // ④a 全缺口挑战进行中：继续或着陆
   if (gen.gapRun > 0) {
     if (gen.gapRun < CONFIG.MAX_GAP_RUN && Math.random() < 0.5) {
       gen.gapRun++;
-      return { index, lanes: new Array(CONFIG.LANES).fill(LANE_TYPE.GAP) };
+      return finalizeGeneratedSegment(gen, {
+        index,
+        lanes: new Array(CONFIG.LANES).fill(LANE_TYPE.GAP),
+      });
     }
     // 着陆段：全 ROAD + 送一枚燃料（奖励 + 保证续航）
     gen.gapRun = 0;
@@ -713,7 +794,7 @@ function generateSegment(index, gen) {
     lanes[gen.safeLane] = LANE_TYPE.FUEL;
     gen.sinceFuel = 0;
     maybePlacePickup(lanes, gen, index);
-    return { index, lanes };
+    return finalizeGeneratedSegment(gen, { index, lanes });
   }
 
   // ⑥a 窄桥进行中：仅桥车道为路面，其余车道全 GAP（悬崖边的独木桥）
@@ -725,12 +806,26 @@ function generateSegment(index, gen) {
     if (gen.bridgeLeft === 0) gen.cooldown = CONFIG.REACTION_SEGS;  // 桥后缓冲
     maybePlaceFuel(lanes, gen, gen.bridgeLane);
     maybePlacePickup(lanes, gen, index);
-    return { index, lanes };
+    return finalizeGeneratedSegment(gen, { index, lanes });
+  }
+
+  if (gen.runLeft > 0) {
+    return emitRunSegment(index, gen);
+  }
+
+  if (gen.landingLeft > 0) {
+    gen.sinceFuel++;
+    if (gen.sinceFuel >= CONFIG.FUEL_FORCE_EVERY) {
+      placeFuel(lanes, gen.safeLane);
+      gen.sinceFuel = 0;
+    }
+    gen.landingLeft--;
+    return finalizeGeneratedSegment(gen, { index, lanes });
   }
 
   // ② 障碍簇进行中：clusterLane 保持畅通
   if (gen.clusterLeft > 0) {
-    fillClusterLanes(lanes, gen.clusterLane, d);
+    fillClusterLanes(lanes, gen, gen.clusterLane, d);
     gen.clusterLeft--;
     if (gen.clusterLeft === 0) {
       gen.safeLane = gen.clusterLane;
@@ -741,7 +836,7 @@ function generateSegment(index, gen) {
     const segC = { index, lanes };
     const enC = maybePlaceEnemy(lanes, gen, index, d, gen.clusterLane);  // 避开簇保证车道
     if (enC) segC.enemies = [enC];
-    return segC;
+    return finalizeGeneratedSegment(gen, segC);
   }
 
   // ③ 缓冲段：全路面，偶有可规避的单车道缺口/墙（不堵保证车道）
@@ -753,8 +848,7 @@ function generateSegment(index, gen) {
       if (Math.random() < 0.5) {
         lanes[lane] = LANE_TYPE.GAP;
       } else {
-        // 高难度下缓冲段也偶见高塔（单车道，变道即可规避）
-        lanes[lane] = (d > 0.5 && Math.random() < 0.35) ? LANE_TYPE.WALL_HIGH : LANE_TYPE.WALL_LOW;
+        lanes[lane] = wallTypeForApproach(gen, lane, d);
       }
     }
     maybePlaceFuel(lanes, gen, gen.safeLane);
@@ -762,14 +856,17 @@ function generateSegment(index, gen) {
     const segB = { index, lanes };
     const enB = maybePlaceEnemy(lanes, gen, index, d, gen.safeLane);  // 避开缓冲保证车道
     if (enB) segB.enemies = [enB];
-    return segB;
+    return finalizeGeneratedSegment(gen, segB);
   }
 
   // ③→② 缓冲结束，开启新挑战
   if (index >= CONFIG.FULL_GAP_MIN_INDEX && d > 0.15 && Math.random() < 0.10 + 0.12 * d) {
     // ④b 全缺口跳跃挑战（前一段是缓冲路面，玩家有起跳反应窗口）
     gen.gapRun = 1;
-    return { index, lanes: new Array(CONFIG.LANES).fill(LANE_TYPE.GAP) };
+    return finalizeGeneratedSegment(gen, {
+      index,
+      lanes: new Array(CONFIG.LANES).fill(LANE_TYPE.GAP),
+    });
   }
   // ⑥b 窄桥挑战：2~5 段独木桥（仅桥车道为路面，其余全 GAP）。
   //   红线：桥车道与当前 safeLane 差 ≤ 1（可达链）；桥只会在缓冲结束后出现，
@@ -793,7 +890,24 @@ function generateSegment(index, gen) {
     if (gen.bridgeLeft === 0) gen.cooldown = CONFIG.REACTION_SEGS;
     maybePlaceFuel(lanes, gen, gen.bridgeLane);
     maybePlacePickup(lanes, gen, index);
-    return { index, lanes };
+    return finalizeGeneratedSegment(gen, { index, lanes });
+  }
+  const runCandidates = laneIndices().filter((lane) =>
+    lane !== gen.safeLane
+    && gen.clearStreak[lane] >= RUN_TUNING.approachSegments
+  );
+  const runChance = RUN_TUNING.chanceBase + RUN_TUNING.chanceDifficulty * d;
+  if (index >= RUN_TUNING.minIndex && runCandidates.length > 0 && Math.random() < runChance) {
+    gen.runLane = runCandidates[Math.floor(Math.random() * runCandidates.length)];
+    const mediumRatio = RUN_TUNING.mediumRatioBase + RUN_TUNING.mediumRatioDifficulty * d;
+    gen.runType = Math.random() < mediumRatio
+      ? LANE_TYPE.WALL_MEDIUM
+      : LANE_TYPE.WALL_LOW;
+    gen.runLength = selectRunLength(gen.runType, nominalSpeed(index), Math.random());
+    gen.runLeft = gen.runLength;
+    gen.runIndex = 0;
+    gen.runId = index;
+    return emitRunSegment(index, gen);
   }
   // 新障碍簇：保证车道与当前车道差 ≤ 1（③可达性）
   const options = [gen.safeLane - 1, gen.safeLane, gen.safeLane + 1]
@@ -801,7 +915,7 @@ function generateSegment(index, gen) {
   gen.clusterLane = options[Math.floor(Math.random() * options.length)];
   gen.clusterLeft = 1 + (Math.random() < 0.3 + 0.4 * d ? 1 : 0)
                       + (d > 0.6 && Math.random() < 0.3 ? 1 : 0); // 1~3 段
-  fillClusterLanes(lanes, gen.clusterLane, d);
+  fillClusterLanes(lanes, gen, gen.clusterLane, d);
   gen.clusterLeft--;
   if (gen.clusterLeft === 0) {
     gen.safeLane = gen.clusterLane;
@@ -812,7 +926,7 @@ function generateSegment(index, gen) {
   const segN = { index, lanes };
   const enN = maybePlaceEnemy(lanes, gen, index, d, gen.clusterLane);  // 避开簇保证车道
   if (enN) segN.enemies = [enN];
-  return segN;
+  return finalizeGeneratedSegment(gen, segN);
 }
 
 // ⑤ 燃料布置：在保证车道上优先；随机补充（第六轮概率 0.10→0.06，燃料不再泛滥）

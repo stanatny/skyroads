@@ -48,6 +48,8 @@ test('nominal speeds and run bounds match the approved table', () => {
     assert.deepEqual(Object.values(runLengthBounds('WALL_MEDIUM', speed)), medium);
     assert.equal(selectRunLength('WALL_LOW', speed, 0), low[0]);
     assert.equal(selectRunLength('WALL_LOW', speed, 0.999), Math.min(low[0] + 1, low[1]));
+    assert.equal(selectRunLength('WALL_MEDIUM', speed, 0), medium[0]);
+    assert.equal(selectRunLength('WALL_MEDIUM', speed, 0.999), Math.min(medium[0] + 1, medium[1]));
   }
 });
 

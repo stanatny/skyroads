@@ -37,6 +37,7 @@ function createGameLogicHarness() {
   const gameSource = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
   vm.runInContext(gameSource, sandbox, { filename: 'src/game.js' });
   vm.runInContext(`
+    globalThis.__generatorApi = { newGenState, generateSegment, LANE_TYPE };
     globalThis.__deaths = [];
     die = (reason) => { __deaths.push(reason); };
     shotBurstFx = () => {};
@@ -473,6 +474,324 @@ test('full gaps cap at three and bridge runs remain two to five segments on a re
   assert.deepEqual(result.cappedGapCounts, [7, 0]);
   assert.ok(result.leftLanding >= 0 && result.leftLanding <= 2);
   assert.ok(result.rightLanding >= 4 && result.rightLanding <= 6);
+});
+
+test('connected low and medium corridors preserve one safe lane and ten clear landing segments', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const { newGenState, generateSegment, LANE_TYPE } = __generatorApi;
+    const withRandom = (values, callback) => {
+      const previous = Math.random;
+      let cursor = 0;
+      Math.random = () => cursor < values.length ? values[cursor++] : 1;
+      try { return callback(); } finally { Math.random = previous; }
+    };
+    const generateRun = (typeRoll, lengthRoll) => withRandom(
+      [0, 0.4, typeRoll, lengthRoll],
+      () => {
+        const gen = newGenState();
+        gen.safeLane = 3;
+        gen.clearStreak = new Array(7).fill(15);
+        const segments = [generateSegment(100, gen)];
+        while (gen.runLeft > 0) {
+          segments.push(generateSegment(100 + segments.length, gen));
+        }
+        gen.sinceFuel = 75;
+        const landing = [];
+        while (gen.landingLeft > 0) {
+          landing.push(generateSegment(100 + segments.length + landing.length, gen));
+        }
+        return { safeLane: 3, segments, landing, state: gen };
+      },
+    );
+    return JSON.stringify({
+      initialState: newGenState(),
+      low: generateRun(0.99, 0),
+      medium: generateRun(0, 0.999),
+    });
+  })()`, sandbox));
+
+  assert.deepEqual({
+    runLane: result.initialState.runLane,
+    runType: result.initialState.runType,
+    runLeft: result.initialState.runLeft,
+    runLength: result.initialState.runLength,
+    runIndex: result.initialState.runIndex,
+    runId: result.initialState.runId,
+    landingLane: result.initialState.landingLane,
+    landingLeft: result.initialState.landingLeft,
+    clearStreak: result.initialState.clearStreak,
+  }, {
+    runLane: -1,
+    runType: null,
+    runLeft: 0,
+    runLength: 0,
+    runIndex: 0,
+    runId: null,
+    landingLane: -1,
+    landingLeft: 0,
+    clearStreak: [0, 0, 0, 0, 0, 0, 0],
+  });
+
+  const pickups = new Set(['FUEL', 'BOOST', 'SLOW', 'TRIPLE', 'MAGNET']);
+  const ordinary = (type) => type === 'ROAD' || pickups.has(type);
+  for (const [kind, expectedType, expectedLength] of [
+    [result.low, 'WALL_LOW', 5],
+    [result.medium, 'WALL_MEDIUM', 7],
+  ]) {
+    assert.equal(kind.segments.length, expectedLength);
+    const runLane = kind.segments[0].corridor.lane;
+    assert.notEqual(runLane, kind.safeLane);
+    for (let index = 0; index < kind.segments.length; index++) {
+      const segment = kind.segments[index];
+      assert.deepEqual(segment.corridor, {
+        id: 100,
+        lane: runLane,
+        type: expectedType,
+        index,
+        length: expectedLength,
+      });
+      assert.equal(segment.lanes[runLane], expectedType);
+      assert.ok(ordinary(segment.lanes[kind.safeLane]));
+      assert.notEqual(segment.lanes[runLane], 'GAP');
+      assert.equal(pickups.has(segment.lanes[runLane]), false);
+      assert.equal((segment.enemies || []).some((enemy) => Math.round(enemy.lane) === runLane), false);
+    }
+    assert.equal(kind.landing.length, 10);
+    for (const segment of kind.landing) {
+      assert.equal(segment.lanes[runLane], 'ROAD');
+      assert.equal((segment.enemies || []).some((enemy) => Math.round(enemy.lane) === runLane), false);
+    }
+    assert.equal(kind.landing[0].lanes[kind.safeLane], 'FUEL');
+    assert.equal(kind.state.landingLane, runLane);
+    assert.equal(kind.state.landingLeft, 0);
+  }
+});
+
+test('short medium and high buildings require their same-lane clear approaches in clusters and cooldowns', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const { newGenState, generateSegment } = __generatorApi;
+    const withRandom = (values, callback) => {
+      const previous = Math.random;
+      let cursor = 0;
+      Math.random = () => cursor < values.length ? values[cursor++] : 1;
+      try { return callback(); } finally { Math.random = previous; }
+    };
+    const clusterWall = (approach, tierRoll) => {
+      const gen = newGenState();
+      gen.clusterLeft = 1;
+      gen.clusterLane = 3;
+      gen.clearStreak = new Array(7).fill(15);
+      gen.clearStreak[0] = approach;
+      return withRandom([0, tierRoll], () => generateSegment(2024, gen)).lanes[0];
+    };
+    const cooldownWall = (approach, tierRoll) => {
+      const gen = newGenState();
+      gen.safeLane = 3;
+      gen.cooldown = 1;
+      gen.clearStreak = new Array(7).fill(15);
+      gen.clearStreak[0] = approach;
+      return withRandom([0, 0, 0.9, tierRoll], () => generateSegment(2024, gen)).lanes[0];
+    };
+    const highBypass = (() => {
+      const gen = newGenState();
+      gen.safeLane = 3;
+      gen.cooldown = 1;
+      gen.clearStreak = new Array(7).fill(15);
+      return withRandom([0, 0, 0.9, 0], () => {
+        const segment = generateSegment(2024, gen);
+        return {
+          high: segment.lanes[0],
+          safe: segment.lanes[3],
+          enemies: segment.enemies || [],
+        };
+      });
+    })();
+    return JSON.stringify({
+      cluster: [
+        clusterWall(9, 0.7),
+        clusterWall(10, 0.7),
+        clusterWall(14, 0),
+        clusterWall(15, 0),
+      ],
+      cooldown: [
+        cooldownWall(9, 0.7),
+        cooldownWall(10, 0.7),
+        cooldownWall(14, 0),
+        cooldownWall(15, 0),
+      ],
+      highBypass,
+    });
+  })()`, sandbox));
+
+  assert.deepEqual(result.cluster, ['WALL_LOW', 'WALL_MEDIUM', 'WALL_MEDIUM', 'WALL_HIGH']);
+  assert.deepEqual(result.cooldown, ['WALL_LOW', 'WALL_MEDIUM', 'WALL_MEDIUM', 'WALL_HIGH']);
+  assert.equal(result.highBypass.high, 'WALL_HIGH');
+  assert.equal(result.highBypass.safe, 'ROAD');
+  assert.equal(result.highBypass.enemies.some((enemy) => Math.round(enemy.lane) === 3), false);
+});
+
+test('a corridor attempt with no eligible non-safe lane falls back to the existing cluster path', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const { newGenState, generateSegment } = __generatorApi;
+    const previous = Math.random;
+    const values = [0.5, 1, 1, 1, 1, 1, 1, 1, 1];
+    let cursor = 0;
+    Math.random = () => cursor < values.length ? values[cursor++] : 1;
+    try {
+      const gen = newGenState();
+      gen.safeLane = 3;
+      gen.clearStreak = [0, 0, 0, 15, 0, 0, 0];
+      const segment = generateSegment(100, gen);
+      return JSON.stringify({
+        corridor: segment.corridor || null,
+        clusterLane: gen.clusterLane,
+        clusterTile: segment.lanes[gen.clusterLane],
+        cooldown: gen.cooldown,
+      });
+    } finally {
+      Math.random = previous;
+    }
+  })()`, sandbox));
+
+  assert.equal(result.corridor, null);
+  assert.ok(Math.abs(result.clusterLane - 3) <= 1);
+  assert.equal(result.clusterTile, 'ROAD');
+  assert.equal(result.cooldown, 8);
+});
+
+test('seeded 20000-segment generation preserves corridor approaches, landings, and full-gap reachability', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const { newGenState, generateSegment } = __generatorApi;
+    const segmentCount = 20000;
+    const lookahead = 10;
+    const gen = newGenState();
+    let seed = 0x5eedc0de;
+    const previous = Math.random;
+    Math.random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+    const records = [];
+    try {
+      for (let index = 0; index < segmentCount + lookahead; index++) {
+        const before = {
+          safeLane: gen.safeLane,
+          gapRun: gen.gapRun,
+          bridgeLeft: gen.bridgeLeft,
+          clusterLeft: gen.clusterLeft,
+          clusterLane: gen.clusterLane,
+          cooldown: gen.cooldown,
+          runLeft: gen.runLeft,
+          landingLeft: gen.landingLeft,
+        };
+        const segment = generateSegment(index, gen);
+        const fullGap = segment.lanes.every((type) => type === 'GAP');
+        let guaranteedLane = gen.safeLane;
+        if (before.bridgeLeft > 0 || gen.bridgeLeft > 0) guaranteedLane = gen.bridgeLane;
+        else if (before.clusterLeft > 0) guaranteedLane = before.clusterLane;
+        else if (
+          !fullGap
+          && !segment.corridor
+          && before.gapRun === 0
+          && before.cooldown === 0
+          && before.runLeft === 0
+          && before.landingLeft === 0
+        ) guaranteedLane = gen.clusterLane;
+        records.push({
+          lanes: segment.lanes,
+          enemies: segment.enemies || [],
+          corridor: segment.corridor || null,
+          fullGap,
+          guaranteedLane,
+          safeLaneBefore: before.safeLane,
+          safeLaneAfter: gen.safeLane,
+        });
+      }
+    } finally {
+      Math.random = previous;
+    }
+    return JSON.stringify({ segmentCount, records });
+  })()`, sandbox));
+
+  const isClear = (segment, lane) => {
+    const type = segment.lanes[lane];
+    return type !== 'GAP'
+      && !type.startsWith('WALL_')
+      && !segment.enemies.some((enemy) => Math.round(enemy.lane) === lane);
+  };
+
+  let corridorCount = 0;
+  let fullGapCount = 0;
+  let longestFullGapRun = 0;
+  for (let index = 0; index < result.segmentCount; index++) {
+    const record = result.records[index];
+    if (!record.fullGap) {
+      assert.ok(
+        isClear(record, record.guaranteedLane),
+        'ordinary safe lane blocked at ' + index + ': ' + JSON.stringify(record),
+      );
+    }
+
+    if (record.corridor) {
+      corridorCount++;
+      const corridor = record.corridor;
+      assert.equal(record.lanes[corridor.lane], corridor.type);
+      assert.ok(corridor.lane >= 0 && corridor.lane < 7);
+      assert.equal(corridor.lane === record.guaranteedLane, false);
+      assert.ok(isClear(record, record.guaranteedLane));
+      if (corridor.index === 0) {
+        for (let offset = 1; offset <= 10; offset++) {
+          assert.ok(isClear(result.records[index - offset], corridor.lane), 'corridor approach blocked at ' + index);
+        }
+        for (let offset = 0; offset < corridor.length; offset++) {
+          const tile = result.records[index + offset];
+          assert.deepEqual(tile.corridor, {
+            id: corridor.id,
+            lane: corridor.lane,
+            type: corridor.type,
+            index: offset,
+            length: corridor.length,
+          });
+          assert.equal(tile.lanes[corridor.lane], corridor.type);
+        }
+        for (let offset = 1; offset <= 10; offset++) {
+          const landing = result.records[index + corridor.length - 1 + offset];
+          assert.ok(isClear(landing, corridor.lane), 'corridor landing blocked at ' + index);
+        }
+      }
+    }
+
+    if (!record.corridor) {
+      for (let lane = 0; lane < 7; lane++) {
+        const type = record.lanes[lane];
+        const approach = type === 'WALL_HIGH' ? 15 : type === 'WALL_MEDIUM' ? 10 : 0;
+        for (let offset = 1; offset <= approach; offset++) {
+          assert.ok(isClear(result.records[index - offset], lane), type + ' approach blocked at ' + index);
+        }
+      }
+    }
+
+    if (record.fullGap && (index === 0 || !result.records[index - 1].fullGap)) {
+      let length = 0;
+      while (result.records[index + length].fullGap) {
+        assert.equal(result.records[index + length].lanes.filter((type) => type === 'GAP').length, 7);
+        length++;
+      }
+      fullGapCount += length;
+      longestFullGapRun = Math.max(longestFullGapRun, length);
+      const landing = result.records[index + length];
+      assert.ok(Math.abs(landing.safeLaneAfter - record.safeLaneBefore) <= 2);
+      assert.ok(isClear(landing, landing.safeLaneAfter));
+    }
+  }
+
+  assert.ok(corridorCount > 0);
+  assert.ok(fullGapCount > 0);
+  assert.ok(longestFullGapRun <= 3);
 });
 
 test('ordinary bullets use each wall tier strict height rule', () => {
