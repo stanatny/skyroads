@@ -161,50 +161,102 @@
     return true;
   }
 
+  function hasOwnProperties(value, keys) {
+    return value
+      && typeof value === 'object'
+      && keys.every((key) => hasOwn(value, key));
+  }
+
   function finiteBounds(bounds) {
+    const keys = ['minX', 'maxX', 'minY', 'maxY', 'minZ', 'maxZ'];
     return bounds
       && typeof bounds === 'object'
-      && ['minX', 'maxX', 'minY', 'maxY', 'minZ', 'maxZ'].every((key) => isFiniteNumber(bounds[key]))
+      && hasOwnProperties(bounds, keys)
+      && keys.every((key) => isFiniteNumber(bounds[key]))
       && bounds.maxX > bounds.minX
       && bounds.maxY > bounds.minY
       && bounds.maxZ > bounds.minZ;
   }
 
+  const metadataValidationCache = new WeakMap();
+
+  function isRecursivelyFrozen(value, seen = new Set()) {
+    if (!value || typeof value !== 'object') return true;
+    if (seen.has(value)) return true;
+    if (!Object.isFrozen(value)) return false;
+    seen.add(value);
+    return Reflect.ownKeys(value).every((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      return descriptor
+        && hasOwn(descriptor, 'value')
+        && isRecursivelyFrozen(descriptor.value, seen);
+    });
+  }
+
+  function validateRoadEdgeMetadata(metadata) {
+    return hasOwnProperties(metadata, [
+      'layout', 'atlasWidth', 'atlasHeight', 'frameWidth', 'frameHeight', 'yawDegrees', 'frames',
+    ])
+      && metadata.layout === 'roadEdge'
+      && metadata.atlasWidth === 3584
+      && metadata.atlasHeight === 512
+      && metadata.frameWidth === 512
+      && metadata.frameHeight === 512
+      && sameNumbers(metadata.yawDegrees, LEGACY_YAW_DEGREES)
+      && metadata.frames === LEGACY_YAW_DEGREES.length;
+  }
+
+  function validateUprightMetadata(metadata) {
+    if (!hasOwnProperties(metadata, [
+      'layout', 'atlasWidth', 'atlasHeight', 'frameWidth', 'frameHeight',
+      'yawDegrees', 'pitchDegrees', 'detailFrontZ', 'worldBounds', 'pixelsPerWorldUnit', 'frames',
+    ])
+      || metadata.layout !== 'upright'
+      || metadata.atlasWidth !== 2240
+      || metadata.atlasHeight !== 960
+      || metadata.frameWidth !== 320
+      || metadata.frameHeight !== 320
+      || !sameNumbers(metadata.yawDegrees, YAW_DEGREES)
+      || !sameNumbers(metadata.pitchDegrees, PITCH_DEGREES)
+      || !isFiniteNumber(metadata.detailFrontZ)
+      || metadata.detailFrontZ <= 0
+      || !finiteBounds(metadata.worldBounds)
+      || !isFiniteNumber(metadata.pixelsPerWorldUnit)
+      || metadata.pixelsPerWorldUnit <= 0
+      || !Array.isArray(metadata.frames)
+      || metadata.frames.length !== YAW_DEGREES.length * PITCH_DEGREES.length) return false;
+
+    for (let index = 0; index < metadata.frames.length; index += 1) {
+      if (!hasOwn(metadata.frames, index)) return false;
+      const frame = metadata.frames[index];
+      if (!frame || typeof frame !== 'object'
+        || !hasOwnProperties(frame, ['source', 'origin'])
+        || !hasOwnProperties(frame.source, ['sx', 'sy', 'sw', 'sh'])
+        || !hasOwnProperties(frame.origin, ['x', 'y'])) return false;
+      const { sx, sy, sw, sh } = frame.source;
+      if (![sx, sy, sw, sh].every(Number.isInteger)) return false;
+      if (sw <= 0 || sh <= 0 || sx < 0 || sy < 0) return false;
+      if (sx + sw > metadata.atlasWidth || sy + sh > metadata.atlasHeight) return false;
+      const column = index % YAW_DEGREES.length;
+      const row = Math.floor(index / YAW_DEGREES.length);
+      const cellMinX = column * metadata.frameWidth;
+      const cellMinY = row * metadata.frameHeight;
+      if (sx < cellMinX || sx + sw > cellMinX + metadata.frameWidth
+        || sy < cellMinY || sy + sh > cellMinY + metadata.frameHeight) return false;
+      if (!isFiniteNumber(frame.origin.x) || !isFiniteNumber(frame.origin.y)) return false;
+    }
+    return true;
+  }
+
   function validateAtlasMetadata(metadata) {
     try {
       if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
-      if (metadata.layout !== 'upright'
-        || metadata.atlasWidth !== 2240
-        || metadata.atlasHeight !== 960
-        || metadata.frameWidth !== 320
-        || metadata.frameHeight !== 320
-        || !sameNumbers(metadata.yawDegrees, YAW_DEGREES)
-        || !sameNumbers(metadata.pitchDegrees, PITCH_DEGREES)
-        || !isFiniteNumber(metadata.detailFrontZ)
-        || metadata.detailFrontZ <= 0
-        || !finiteBounds(metadata.worldBounds)
-        || !isFiniteNumber(metadata.pixelsPerWorldUnit)
-        || metadata.pixelsPerWorldUnit <= 0
-        || !Array.isArray(metadata.frames)
-        || metadata.frames.length !== YAW_DEGREES.length * PITCH_DEGREES.length) return false;
-
-      for (let index = 0; index < metadata.frames.length; index += 1) {
-        if (!hasOwn(metadata.frames, index)) return false;
-        const frame = metadata.frames[index];
-        if (!frame || typeof frame !== 'object' || !frame.source || !frame.origin) return false;
-        const { sx, sy, sw, sh } = frame.source;
-        if (![sx, sy, sw, sh].every(Number.isInteger)) return false;
-        if (sw <= 0 || sh <= 0 || sx < 0 || sy < 0) return false;
-        if (sx + sw > metadata.atlasWidth || sy + sh > metadata.atlasHeight) return false;
-        const column = index % YAW_DEGREES.length;
-        const row = Math.floor(index / YAW_DEGREES.length);
-        const cellMinX = column * metadata.frameWidth;
-        const cellMinY = row * metadata.frameHeight;
-        if (sx < cellMinX || sx + sw > cellMinX + metadata.frameWidth
-          || sy < cellMinY || sy + sh > cellMinY + metadata.frameHeight) return false;
-        if (!isFiniteNumber(frame.origin.x) || !isFiniteNumber(frame.origin.y)) return false;
-      }
-      return true;
+      if (metadataValidationCache.has(metadata)) return metadataValidationCache.get(metadata);
+      const valid = metadata.layout === 'upright'
+        ? validateUprightMetadata(metadata)
+        : validateRoadEdgeMetadata(metadata);
+      if (isRecursivelyFrozen(metadata)) metadataValidationCache.set(metadata, valid);
+      return valid;
     } catch (_error) {
       return false;
     }
@@ -357,7 +409,7 @@
       return buildUprightDrawPlan(options);
     }
     if (metadata && metadata.layout === 'roadEdge') {
-      if (!destination || typeof destination !== 'object') return null;
+      if (!validateAtlasMetadata(metadata) || !destination || typeof destination !== 'object') return null;
       return legacySpriteDrawPlan(options);
     }
     if (!metadata || metadata.layout != null || !destination || typeof destination !== 'object') return null;
@@ -365,15 +417,8 @@
   }
 
   function roadEdgeFrame(metadata) {
-    if (!metadata || metadata.layout !== 'roadEdge') return null;
-    if (Array.isArray(metadata.frames) && metadata.frames.length > 0) {
-      const frame = metadata.frames[Math.floor(metadata.frames.length / 2)];
-      return frozenSource(frame && (frame.source || frame));
-    }
-    if (Number.isInteger(metadata.frames) && metadata.frames > 0) {
-      return atlasFrameRect(metadata, Math.floor(metadata.frames / 2));
-    }
-    return null;
+    if (!validateAtlasMetadata(metadata) || metadata.layout !== 'roadEdge') return null;
+    return atlasFrameRect(metadata, Math.floor(metadata.frames / 2));
   }
 
   function worldSpriteDrawRect({ projectPoint, worldX, zRel, worldWidth, worldHeight, baseY = 0 }) {

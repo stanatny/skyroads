@@ -27,6 +27,7 @@ const {
   selectRunLength,
   wallHeight,
   isWallType,
+  corridorModulePhase,
 } = globalThis.Skyroads.obstacles;
 
 // ============================================================
@@ -1187,7 +1188,10 @@ function drawTessellatedGapEdges(ctx, gapCorners, atlasKey, maxInterval = 48) {
   const image = presentation && typeof presentation.resolveWorldAtlas === 'function'
     ? presentation.resolveWorldAtlas(STATE.visualAssets, atlasKey)
     : null;
-  if (!worldArt || !metadata || !image) return false;
+  const source = worldArt && typeof worldArt.roadEdgeFrame === 'function'
+    ? worldArt.roadEdgeFrame(metadata)
+    : null;
+  if (!worldArt || !metadata || !image || !source) return false;
 
   const { nearLeft, nearRight, farLeft, farRight } = gapCorners;
   const boundaries = [
@@ -1218,21 +1222,16 @@ function drawTessellatedGapEdges(ctx, gapCorners, atlasKey, maxInterval = 48) {
         const centerX = startPoint.x + deltaX * fraction;
         const centerY = startPoint.y + deltaY * fraction;
         const scale = startPoint.scale + (endPoint.scale - startPoint.scale) * fraction;
-        const zRel = CONFIG.CAMERA_DEPTH / Math.max(scale, Number.EPSILON);
-        const worldX = (centerX - STATE.width / 2) / (Math.max(scale, Number.EPSILON) * STATE.width / 2);
         const moduleHeight = Math.max(2, Math.min(18, 120 * scale * STATE.height / 2));
-        drawWorldAtlasSprite(ctx, atlasKey, {
-          worldX,
-          zRel,
-          destination: {
-            x: centerX - intervalWidth / 2,
-            y: centerY - moduleHeight,
-            width: intervalWidth,
-            height: moduleHeight,
-          },
-          rotation: angle,
-          alpha: 1,
-        });
+        ctx.save();
+        try {
+          ctx.translate(centerX, centerY);
+          ctx.rotate(angle);
+          ctx.drawImage(image, source.sx, source.sy, source.sw, source.sh,
+            -intervalWidth / 2, -moduleHeight, intervalWidth, moduleHeight);
+        } finally {
+          ctx.restore();
+        }
       }
     }
   } finally {
@@ -1316,10 +1315,8 @@ function renderTrack(ctx) {
     if (zFar < 8) continue;
     for (let lane = 0; lane < CONFIG.LANES; lane++) {
       const type = seg.lanes[lane];
-      if (type === LANE_TYPE.WALL_LOW) {
-        renderWallLow(ctx, lane, i, zNear, zFar);
-      } else if (type === LANE_TYPE.WALL_HIGH) {
-        renderWallHigh(ctx, lane, i, zNear, zFar);
+      if (isWallType(type)) {
+        renderWallModule(ctx, type, lane, i, zNear, zFar);
       } else if (type === LANE_TYPE.FUEL) {
         renderFuel(ctx, lane, i, zNear, zFar);
       } else if (type === LANE_TYPE.BOOST || type === LANE_TYPE.SLOW || type === LANE_TYPE.TRIPLE || type === LANE_TYPE.MAGNET) {
@@ -1507,40 +1504,109 @@ function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
 
 // ---- 敌人渲染（与 checkCollisions / advanceShots 共用 enemyLane() 连续位置）----
 // 图集负责机体；阴影、换道预警、炮管和炮口仍按世界坐标投影，因此素材降级不会改变玩法语义。
+function rotatedSpriteBounds(bounds, origin, rotation) {
+  if (!rotation) return bounds;
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  const points = [
+    [bounds.x, bounds.y],
+    [bounds.x + bounds.width, bounds.y],
+    [bounds.x + bounds.width, bounds.y + bounds.height],
+    [bounds.x, bounds.y + bounds.height],
+  ].map(([x, y]) => {
+    const relativeX = x - origin.x;
+    const relativeY = y - origin.y;
+    return {
+      x: origin.x + relativeX * cosine - relativeY * sine,
+      y: origin.y + relativeX * sine + relativeY * cosine,
+    };
+  });
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function convexScreenHull(points) {
+  const sorted = points
+    .filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map(({ x, y }) => ({ x, y }))
+    .sort((left, right) => left.x - right.x || left.y - right.y)
+    .filter((point, index, values) => index === 0
+      || point.x !== values[index - 1].x || point.y !== values[index - 1].y);
+  if (sorted.length < 3) return null;
+  const cross = (origin, first, second) => (
+    (first.x - origin.x) * (second.y - origin.y)
+      - (first.y - origin.y) * (second.x - origin.x)
+  );
+  const buildHalf = (values) => {
+    const half = [];
+    for (const point of values) {
+      while (half.length >= 2 && cross(half.at(-2), half.at(-1), point) <= 0) half.pop();
+      half.push(point);
+    }
+    return half;
+  };
+  const lower = buildHalf(sorted);
+  const upper = buildHalf([...sorted].reverse());
+  const hull = [...lower.slice(0, -1), ...upper.slice(0, -1)];
+  return hull.length >= 3 ? hull : null;
+}
+
 function drawWorldAtlasSprite(ctx, atlasKey, placement) {
   const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
   const presentation = globalThis.Skyroads && globalThis.Skyroads.presentation;
-  if (!worldArt || !presentation || typeof presentation.resolveWorldAtlas !== 'function') return false;
+  if (!worldArt || !presentation || typeof presentation.resolveWorldAtlas !== 'function') return null;
   const metadata = worldArt.WORLD_ATLAS_MANIFEST && worldArt.WORLD_ATLAS_MANIFEST[atlasKey];
   const image = presentation.resolveWorldAtlas(STATE.visualAssets, atlasKey);
-  if (!metadata || !image || !placement || !placement.destination) return false;
-  const plan = worldArt.buildSpriteDrawPlan({ metadata, ...placement });
-  const destination = plan.destination;
-  if (destination.width < 1 || destination.height < 1
-    || destination.x + destination.width <= 0 || destination.x >= STATE.width
-    || destination.y + destination.height <= 0 || destination.y >= STATE.height) return true;
+  if (!metadata || !image || !placement || typeof worldArt.buildSpriteDrawPlan !== 'function') return null;
+  const plan = worldArt.buildSpriteDrawPlan({ metadata, ...placement, cameraY: CONFIG.CAMERA_HEIGHT });
+  if (!plan || !plan.bounds || !Array.isArray(plan.draws)) return null;
+  const bounds = plan.bounds;
+  if (bounds.width < 1 || bounds.height < 1) return plan;
 
   const rotation = Number.isFinite(placement.rotation) ? placement.rotation : 0;
-  const dx = rotation === 0 ? destination.x : -destination.width / 2;
-  const dy = rotation === 0 ? destination.y : -destination.height;
+  const origin = placement.projectedOrigin;
+  if (rotation !== 0 && (!origin || !Number.isFinite(origin.x) || !Number.isFinite(origin.y))) return null;
+  const cullBounds = rotatedSpriteBounds(bounds, origin, rotation);
+  if (cullBounds.x + cullBounds.width <= 0 || cullBounds.x >= STATE.width
+    || cullBounds.y + cullBounds.height <= 0 || cullBounds.y >= STATE.height) return plan;
+
+  const incomingAlpha = Number.isFinite(ctx.globalAlpha) ? ctx.globalAlpha : 1;
   ctx.save();
   try {
+    const clipPoints = Array.isArray(placement.clipPoints)
+      ? placement.clipPoints.filter((point) => (
+        point && Number.isFinite(point.x) && Number.isFinite(point.y)
+      ))
+      : null;
+    if (clipPoints && clipPoints.length >= 3) {
+      ctx.beginPath();
+      ctx.moveTo(clipPoints[0].x, clipPoints[0].y);
+      for (let index = 1; index < clipPoints.length; index += 1) {
+        ctx.lineTo(clipPoints[index].x, clipPoints[index].y);
+      }
+      ctx.closePath();
+      ctx.clip();
+    }
     if (rotation !== 0) {
-      ctx.translate(destination.x + destination.width / 2, destination.y + destination.height);
+      ctx.translate(origin.x, origin.y);
       ctx.rotate(rotation);
     }
-    ctx.globalAlpha = Math.max(0, Math.min(1, plan.alpha * (1 - plan.mix)));
-    ctx.drawImage(image, plan.lower.sx, plan.lower.sy, plan.lower.sw, plan.lower.sh,
-      dx, dy, destination.width, destination.height);
-    if (plan.mix > 0) {
-      ctx.globalAlpha = Math.max(0, Math.min(1, plan.alpha * plan.mix));
-      ctx.drawImage(image, plan.upper.sx, plan.upper.sy, plan.upper.sw, plan.upper.sh,
+    for (const draw of plan.draws) {
+      if (!draw || !draw.source || !draw.destination || !(draw.alpha > 0)) continue;
+      const destination = draw.destination;
+      const dx = rotation === 0 ? destination.x : destination.x - origin.x;
+      const dy = rotation === 0 ? destination.y : destination.y - origin.y;
+      ctx.globalAlpha = incomingAlpha * Math.max(0, Math.min(1, draw.alpha));
+      ctx.drawImage(image, draw.source.sx, draw.source.sy, draw.source.sw, draw.source.sh,
         dx, dy, destination.width, destination.height);
     }
   } finally {
     ctx.restore();
   }
-  return true;
+  return plan;
 }
 
 function worldSpriteDrawRect(worldArt, placement) {
@@ -1556,6 +1622,22 @@ function worldSpriteDrawRect(worldArt, placement) {
   return { x: bottom.x - width / 2, y: bottom.y - height, width, height };
 }
 
+function uprightAtlasPlacement(worldX, zRel, objectY, { alpha = 1, rotation = 0 } = {}) {
+  const projectedOrigin = project(worldX, objectY, zRel);
+  const projectedUnitX = project(worldX + 1, objectY, zRel);
+  const projectedUnitY = project(worldX, objectY + 1, zRel);
+  return {
+    worldX,
+    zRel,
+    objectY,
+    projectedOrigin,
+    pixelsPerWorldUnitX: Math.abs(projectedUnitX.x - projectedOrigin.x),
+    pixelsPerWorldUnitY: Math.abs(projectedUnitY.y - projectedOrigin.y),
+    alpha,
+    rotation,
+  };
+}
+
 function drawDroneShadow(ctx, cx, zMid) {
   const ground = project(cx, 0, zMid);
   if (!ground.visible) return;
@@ -1566,13 +1648,12 @@ function drawDroneShadow(ctx, cx, zMid) {
   ctx.fill();
 }
 
-function drawDroneDirectionCues(ctx, e, cx, zMid, destination) {
+function drawDroneDirectionCues(ctx, e, cx, zMid, spriteBounds) {
   if (e.state !== 'warn') return;
   const direction = Math.sign(e.toLane - e.fromLane);
   if (direction === 0) return;
   const landing = project(laneCenterX(e.toLane), 0, zMid);
-  const body = project(cx, CONFIG.DRONE_HEIGHT + 90, zMid);
-  if (!landing.visible || !body.visible) return;
+  if (!landing.visible || !spriteBounds) return;
   const unit = landing.scale * STATE.width / 2;
   const pulse = canvasPulse(0.62, 0.28, 14, e.phase);
   ctx.save();
@@ -1583,9 +1664,11 @@ function drawDroneDirectionCues(ctx, e, cx, zMid, destination) {
   ctx.ellipse(landing.x, landing.y, Math.max(4, 105 * unit), Math.max(2, 30 * unit), 0, 0, Math.PI * 2);
   ctx.stroke();
 
-  const size = Math.max(5, Math.min(18, destination.width * 0.32));
-  const anchorX = body.x + direction * Math.max(size, destination.width * 0.6);
-  const anchorY = destination.y + destination.height * 0.28;
+  const size = Math.max(5, Math.min(18, spriteBounds.width * 0.32));
+  const anchorX = direction > 0
+    ? spriteBounds.x + spriteBounds.width + Math.max(size, spriteBounds.width * 0.1)
+    : spriteBounds.x - Math.max(size, spriteBounds.width * 0.1);
+  const anchorY = spriteBounds.y + spriteBounds.height * 0.28;
   ctx.fillStyle = '#fff4f7';
   ctx.beginPath();
   ctx.moveTo(anchorX + direction * size, anchorY);
@@ -1601,7 +1684,7 @@ function drawProceduralDrone(ctx, e, { cx, zMid, animationTime, bob, tiltDir }) 
   const p = project(cx, 300 + bob, zMid);
   if (!p.visible) return;
   const unit = p.scale * STATE.width / 2;
-  const radius = Math.max(2, 190 * unit);
+  const radius = Math.max(2, 216 * unit);
   const jx = warn ? Math.sin(animationTime * 47 + e.phase) * 0.06 * radius : 0;
   const jy = warn ? Math.sin(animationTime * 39 + e.phase * 1.7) * 0.04 * radius : 0;
   ctx.save();
@@ -1723,18 +1806,18 @@ function drawEnemy(ctx, e, segIndex, zNear, zFar) {
     const bob = Math.sin(animationTime * 2.2 + e.phase) * 40;
     const geometry = worldArt && worldArt.WORLD_GEOMETRY
       ? worldArt.WORLD_GEOMETRY.drone
-      : { worldWidth: 380, worldHeight: CONFIG.DRONE_HEIGHT - 140, baseY: 140 };
-    const destination = worldSpriteDrawRect(worldArt, {
+      : { worldWidth: 432, worldHeight: CONFIG.DRONE_HEIGHT - 140, baseY: 140 };
+    const fallbackBounds = worldSpriteDrawRect(worldArt, {
       worldX: cx, zRel: zMid, worldWidth: geometry.worldWidth, worldHeight: geometry.worldHeight,
       baseY: geometry.baseY + bob,
     });
     drawDroneShadow(ctx, cx, zMid);
-    const drawn = drawWorldAtlasSprite(ctx, e.visualVariant, {
-      worldX: cx, zRel: zMid, destination, alpha: 1,
+    const plan = drawWorldAtlasSprite(ctx, e.visualVariant, uprightAtlasPlacement(cx, zMid, bob, {
+      alpha: 1,
       rotation: direction * (warning ? 0.30 : (moving ? 0.18 : 0)),
-    });
-    if (!drawn) drawProceduralDrone(ctx, e, { cx, zMid, animationTime, bob, tiltDir: direction });
-    drawDroneDirectionCues(ctx, e, cx, zMid, destination);
+    }));
+    if (!plan) drawProceduralDrone(ctx, e, { cx, zMid, animationTime, bob, tiltDir: direction });
+    drawDroneDirectionCues(ctx, e, cx, zMid, plan ? plan.bounds : fallbackBounds);
     return;
   }
 
@@ -1743,15 +1826,13 @@ function drawEnemy(ctx, e, segIndex, zNear, zFar) {
     : { worldWidth: (CONFIG.ROAD_WIDTH / CONFIG.LANES) * 0.68, worldHeight: CONFIG.TURRET_HEIGHT, baseY: 0 };
   const shape = turretProjection(lane, zNear, zFar);
   drawTurretFootprint(ctx, shape);
-  const destination = worldSpriteDrawRect(worldArt, {
-    worldX: cx, zRel: zMid,
-    worldWidth: geometry.worldWidth, worldHeight: CONFIG.TURRET_HEIGHT, baseY: geometry.baseY,
-  });
-  const drawn = drawWorldAtlasSprite(ctx, e.visualVariant, {
-    worldX: cx, zRel: zMid, destination, alpha: 1,
-  });
-  if (!drawn) drawProceduralTurret(ctx, shape);
-  const weaponMountHeight = drawn && Number.isFinite(geometry.weaponMountHeight)
+  const plan = drawWorldAtlasSprite(
+    ctx,
+    e.visualVariant,
+    uprightAtlasPlacement(cx, zMid, geometry.baseY, { alpha: 1 }),
+  );
+  if (!plan) drawProceduralTurret(ctx, shape);
+  const weaponMountHeight = plan && Number.isFinite(geometry.weaponMountHeight)
     ? geometry.weaponMountHeight
     : shape.height;
   drawTurretWeapon(ctx, e, cx, shape, animationTime, zNear, weaponMountHeight);
@@ -1826,38 +1907,190 @@ function renderShots(ctx) {
   }
 }
 
-function drawWallAtlas(ctx, category, lane, segIndex, zNear, zFar) {
+const WALL_CATEGORY = Object.freeze({
+  [LANE_TYPE.WALL_LOW]: 'wallLow',
+  [LANE_TYPE.WALL_MEDIUM]: 'wallMedium',
+  [LANE_TYPE.WALL_HIGH]: 'wallHigh',
+});
+const CORRIDOR_CATEGORY = Object.freeze({
+  [LANE_TYPE.WALL_LOW]: 'corridorLow',
+  [LANE_TYPE.WALL_MEDIUM]: 'corridorMedium',
+});
+const CORRIDOR_HALF_WIDTH = 324;
+const CORRIDOR_OPEN_END_INSET = 6;
+
+function drawDefenseAtlas(ctx, category, height, lane, segIndex, zNear, zFar, { clipPoints = null } = {}) {
   const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
   if (!worldArt || typeof worldArt.variantKey !== 'function') return false;
   const geometry = worldArt.WORLD_GEOMETRY && worldArt.WORLD_GEOMETRY[category];
-  if (!geometry) return false;
+  if (!category || !geometry || height === null || geometry.worldHeight !== height) return false;
   const zMid = (zNear + zFar) / 2;
   const worldX = laneCenterX(lane);
-  const destination = worldSpriteDrawRect(worldArt, {
-    worldX,
-    zRel: zMid,
-    worldWidth: geometry.worldWidth,
-    worldHeight: category === 'wallLow' ? CONFIG.WALL_LOW_HEIGHT : CONFIG.WALL_HIGH_HEIGHT,
-    baseY: geometry.baseY,
+  return drawWorldAtlasSprite(
+    ctx,
+    worldArt.variantKey(category, segIndex, lane),
+    { ...uprightAtlasPlacement(worldX, zMid, geometry.baseY, { alpha: 1 }), clipPoints },
+  );
+}
+
+function drawWallAtlas(ctx, wallType, lane, segIndex, zNear, zFar) {
+  return drawDefenseAtlas(
+    ctx,
+    WALL_CATEGORY[wallType],
+    wallHeight(wallType),
+    lane,
+    segIndex,
+    zNear,
+    zFar,
+  );
+}
+
+function liveCorridorDescriptor(track, segIndex, lane) {
+  if (typeof corridorModulePhase !== 'function') return null;
+  const phase = corridorModulePhase(track, segIndex, lane);
+  if (!phase) return null;
+  const segment = track[segIndex];
+  const wallType = segment && segment.lanes[lane];
+  const category = CORRIDOR_CATEGORY[wallType];
+  const height = wallHeight(wallType);
+  if (!category || height === null) return null;
+  return Object.freeze({
+    phase,
+    category,
+    height,
+    connectBefore: phase === 'middle' || phase === 'end',
+    connectAfter: phase === 'middle' || phase === 'start',
   });
-  return drawWorldAtlasSprite(ctx, worldArt.variantKey(category, segIndex, lane), {
-    worldX,
-    zRel: zMid,
-    destination,
-    alpha: 1,
-  });
+}
+
+function corridorAtlasClipPoints(lane, zNear, zFar, descriptor) {
+  const centerX = laneCenterX(lane);
+  const interiorNear = zNear + (descriptor.connectBefore ? 0 : CORRIDOR_OPEN_END_INSET);
+  const interiorFar = zFar - (descriptor.connectAfter ? 0 : CORRIDOR_OPEN_END_INSET);
+  const corners = [];
+  for (const z of [interiorNear, interiorFar]) {
+    for (const x of [centerX - CORRIDOR_HALF_WIDTH, centerX + CORRIDOR_HALF_WIDTH]) {
+      for (const y of [0, descriptor.height]) {
+        const point = project(x, y, z);
+        if (point.visible) corners.push(point);
+      }
+    }
+  }
+  return convexScreenHull(corners);
+}
+
+function drawCorridorDetails(ctx, lane, zNear, zFar, descriptor) {
+  const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
+  const centerX = laneCenterX(lane);
+  const halfWidth = CORRIDOR_HALF_WIDTH;
+  const midZ = (zNear + zFar) / 2;
+  const openEndInset = CORRIDOR_OPEN_END_INSET;
+  const plinthNearZ = zNear + (descriptor.connectBefore ? 0 : openEndInset);
+  const plinthFarZ = zFar - (descriptor.connectAfter ? 0 : openEndInset);
+  const plinthLeftNear = project(centerX - halfWidth, 20, plinthNearZ);
+  const plinthRightNear = project(centerX + halfWidth, 20, plinthNearZ);
+  const plinthRightFar = project(centerX + halfWidth, 20, plinthFarZ);
+  const plinthLeftFar = project(centerX - halfWidth, 20, plinthFarZ);
+  if (plinthLeftNear.visible && plinthLeftFar.visible) {
+    ctx.fillStyle = '#101b2a';
+    quad(ctx, plinthLeftNear, plinthRightNear, plinthRightFar, plinthLeftFar);
+    ctx.fill();
+  }
+
+  const conduitY = descriptor.height * 0.16;
+  const conduitMid = project(centerX, conduitY, midZ);
+  ctx.strokeStyle = '#3de6ff';
+  ctx.lineWidth = Math.max(1, laneWidth * conduitMid.scale * STATE.width * 0.008);
+  ctx.beginPath();
+  let connectorCount = 0;
+  if (descriptor.connectBefore) {
+    const target = project(centerX, conduitY, zNear);
+    ctx.moveTo(conduitMid.x, conduitMid.y);
+    ctx.lineTo(target.x, target.y);
+    connectorCount += 1;
+  }
+  if (descriptor.connectAfter) {
+    const target = project(centerX, conduitY, zFar);
+    ctx.moveTo(conduitMid.x, conduitMid.y);
+    ctx.lineTo(target.x, target.y);
+    connectorCount += 1;
+  }
+  if (connectorCount > 0) ctx.stroke();
+
+  ctx.strokeStyle = '#b8f7ff';
+  ctx.lineWidth = Math.max(1, laneWidth * conduitMid.scale * STATE.width * 0.006);
+  ctx.beginPath();
+  let capCount = 0;
+  for (const [open, z] of [
+    [!descriptor.connectBefore, zNear],
+    [!descriptor.connectAfter, zFar],
+  ]) {
+    if (!open) continue;
+    const left = project(centerX - halfWidth, descriptor.height * 0.1, z);
+    const right = project(centerX + halfWidth, descriptor.height * 0.1, z);
+    ctx.moveTo(left.x, left.y);
+    ctx.lineTo(right.x, right.y);
+    capCount += 1;
+  }
+  if (capCount > 0) ctx.stroke();
+
+  if (descriptor.phase === 'start' || descriptor.phase === 'single') {
+    const tip = project(centerX, 28, zNear);
+    const left = project(centerX - halfWidth * 0.34, 28, zNear + CONFIG.SEGMENT_LENGTH * 0.18);
+    const right = project(centerX + halfWidth * 0.34, 28, zNear + CONFIG.SEGMENT_LENGTH * 0.18);
+    ctx.fillStyle = '#54e7ff';
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(left.x, left.y);
+    ctx.lineTo(right.x, right.y);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawProceduralWallByType(ctx, wallType, lane, segIndex, zNear, zFar) {
+  if (wallType === LANE_TYPE.WALL_LOW) {
+    drawProceduralWallLow(ctx, lane, segIndex, zNear, zFar);
+  } else if (wallType === LANE_TYPE.WALL_MEDIUM) {
+    drawProceduralWallMedium(ctx, lane, segIndex, zNear, zFar);
+  } else {
+    drawProceduralWallHigh(ctx, lane, segIndex, zNear, zFar);
+  }
+}
+
+function renderWallModule(ctx, wallType, lane, segIndex, zNear, zFar) {
+  const corridor = liveCorridorDescriptor(STATE.track, segIndex, lane);
+  if (corridor) {
+    const clipPoints = corridorAtlasClipPoints(lane, zNear, zFar, corridor);
+    const plan = drawDefenseAtlas(
+      ctx,
+      corridor.category,
+      corridor.height,
+      lane,
+      segIndex,
+      zNear,
+      zFar,
+      { clipPoints },
+    );
+    if (!plan) drawProceduralWallByType(ctx, wallType, lane, segIndex, zNear, zFar);
+    drawCorridorDetails(ctx, lane, zNear, zFar, corridor);
+    return;
+  }
+  if (!drawWallAtlas(ctx, wallType, lane, segIndex, zNear, zFar)) {
+    drawProceduralWallByType(ctx, wallType, lane, segIndex, zNear, zFar);
+  }
 }
 
 function renderWallLow(ctx, lane, segIndex, zNear, zFar) {
-  if (!drawWallAtlas(ctx, 'wallLow', lane, segIndex, zNear, zFar)) {
-    drawProceduralWallLow(ctx, lane, segIndex, zNear, zFar);
-  }
+  renderWallModule(ctx, LANE_TYPE.WALL_LOW, lane, segIndex, zNear, zFar);
+}
+
+function renderWallMedium(ctx, lane, segIndex, zNear, zFar) {
+  renderWallModule(ctx, LANE_TYPE.WALL_MEDIUM, lane, segIndex, zNear, zFar);
 }
 
 function renderWallHigh(ctx, lane, segIndex, zNear, zFar) {
-  if (!drawWallAtlas(ctx, 'wallHigh', lane, segIndex, zNear, zFar)) {
-    drawProceduralWallHigh(ctx, lane, segIndex, zNear, zFar);
-  }
+  renderWallModule(ctx, LANE_TYPE.WALL_HIGH, lane, segIndex, zNear, zFar);
 }
 
 // 矮墙（可跳过）：两侧金属立柱 + 中间红色能量场
@@ -1868,8 +2101,8 @@ function renderWallHigh(ctx, lane, segIndex, zNear, zFar) {
 function drawProceduralWallLow(ctx, lane, segIndex, zNear, zFar) {
   const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
   const halfRoad = CONFIG.ROAD_WIDTH / 2;
-  const xL = -halfRoad + lane * laneWidth + laneWidth * 0.10;
-  const xR = -halfRoad + (lane + 1) * laneWidth - laneWidth * 0.10;
+  const xL = -halfRoad + lane * laneWidth + laneWidth * 0.05;
+  const xR = -halfRoad + (lane + 1) * laneWidth - laneWidth * 0.05;
   const pw = laneWidth * 0.16;                   // 单侧立柱宽度
   const xLP = xL + pw, xRP = xR - pw;            // 能量场左右边界（立柱内缘）
   const H = CONFIG.WALL_LOW_HEIGHT;              // 与碰撞判定共用
@@ -1967,6 +2200,50 @@ function drawProceduralWallLow(ctx, lane, segIndex, zNear, zFar) {
     ctx.fillStyle = 'rgba(255,120,130,' + (0.45 + 0.55 * blink).toFixed(3) + ')';
     ctx.beginPath(); ctx.arc(lxp, lyp, lr, 0, Math.PI * 2); ctx.fill();
   }
+  const signalLeft = project(xLP, H * 0.72, zNear);
+  const signalRight = project(xRP, H * 0.72, zNear);
+  ctx.strokeStyle = '#64dcff';
+  ctx.lineWidth = Math.max(1, Math.abs(signalRight.x - signalLeft.x) * 0.025);
+  ctx.beginPath();
+  ctx.moveTo(signalLeft.x, signalLeft.y);
+  ctx.lineTo(signalRight.x, signalRight.y);
+  ctx.stroke();
+}
+
+function drawProceduralWallMedium(ctx, lane, segIndex, zNear, zFar) {
+  const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
+  const halfRoad = CONFIG.ROAD_WIDTH / 2;
+  const height = wallHeight(LANE_TYPE.WALL_MEDIUM);
+  const xLb = -halfRoad + lane * laneWidth + laneWidth * 0.05;
+  const xRb = -halfRoad + (lane + 1) * laneWidth - laneWidth * 0.05;
+  const xLt = -halfRoad + lane * laneWidth + laneWidth * 0.20;
+  const xRt = -halfRoad + (lane + 1) * laneWidth - laneWidth * 0.20;
+  const b1 = project(xLb, 0, zNear), b2 = project(xRb, 0, zNear);
+  const b4 = project(xLb, 0, zFar), b3 = project(xRb, 0, zFar);
+  const t1 = project(xLt, height, zNear), t2 = project(xRt, height, zNear);
+  const t4 = project(xLt, height, zFar), t3 = project(xRt, height, zFar);
+  if (!b1.visible || !t1.visible || !t3.visible) return;
+  if (b3.visible) {
+    ctx.fillStyle = '#101c2b';
+    quad(ctx, b2, b3, t3, t2); ctx.fill();
+    quad(ctx, b1, b4, t4, t1); ctx.fill();
+  }
+  ctx.fillStyle = '#26394d'; quad(ctx, t1, t2, t3, t4); ctx.fill();
+  ctx.fillStyle = '#18283a'; quad(ctx, b1, b2, t2, t1); ctx.fill();
+  ctx.strokeStyle = '#64dcff';
+  ctx.lineWidth = Math.max(1, Math.abs(b2.x - b1.x) * 0.025);
+  ctx.beginPath();
+  for (const fraction of [0.36, 0.72]) {
+    ctx.moveTo(
+      b1.x + (t1.x - b1.x) * fraction,
+      b1.y + (t1.y - b1.y) * fraction,
+    );
+    ctx.lineTo(
+      b2.x + (t2.x - b2.x) * fraction,
+      b2.y + (t2.y - b2.y) * fraction,
+    );
+  }
+  ctx.stroke();
 }
 
 // 高塔（不可跳过，必须变道）：暗红高塔 —— 收分轮廓 + 垂直棱线/肋骨 + 塔顶脉冲灯
@@ -1974,7 +2251,7 @@ function drawProceduralWallLow(ctx, lane, segIndex, zNear, zFar) {
 function drawProceduralWallHigh(ctx, lane, segIndex, zNear, zFar) {
   const laneWidth = CONFIG.ROAD_WIDTH / CONFIG.LANES;
   const halfRoad = CONFIG.ROAD_WIDTH / 2;
-  const inB = laneWidth * 0.10, inT = laneWidth * 0.26;  // 底部/顶部内缩（收分造型）
+  const inB = laneWidth * 0.05, inT = laneWidth * 0.26;  // 底部/顶部内缩（收分造型）
   const xLb = -halfRoad + lane * laneWidth + inB;
   const xRb = -halfRoad + (lane + 1) * laneWidth - inB;
   const xLt = -halfRoad + lane * laneWidth + inT;
@@ -2069,6 +2346,26 @@ function drawProceduralWallHigh(ctx, lane, segIndex, zNear, zFar) {
   ctx.beginPath(); ctx.arc(bx, by, r * 2.4, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = 'rgba(255,90,105,' + (0.35 + 0.5 * pulse).toFixed(3) + ')';
   ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#64dcff';
+  ctx.lineWidth = Math.max(1, Math.abs(b2.x - b1.x) * 0.025);
+  ctx.beginPath();
+  for (const fraction of [0.36, 0.72]) {
+    ctx.moveTo(
+      b1.x + (t1.x - b1.x) * fraction,
+      b1.y + (t1.y - b1.y) * fraction,
+    );
+    ctx.lineTo(
+      b2.x + (t2.x - b2.x) * fraction,
+      b2.y + (t2.y - b2.y) * fraction,
+    );
+  }
+  ctx.stroke();
+  if (at.visible) {
+    ctx.fillStyle = '#f4c95d';
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, Math.max(1.5, r * 0.72), 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 // 燃料宝物：悬浮发光晶体 —— 上下浮动（sin 相位）+ 2D 旋转近似 + 青色渐变光晕 + 白色高光

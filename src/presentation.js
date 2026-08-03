@@ -94,16 +94,24 @@
     const worldArt = root.Skyroads && root.Skyroads.worldArt;
     const worldManifest = worldArt ? worldArt.WORLD_ATLAS_MANIFEST : {};
     const worldKeys = Object.keys(worldManifest);
+    const worldCategories = new Map();
     const states = { ship: {}, ui: {}, icons: {}, world: {}, font: {} };
     const pending = [];
     const imageTasks = [];
 
-    function queueImage(groupName, key, assetPath) {
+    function queueImage(groupName, key, assetPath, metadata = null, isWorldAsset = false) {
       const state = { path: assetPath, loaded: false, element: null };
       states[groupName][key] = state;
-      if (typeof ImageCtor !== 'function') return;
+      if (isWorldAsset && (
+        typeof assetPath !== 'string'
+        || assetPath.trim().length === 0
+        || !worldArt
+        || typeof worldArt.validateAtlasMetadata !== 'function'
+        || !worldArt.validateAtlasMetadata(metadata)
+      )) return false;
+      if (typeof ImageCtor !== 'function') return false;
       let image = null;
-      try { image = new ImageCtor(); } catch (_) { return; }
+      try { image = new ImageCtor(); } catch (_) { return false; }
       state.element = image;
       pending.push(new Promise((resolve) => {
         let settled = false;
@@ -116,7 +124,10 @@
           resolve();
         };
         imageTasks.push({ finish });
-        image.onload = () => finish(true);
+        image.onload = () => finish(!isWorldAsset || (
+          image.naturalWidth === metadata.atlasWidth
+          && image.naturalHeight === metadata.atlasHeight
+        ));
         image.onerror = () => finish(false);
         try {
           image.decoding = 'async';
@@ -125,12 +136,26 @@
           finish(false);
         }
       }));
+      return true;
     }
 
     for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.ship)) queueImage('ship', key, assetPath);
     for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.ui)) queueImage('ui', key, assetPath);
     for (const [key, assetPath] of Object.entries(VISUAL_ASSET_MANIFEST.icons)) queueImage('icons', key, assetPath);
-    for (const [key, metadata] of Object.entries(worldManifest)) queueImage('world', key, metadata.path);
+    for (const [key, metadata] of Object.entries(worldManifest)) {
+      let assetPath = null;
+      try {
+        if (metadata && typeof metadata === 'object') assetPath = metadata.path;
+      } catch (_) {
+        assetPath = null;
+      }
+      if (!queueImage('world', key, assetPath, metadata, true)) continue;
+      try {
+        if (typeof metadata.category === 'string') worldCategories.set(key, metadata.category);
+      } catch (_) {
+        // A failed diagnostic category must not affect the exact asset or any sibling.
+      }
+    }
 
     const fontPath = VISUAL_ASSET_MANIFEST.font.orbitron;
     const fontState = { path: fontPath, loaded: false, element: null };
@@ -180,9 +205,9 @@
       loaded: Object.freeze(worldKeys.filter((key) => assets.world[key].loaded)),
       fallback: Object.freeze(worldKeys.filter((key) => !assets.world[key].loaded)),
       categoryReady: Object.freeze(Object.fromEntries(
-        ['drone', 'turret', 'wallLow', 'wallHigh', 'gap'].map((category) => [
+        ['drone', 'turret', 'wallLow', 'wallMedium', 'wallHigh', 'corridorLow', 'corridorMedium', 'gap'].map((category) => [
           category,
-          worldKeys.some((key) => worldManifest[key].category === category && assets.world[key].loaded),
+          worldKeys.some((key) => worldCategories.get(key) === category && assets.world[key].loaded),
         ]),
       )),
     });

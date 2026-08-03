@@ -68,6 +68,16 @@ const WORLD_OUTPUT_HASHES = {
   'assets/world/corridor-medium.png': '40213dacdf2177909dffe0980a9e4ad1872dfeffcc3b1fb3bf346348d1c85968',
   'assets/world/gap-edge.png': 'c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49',
 };
+const WORLD_DIMENSIONS_BY_PATH = new Map(Object.values(WORLD_ATLAS_MANIFEST).map((metadata) => [
+  metadata.path,
+  [metadata.atlasWidth, metadata.atlasHeight],
+]));
+
+function applyWorldImageDimensions(image, assetPath) {
+  const dimensions = WORLD_DIMENSIONS_BY_PATH.get(assetPath);
+  if (!dimensions) return;
+  [image.naturalWidth, image.naturalHeight] = dimensions;
+}
 const WORLD_SOURCE_HASHES = {
   'modular-space-kit/Models/OBJ format/Textures/colormap.png': '5aa7d186416e85310d99308c8e5510ededda181f3354ba9f4887cd56273f2b1e',
   'modular-space-kit/Models/OBJ format/gate-lasers.mtl': '45a6736aa344a0c7e286b9c43c6a48f25b6a2f78d8c5949e430c3b4a93b4e060',
@@ -2152,6 +2162,7 @@ test('visual preloading reports every local asset and requires both player frame
     set src(value) {
       this.currentSrc = value;
       queuedPaths.push(value);
+      applyWorldImageDimensions(this, value);
       queueMicrotask(() => this.onload());
     }
   }
@@ -2201,7 +2212,8 @@ test('visual preloading reports every local asset and requires both player frame
   ]);
   assert.deepEqual(result.world.fallback, []);
   assert.deepEqual(result.world.categoryReady, {
-    drone: true, turret: true, wallLow: true, wallHigh: true, gap: true,
+    drone: true, turret: true, wallLow: true, wallMedium: true, wallHigh: true,
+    corridorLow: true, corridorMedium: true, gap: true,
   });
   assert.equal(Object.isFrozen(result.assets.world), true);
   assert.equal(Object.isFrozen(result.world), true);
@@ -2216,6 +2228,7 @@ test('world atlas fallback leaves independent variants and categories available'
   class ImageWithMissingDroneScout {
     set src(value) {
       this.currentSrc = value;
+      applyWorldImageDimensions(this, value);
       queueMicrotask(() => value.includes('drone-scout') ? this.onerror() : this.onload());
     }
   }
@@ -2231,7 +2244,8 @@ test('world atlas fallback leaves independent variants and categories available'
   assert.equal(result.assets.world.droneStriker.loaded, true);
   assert.deepEqual(result.world.fallback, ['droneScout']);
   assert.deepEqual(result.world.categoryReady, {
-    drone: true, turret: true, wallLow: true, wallHigh: true, gap: true,
+    drone: true, turret: true, wallLow: true, wallMedium: true, wallHigh: true,
+    corridorLow: true, corridorMedium: true, gap: true,
   });
 });
 
@@ -2239,6 +2253,7 @@ test('world atlas diagnostics mark only a fully unavailable category as not read
   class ImageWithMissingLowWalls {
     set src(value) {
       this.currentSrc = value;
+      applyWorldImageDimensions(this, value);
       queueMicrotask(() => value.includes('barrier-') ? this.onerror() : this.onload());
     }
   }
@@ -2251,7 +2266,8 @@ test('world atlas diagnostics mark only a fully unavailable category as not read
 
   assert.deepEqual(result.world.fallback, ['barrierRail', 'barrierCrate']);
   assert.deepEqual(result.world.categoryReady, {
-    drone: true, turret: true, wallLow: false, wallHigh: true, gap: true,
+    drone: true, turret: true, wallLow: false, wallMedium: true, wallHigh: true,
+    corridorLow: true, corridorMedium: true, gap: true,
   });
 });
 
@@ -2259,6 +2275,7 @@ test('all world atlas failures do not require the procedural player fallback', a
   class ImageWithMissingWorldArt {
     set src(value) {
       this.currentSrc = value;
+      applyWorldImageDimensions(this, value);
       queueMicrotask(() => value.includes('/world/') ? this.onerror() : this.onload());
     }
   }
@@ -2278,7 +2295,8 @@ test('all world atlas failures do not require the procedural player fallback', a
     'structureTower', 'corridorLow', 'corridorMedium', 'gapEdge',
   ]);
   assert.deepEqual(result.world.categoryReady, {
-    drone: false, turret: false, wallLow: false, wallHigh: false, gap: false,
+    drone: false, turret: false, wallLow: false, wallMedium: false, wallHigh: false,
+    corridorLow: false, corridorMedium: false, gap: false,
   });
 });
 
@@ -2286,6 +2304,7 @@ test('one missing required ship frame triggers procedural fallback without hidin
   class ImageWithMissingThrust {
     set src(value) {
       this.currentSrc = value;
+      applyWorldImageDimensions(this, value);
       queueMicrotask(() => value.includes('player-thrust') ? this.onerror() : this.onload());
     }
   }

@@ -67,6 +67,13 @@ function cloneMetadata(metadata) {
   return structuredClone(metadata);
 }
 
+function deepFreeze(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
+}
+
 const FINAL_MANIFEST_CONTRACT = Object.freeze({
   droneScout: ['./assets/world/drone-scout.png', 'drone', 0],
   droneStriker: ['./assets/world/drone-striker.png', 'drone', 1],
@@ -141,6 +148,7 @@ test('final manifest exposes thirteen real deeply frozen atlas records', () => {
         yawDegrees: [-30, -20, -10, 0, 10, 20, 30],
         frames: 7,
       });
+      assert.equal(validateAtlasMetadata(metadata), true, key);
     } else {
       assert.equal(validateAtlasMetadata(metadata), true, key);
       assert.deepEqual(metadata.worldBounds, CATEGORY_WORLD_BOUNDS[category], key);
@@ -403,12 +411,133 @@ test('malformed upright metadata fails validation and planning without throwing'
   }
 });
 
-test('road edges select their center source without upright blending', () => {
-  const frames = Array.from({ length: 7 }, (_, index) => ({
-    source: { sx: index * 512, sy: 0, sw: 512, sh: 512 },
-  }));
-  const metadata = { layout: 'roadEdge', frames };
-  const source = roadEdgeFrame(metadata);
+test('road-edge metadata validates only the strict seven-cell legacy contract', () => {
+  const valid = cloneMetadata(WORLD_ATLAS_MANIFEST.gapEdge);
+  assert.equal(validateAtlasMetadata(valid), true);
+
+  const malformed = [];
+  function invalid(label, mutate) {
+    const metadata = cloneMetadata(valid);
+    mutate(metadata);
+    malformed.push([label, metadata]);
+  }
+  invalid('layout', (metadata) => { metadata.layout = 'upright'; });
+  invalid('atlas width', (metadata) => { metadata.atlasWidth = 3072; });
+  invalid('atlas height', (metadata) => { metadata.atlasHeight = 511; });
+  invalid('frame width', (metadata) => { metadata.frameWidth = 511; });
+  invalid('frame height', (metadata) => { metadata.frameHeight = 511; });
+  invalid('yaw angle', (metadata) => { metadata.yawDegrees[0] = -31; });
+  invalid('sparse yaw angles', (metadata) => { delete metadata.yawDegrees[3]; });
+  invalid('frame count', (metadata) => { metadata.frames = 6; });
+  invalid('coercible frame count', (metadata) => { metadata.frames = '7'; });
+
+  for (const [label, metadata] of malformed) {
+    assert.doesNotThrow(() => validateAtlasMetadata(metadata), label);
+    assert.equal(validateAtlasMetadata(metadata), false, label);
+    assert.equal(roadEdgeFrame(metadata), null, label);
+  }
+});
+
+test('validation caches only recursively frozen data metadata and rechecks mutable fixtures', () => {
+  let propertyReads = 0;
+  const frozenData = new Proxy(deepFreeze(syntheticUpright()), {
+    get(target, property, receiver) {
+      propertyReads += 1;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  assert.equal(validateAtlasMetadata(frozenData), true);
+  const readsAfterFirstValidation = propertyReads;
+  assert.ok(readsAfterFirstValidation > 0);
+  assert.equal(validateAtlasMetadata(frozenData), true);
+  assert.equal(propertyReads, readsAfterFirstValidation, 'cached frozen data metadata must not be walked twice');
+
+  const mutable = syntheticUpright();
+  assert.equal(validateAtlasMetadata(mutable), true);
+  mutable.frames[20].source.sx = 2200;
+  assert.equal(validateAtlasMetadata(mutable), false, 'mutable metadata must never reuse a stale result');
+});
+
+test('validation never caches frozen accessors backed by mutable external state', () => {
+  let externalSx = 0;
+  const accessorMetadata = syntheticUpright();
+  Object.defineProperty(accessorMetadata.frames[0].source, 'sx', {
+    configurable: true,
+    enumerable: true,
+    get() { return externalSx; },
+  });
+  deepFreeze(accessorMetadata);
+  assert.equal(validateAtlasMetadata(accessorMetadata), true);
+  externalSx = 999;
+  assert.equal(validateAtlasMetadata(accessorMetadata), false,
+    'a frozen accessor graph must re-read external state instead of returning a cached result');
+});
+
+test('validation requires own fields at the root, bounds, frame, source, and origin levels', () => {
+  const inheritedRoot = Object.freeze(Object.create(syntheticUpright()));
+
+  const inheritedBounds = syntheticUpright();
+  inheritedBounds.worldBounds = Object.create(inheritedBounds.worldBounds);
+
+  const inheritedFrame = syntheticUpright();
+  inheritedFrame.frames[0] = Object.create(inheritedFrame.frames[0]);
+
+  const inheritedSource = syntheticUpright();
+  inheritedSource.frames[0].source = Object.create(inheritedSource.frames[0].source);
+
+  const inheritedOrigin = syntheticUpright();
+  inheritedOrigin.frames[0].origin = Object.create(inheritedOrigin.frames[0].origin);
+
+  for (const [label, metadata] of [
+    ['root', inheritedRoot],
+    ['bounds', inheritedBounds],
+    ['frame', inheritedFrame],
+    ['source', inheritedSource],
+    ['origin', inheritedOrigin],
+  ]) {
+    assert.equal(validateAtlasMetadata(metadata), false, `${label} required fields must be own`);
+  }
+});
+
+test('validation does not cache frozen wrappers around non-enumerable or symbol mutable children', () => {
+  const nonEnumerableBounds = syntheticUpright();
+  const mutableBounds = nonEnumerableBounds.worldBounds;
+  delete nonEnumerableBounds.worldBounds;
+  Object.defineProperty(nonEnumerableBounds, 'worldBounds', {
+    configurable: false,
+    enumerable: false,
+    value: mutableBounds,
+    writable: false,
+  });
+  deepFreeze(nonEnumerableBounds);
+  assert.equal(validateAtlasMetadata(nonEnumerableBounds), true);
+  mutableBounds.maxX = mutableBounds.minX;
+  assert.equal(validateAtlasMetadata(nonEnumerableBounds), false,
+    'a mutable non-enumerable required child must be revalidated after mutation');
+
+  let sourceReads = 0;
+  const symbolChild = syntheticUpright();
+  Object.defineProperty(symbolChild.frames[0].source, 'sx', {
+    configurable: true,
+    enumerable: true,
+    get() { sourceReads += 1; return 0; },
+  });
+  Object.defineProperty(symbolChild, Symbol('mutable child'), {
+    configurable: false,
+    enumerable: false,
+    value: { mutable: true },
+    writable: false,
+  });
+  deepFreeze(symbolChild);
+  assert.equal(validateAtlasMetadata(symbolChild), true);
+  const readsAfterFirstValidation = sourceReads;
+  assert.equal(validateAtlasMetadata(symbolChild), true);
+  assert.ok(sourceReads > readsAfterFirstValidation,
+    'a mutable symbol child must prevent validation-result caching');
+});
+
+test('road edges select their validated center source without upright blending', () => {
+  const source = roadEdgeFrame(WORLD_ATLAS_MANIFEST.gapEdge);
   assert.deepEqual(source, { sx: 1536, sy: 0, sw: 512, sh: 512 });
   assert.equal(Object.isFrozen(source), true);
 });
@@ -503,6 +632,15 @@ test('destination-only road-edge calls preserve seven-yaw 512-frame behavior', (
   assert.deepEqual(plan?.destination, destination);
   assert.equal(plan?.alpha, 0.6);
   assertDeepFrozen(plan);
+
+  const malformed = cloneMetadata(metadata);
+  malformed.atlasWidth = 3072;
+  assert.equal(buildSpriteDrawPlan({
+    metadata: malformed,
+    worldX: 0,
+    zRel: 1,
+    destination,
+  }), null);
 });
 
 test('world draw rectangles use fixed collision geometry at each viewport, depth, and lane region', () => {

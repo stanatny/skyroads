@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const {
   computeShipDrawRect,
   fallbackShipLayout,
+  VISUAL_ASSET_MANIFEST,
+  preloadVisualAssets,
   resolveWorldAtlas,
   playerVisualLayerPlan,
   canvasMotionPolicy,
@@ -21,6 +23,7 @@ const {
   renderCommandCenter,
   focusPrimaryForMode,
 } = require('../src/presentation.js');
+const worldArt = require('../src/world-art.js');
 const { createLeaderboard } = require('../src/leaderboard.js');
 const {
   createMovementState,
@@ -28,6 +31,52 @@ const {
   directionForCode,
   shouldHandleGameInput,
 } = require('../src/input.js');
+
+function imageAssetCount() {
+  return ['ship', 'ui', 'icons'].reduce(
+    (count, group) => count + Object.keys(VISUAL_ASSET_MANIFEST[group]).length,
+    0,
+  );
+}
+
+function recordingImageCtor(dimensionsForPath) {
+  const record = { constructed: 0, sources: [], instances: [] };
+  class RecordingImage {
+    constructor() {
+      record.constructed += 1;
+      record.instances.push(this);
+      this.onload = null;
+      this.onerror = null;
+      this.naturalWidth = 0;
+      this.naturalHeight = 0;
+    }
+
+    set src(value) {
+      this._src = value;
+      record.sources.push(value);
+      const [width, height] = dimensionsForPath(value);
+      this.naturalWidth = width;
+      this.naturalHeight = height;
+      queueMicrotask(() => { if (this.onload) this.onload(); });
+    }
+
+    get src() { return this._src; }
+  }
+  return { ImageCtor: RecordingImage, record };
+}
+
+async function withWorldManifest(manifest, callback) {
+  const previous = globalThis.Skyroads.worldArt;
+  globalThis.Skyroads.worldArt = {
+    ...worldArt,
+    WORLD_ATLAS_MANIFEST: manifest,
+  };
+  try {
+    return await callback();
+  } finally {
+    globalThis.Skyroads.worldArt = previous;
+  }
+}
 
 test('loaded neutral and thrust frames retain charge boost and super layers in draw order', () => {
   const neutral = { id: 'neutral' };
@@ -69,6 +118,144 @@ test('world atlas resolution isolates unavailable variants from loaded atlases',
   assert.equal(resolveWorldAtlas(visualAssets, 'droneScout'), scout);
   assert.equal(resolveWorldAtlas(visualAssets, 'droneStriker'), null);
   assert.equal(resolveWorldAtlas(visualAssets, 'unknown'), null);
+});
+
+test('world preload rejects malformed exact metadata before constructing an image', async () => {
+  const malformed = structuredClone(worldArt.WORLD_ATLAS_MANIFEST.droneScout);
+  malformed.path = './assets/world/malformed-drone.png';
+  malformed.atlasWidth = 2239;
+  const manifest = {
+    droneScout: malformed,
+    droneStriker: worldArt.WORLD_ATLAS_MANIFEST.droneStriker,
+  };
+  const { ImageCtor, record } = recordingImageCtor((assetPath) => (
+    assetPath === manifest.droneStriker.path ? [2240, 960] : [1, 1]
+  ));
+
+  const visualAssets = await withWorldManifest(manifest, () => preloadVisualAssets({
+    ImageCtor,
+    FontFaceCtor: null,
+    setTimeoutFn: null,
+  }));
+
+  assert.equal(record.constructed, imageAssetCount() + 1);
+  assert.equal(record.sources.includes(malformed.path), false);
+  assert.deepEqual(visualAssets.world.loaded, ['droneStriker']);
+  assert.deepEqual(visualAssets.world.fallback, ['droneScout']);
+  assert.equal(visualAssets.assets.world.droneScout.element, null);
+  assert.equal(resolveWorldAtlas(visualAssets, 'droneScout'), null);
+  assert.equal(resolveWorldAtlas(visualAssets, 'droneStriker').src, manifest.droneStriker.path);
+});
+
+test('world preload isolates every non-record and unreadable or empty exact path', async () => {
+  const emptyPath = structuredClone(worldArt.WORLD_ATLAS_MANIFEST.droneScout);
+  emptyPath.path = '';
+  const whitespacePath = structuredClone(worldArt.WORLD_ATLAS_MANIFEST.droneScout);
+  whitespacePath.path = '   ';
+  const numericPath = structuredClone(worldArt.WORLD_ATLAS_MANIFEST.droneScout);
+  numericPath.path = 0;
+  const throwingPath = structuredClone(worldArt.WORLD_ATLAS_MANIFEST.droneScout);
+  Object.defineProperty(throwingPath, 'path', {
+    enumerable: true,
+    get() { throw new Error('unreadable exact path'); },
+  });
+  const cases = [
+    ['null record', null],
+    ['undefined record', undefined],
+    ['false record', false],
+    ['zero record', 0],
+    ['string record', 'not metadata'],
+    ['empty path', emptyPath],
+    ['whitespace path', whitespacePath],
+    ['numeric path', numericPath],
+    ['throwing path getter', throwingPath],
+  ];
+
+  for (const [label, invalid] of cases) {
+    const sibling = worldArt.WORLD_ATLAS_MANIFEST.droneStriker;
+    const manifest = { invalid, droneStriker: sibling };
+    const { ImageCtor, record } = recordingImageCtor((assetPath) => (
+      assetPath === sibling.path ? [2240, 960] : [1, 1]
+    ));
+    let visualAssets = null;
+    let failure = null;
+    try {
+      visualAssets = await withWorldManifest(manifest, () => preloadVisualAssets({
+        ImageCtor,
+        FontFaceCtor: null,
+        setTimeoutFn: null,
+      }));
+    } catch (error) {
+      failure = error;
+    }
+
+    assert.equal(failure, null, label);
+    assert.equal(record.constructed, imageAssetCount() + 1, label);
+    assert.deepEqual(visualAssets.world.loaded, ['droneStriker'], label);
+    assert.deepEqual(visualAssets.world.fallback, ['invalid'], label);
+    assert.equal(visualAssets.assets.world.invalid.element, null, label);
+    assert.equal(resolveWorldAtlas(visualAssets, 'invalid'), null, label);
+    assert.equal(resolveWorldAtlas(visualAssets, 'droneStriker').src, sibling.path, label);
+    assert.deepEqual(visualAssets.world.categoryReady, {
+      drone: true,
+      turret: false,
+      wallLow: false,
+      wallMedium: false,
+      wallHigh: false,
+      corridorLow: false,
+      corridorMedium: false,
+      gap: false,
+    }, label);
+  }
+});
+
+test('world preload enforces exact upright and road-edge natural dimensions per key', async () => {
+  const manifest = worldArt.WORLD_ATLAS_MANIFEST;
+  const { ImageCtor } = recordingImageCtor((assetPath) => {
+    if (assetPath === manifest.droneScout.path) return [3584, 512];
+    if (assetPath === manifest.gapEdge.path) return [2240, 960];
+    if (Object.values(manifest).some((metadata) => metadata.path === assetPath)) return [2240, 960];
+    return [1, 1];
+  });
+
+  const visualAssets = await withWorldManifest(manifest, () => preloadVisualAssets({
+    ImageCtor,
+    FontFaceCtor: null,
+    setTimeoutFn: null,
+  }));
+
+  assert.deepEqual(visualAssets.world.fallback, ['droneScout', 'gapEdge']);
+  assert.equal(resolveWorldAtlas(visualAssets, 'droneScout'), null);
+  assert.equal(resolveWorldAtlas(visualAssets, 'droneStriker').src, manifest.droneStriker.path);
+  assert.equal(resolveWorldAtlas(visualAssets, 'gapEdge'), null);
+});
+
+test('world preload exposes all eight exact categories when dimensions are valid', async () => {
+  const manifest = worldArt.WORLD_ATLAS_MANIFEST;
+  const worldPaths = new Set(Object.values(manifest).map((metadata) => metadata.path));
+  const { ImageCtor } = recordingImageCtor((assetPath) => {
+    if (assetPath === manifest.gapEdge.path) return [3584, 512];
+    if (worldPaths.has(assetPath)) return [2240, 960];
+    return [1, 1];
+  });
+
+  const visualAssets = await withWorldManifest(manifest, () => preloadVisualAssets({
+    ImageCtor,
+    FontFaceCtor: null,
+    setTimeoutFn: null,
+  }));
+
+  assert.deepEqual(visualAssets.world.fallback, []);
+  assert.deepEqual(visualAssets.world.categoryReady, {
+    drone: true,
+    turret: true,
+    wallLow: true,
+    wallMedium: true,
+    wallHigh: true,
+    corridorLow: true,
+    corridorMedium: true,
+    gap: true,
+  });
 });
 
 test('canvas reduced-motion policy keeps gameplay moving but steadies decorative effects', () => {

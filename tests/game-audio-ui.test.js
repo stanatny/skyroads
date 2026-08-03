@@ -121,6 +121,10 @@ function makeGameUiSandbox({
   class FakeImage {
     set src(value) {
       this.currentSrc = value;
+      if (value.includes('/world/')) {
+        this.naturalWidth = value.endsWith('/gap-edge.png') ? 3584 : 2240;
+        this.naturalHeight = value.endsWith('/gap-edge.png') ? 512 : 960;
+      }
       if (typeof this.onload === 'function') this.onload();
     }
   }
@@ -231,7 +235,8 @@ test('release diagnostics expose complete preferred world atlas readiness', asyn
   ]);
   assert.deepEqual(Array.from(diagnostics.visualAssets.world.fallback), []);
   assert.deepEqual({ ...diagnostics.visualAssets.world.categoryReady }, {
-    drone: true, turret: true, wallLow: true, wallHigh: true, gap: true,
+    drone: true, turret: true, wallLow: true, wallMedium: true, wallHigh: true,
+    corridorLow: true, corridorMedium: true, gap: true,
   });
   assert.equal(Object.isFrozen(diagnostics.visualAssets.world), true);
 });
