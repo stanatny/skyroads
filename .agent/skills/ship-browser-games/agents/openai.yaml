@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ship Browser Games"
+  short_description: "Design, build, verify, and release browser games"
+  default_prompt: "Use $ship-browser-games to plan and ship this browser-game change with proportional design, testing, and release evidence."
+
+policy:
+  allow_implicit_invocation: true

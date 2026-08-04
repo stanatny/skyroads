@@ -1,90 +1,100 @@
-# 太空跳跳车 SkyRoads
+[中文](README.zh-CN.md)
 
-一款致敬经典 SkyRoads 的太空跑酷网页游戏。单文件 HTML，浏览器打开即玩。
+# Nebula Cruise / 星云巡航
 
-在线游玩：https://stanatny.github.io/skyroads/
+Nebula Cruise is a fast, polished sci-fi lane runner for the browser. Pilot a detailed starship through an endless procedural nebula, read the track ahead, chain jumps and charged shots, collect power-ups, and push for a place in your reliable local Top 15.
 
-## 运行
+Play online: https://stanatny.github.io/skyroads/
 
-直接用浏览器打开 `index.html` 即可。
+Current version: [v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1.0)
 
-或用本地服务器（推荐，避免 file:// 限制）：
+## Highlights
+
+- Responsive held movement crosses multiple lanes smoothly and reverses immediately; `Space` / `Enter` starts or restarts a mission, and `P` pauses or resumes play.
+- A bilingual interstellar command center follows Chinese system languages and otherwise starts in English, with a remembered manual language switch and a compact `V1.1` identity.
+- The original 144 BPM, three-stem adaptive **Nebula Cruise** soundtrack keeps its cinematic electronic palette while adding a faster, joyful, slightly tense pulse.
+- Perspective-aware **Orbital Defense** world art gives low, medium, and high structures distinct silhouettes, connected defense corridors, a dangerous event-horizon treatment for missing road, and Heavy Swarm drones that preserve their warning and movement-direction cues.
+- Semantic Spectrum colors separate the gold player ship, graphite/orange structures, crimson hostile units, and cold-black gaps, while vector jets and synchronized propulsion audio distinguish second jump, third jump, glide, and BOOST.
+- A reliable local Top 15 stays in this browser. The first pilot name comes from a safe original sci-fi call-sign list, is reused automatically, and can be changed whenever you want.
+- An endless, progressively faster course keeps ordinary bypass lanes around the new advanced defenses while retaining fuel pressure, gaps, bridges, enemies, BOOST, super form, magnet, and slowdown power-ups.
+
+## Controls
+
+| Action | Keyboard | Touch |
+| --- | --- | --- |
+| Move | Hold `A` / `D` or `←` / `→` | Swipe left or right |
+| Jump | `K`, `Space`, `W`, or `↑` | Tap |
+| Double jump | Press jump again in the air; costs 3 fuel | Tap again in the air |
+| Glide | Hold a jump key while falling; consumes fuel | Keyboard only |
+| Fire | Tap `J` | Keyboard only |
+| Charged missile | Hold `J` for 3 seconds, then release | Keyboard only |
+| Start / fly again | `Space` or `Enter` | Use the on-screen button |
+| Pause / resume | `P` | Keyboard only |
+| Return to command center (mission over) | `Esc` | Use the Command Center button |
+| Toggle all audio | `M` | Use the separate music and SFX buttons |
+
+Low barriers can be jumped; tall towers require a lane change, super-form jump, or weapon. Bullets and charged missiles have different collision rules, and holding jump while falling activates fuel-consuming glide. The HUD shows fuel, jumps, score, distance, time, speed, charge, power-up timers, and audio state.
+
+## Obstacle route language
+
+Defense modules use a consistent visual language:
+
+- **1 cyan band — 600 world units:** clear it with one jump.
+- **2 cyan bands — 1,250 world units:** clear it with two jumps.
+- **Gold beacon — 2,000 world units:** clear it with the super-form third jump.
+- **Low lit corridor:** primarily uses one jump followed by hold-to-glide while descending; a well-timed second jump is also accepted.
+- **Medium lit corridor:** requires two jumps followed by hold-to-glide while descending.
+- Every newly added advanced building or corridor challenge keeps an ordinary bypass lane. The existing intentional seven-lane all-gap challenge remains unchanged.
+
+## Language and local records
+
+The game supports Simplified/Traditional Chinese system locales and English. If any browser system language is Chinese, the first launch uses Chinese; every other system language uses English. Use the `中文 / EN` control to switch manually. Your choice is remembered in this browser.
+
+Each completed mission is ranked by score, distance, and elapsed time. The local Top 15 is kept in this browser only, using a recoverable local primary/backup store. The current pilot name is reused automatically; changing it is optional. Clearing browser site data also clears these records and preferences.
+
+## Run locally
+
+No package install or web build step is required. You can open `index.html` directly in a modern browser:
+
+```bash
+open index.html
+```
+
+For the most browser-compatible local run, serve the repository directory:
 
 ```bash
 python3 -m http.server 8000
-# 浏览器访问 http://localhost:8000/
 ```
 
-## 玩法
+Then visit `http://localhost:8000/`.
 
-- **目标**：在无限延伸的太空跑道上尽可能跑远。
-- **操作**：
-  - `←/→` 或 `A/D`：左右变道（7 条车道）
-  - `K` / `空格` / `W` / `↑`：跳跃（支持二段跳：空中再按一次触发跃升推进器，一次性消耗 3 燃料；可跃过矮墙，高塔需变道躲避）
-  - **按住** `K` / `空格` / `W` / `↑`：**滑翔**（下落过程中按住跳跃键展开机翼 + 翼下喷口点火，滞空约 3.5 倍但持续耗油，松键或油尽即停；伴随喷火轰鸣音效）
-  - `J`：**点按**发射子弹（无限，射速上限 0.22s/发）；**按住蓄力 3 秒**后松手发射**蓄力导弹**（可击毁敌机或清除墙体含高塔，无弹药限制——蓄力时间就是成本）。蓄力反馈：机头能量球显著长大（0.35→1.2 倍船高）+ 白亮核心 + 折线电弧，满蓄时金色旋转虚线环 + 急促脉冲 + 清亮就绪音；左上角蓄力槽常驻（空槽暗灰、蓄力橙色、满蓄金色闪烁"导弹就绪"），1 秒/2 秒提示音渐高
-  - `M`：音乐 / 音效开关
-  - `空格` / `Enter`：开始 / 重开
-  - `Esc`：回主菜单
-  - 触屏：左右滑动变道，点按跳跃（滑翔与开火为键盘限定操作）
-- **视觉语义**：红色 = 危险 / 屏障；青色 = 宝物 / 可以吃；黄色 = 闪电；紫色 = 沙漏；红白 = 磁铁；紫/橙 = 敌机。
-  - **矮墙**（两侧金属立柱 + 红色能量场）：跳跃顶点高于墙高，时机恰当的跳跃可直接跃过。
-  - **高塔**（暗红高塔，带灯点阵列与顶部天线）：比二段跳上限还高，跳不过去，必须变道躲避。
-  - **窄桥**：偶发连续 2~5 段只剩一条路面、两侧皆是虚空的独木桥路段，稳住别慌。
-- **奖励道具**（发光图标，碾压即可拾取，各有独立音效）：
-  - **闪电超级加速**（黄/青白锯齿闪电）：5 秒无敌 + 速度锁定 36 段/秒（1.5 倍满速）——撞墙（含高塔）、坠入虚空均直接穿透不受伤，可以毫无限制地吃分；期间引擎尾焰拉长、船后拖出速度线，HUD 显示闪电剩余时间条，到期后速度回落至正常上限内继续爬升。
-  - **紫色沙漏**：速度立即降到当前的 60%（不低于起步速度），之后重新爬升，给你喘息。
-  - **青白星超级形态**（青白星形 + ×3 字样）：20 秒限时变身，一波大增强——
-    - **三段跳 + 长滑翔**（滑翔重力系数 0.08 → 0.045），第三段跳同样消耗 3 点燃料；三段顶点可以越过高塔与炮塔；
-    - **子弹强化**：普通子弹任意高度直接摧毁建筑（矮墙、高塔一律崩塌）；
-    - **导弹强化**：命中后清除命中段前后 ±1 段 × 全部车道的整片建筑与敌人，伴随大爆花与强震屏；
-    - **变身瞬间**：白闪 + 金色冲击波环自船体扩散 + 26 颗金色爆发粒子 + 屏幕中央"★ 超级形态 ★"大字渐放，配上扬充能变身音；
-    - **变身期间**：金白能量装甲——整船镀金、顶部双光刃、翼缘金色辉光、金色座舱、金色能量中脊、船尾金色火花、三颗轨道能量球绕船旋转、大号金色脉冲光环；
-    - **到期预警**：最后 3 秒 HUD 条变橙红急促闪烁、3 声渐高 beep（3/2/1 秒）、屏幕边缘金红脉冲光晕收缩、船体金色特效同步急促闪烁；
-    - **结束恢复**：18 颗金色余烬自船体向上升腾散去 + 轻微白闪 + 下行熄火音，明确告知"变回普通形态"。
-  - **红白马蹄磁铁**：8 秒内磁力吸附——当前段与前方 2 段、左右 ±3 车道内的燃料晶体自动飞来（无视高度），每颗被吸晶体化作青色发光菱形沿屏幕弧线飞向船体，HUD 显示青色磁铁倒计时条。
-- **战斗系统**（segment ≥ 80 出现，密度随难度提升）：
-  - **无人机**（紫/橙圆盘 + 旋转桨叶）：高度约 500，可以跳过也可以击落。换道前 0.6 秒急促红白闪烁、原地抖动并向目标侧倾斜（预警），随后 0.4 秒平滑滑到相邻车道——看清节奏再行动。
-  - **重炮塔**（暗紫重型，炮管追踪玩家方向）：高度约 1900，跳不过去，必须变道躲避、击落或用导弹清除。
-  - 撞上敌机即死（BOOST 无敌期间穿透不死）；击毁敌机 +20m。
-  - **弹道携带高度**：子弹保持发射瞬间的高度飞行——对敌人采用近炸引信（任意高度命中，无人机、炮塔均可）；对墙体按高度判定——子弹高度超过矮墙可飞越，高塔挡一切子弹；导弹命中敌人或墙体（含高塔）即清除，不受高度限制。
-  - 敌人绝不刷在当段保证车道上——"沿保证车道前进"永远是无敌安全解。
-- **BOOST 到期预警**：超级加速最后 1.5 秒，HUD 条变红急促闪烁、3 声渐高 beep、屏幕边缘青色脉冲光晕收缩、船体光环同步闪烁。
-- **死亡条件**：
-  - 坠入虚空（缺口未跳跃或跳跃高度不足）
-  - 撞上障碍物（矮墙未跳过，或撞上高塔）
-  - 撞上敌机（无人机或重炮塔）
-  - 燃料耗尽
-- **跳跃高度规则**：单跳顶点高于矮墙与无人机；二段跳上限（约 2 倍单跳顶点）仍低于高塔与重炮塔，因此它们永远必须变道躲避（或用导弹清除）；跳跃中仍可变道。剩余跳跃次数显示在燃料条下方的小菱形指示灯上。
-- **燃料**：跑道上悬浮的发光青色晶体可补充燃料（每颗 +18，上下浮动、缓慢旋转；跳得太高会从晶体上方飞过而错过）。补给节奏克制（保证车道上最迟每 75 段一颗 + 低概率随机），燃油管理是真实的生存压力——磁铁奖励是缓解压力的关键道具。
-- **记录**：最佳距离自动保存到浏览器本地存储。
-- **赛道**：程序化无限生成，生成器保证永远有解（每段至少一条可通行车道、相邻挑战之间留有变道反应距离、全缺口跳跃段长度在滞空跨越范围内、窄桥保证车道与前后可达链相连、燃料定期补给不死局）。难度由浅入深：起步 8 段/秒，约 40 秒才爬升到满速 24。飞船按车道偏移做透视偏转（机头朝消失点 yaw ≈2.6°/车道 + 轻微剪切），与赛道的近大远小透视保持一致。
-- **音频**：Web Audio 程序化合成的芯片音乐 BGM（低音 + 琶音 + 打击乐三层循环，C–G–Am–F 明快进行，BPM 138）与全套音效，零音频文件；浏览器自动播放策略下，音频在首次按键 / 触屏开始游戏时才启动。
+Developers can run the complete automated checks with:
 
-## 技术栈
+```bash
+npm test
+npm run check
+```
 
-原生 HTML5 Canvas 2D + JavaScript。零依赖、零构建。
+The versioned repository Skill at [`.agent/skills/ship-browser-games`](.agent/skills/ship-browser-games/SKILL.md) captures the design, asset, testing, browser-proof, and release practices used for this game so future iterations can reuse them.
 
-## macOS App
+## macOS app
 
-运行以下命令可以构建支持 Apple Silicon 与 Intel 的通用 App：
+On macOS 12 or later with Xcode command-line tools installed, build the universal Apple Silicon + Intel wrapper with:
 
 ```bash
 bash app/build.sh
 ```
 
-构建产物为项目根目录下的 `太空跳跳车.app`。公开版本可从
-[GitHub Releases](https://github.com/stanatny/skyroads/releases) 下载。
+The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. After merge and release verification, the V1.1 workflow targets the universal release asset `Nebula-Cruise-macOS-v1.1.0.zip`; releases are listed on [GitHub Releases](https://github.com/stanatny/skyroads/releases).
 
-## 设计文档
+## Third-party assets
 
-- 设计：`docs/superpowers/specs/2026-06-22-skyroads-design.md`
-- 实现计划：`docs/superpowers/plans/2026-06-22-skyroads-implementation.md`
+Visual assets and fonts are copied into this repository; nothing is hotlinked at runtime. Gameplay uses local Semantic Spectrum color derivatives so the ship, structures, hostile units, and gaps keep distinct visual roles without changing their geometry, anchors, or collision. The deterministic recipe and hashes are in [`docs/assets/semantic-spectrum.md`](docs/assets/semantic-spectrum.md). Sources, upstream licenses, selected files, and modifications are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), with license texts in [`licenses/`](licenses/). The adaptive soundtrack is original to this project.
 
-## AI 辅助声明
+## AI assistance
 
-本项目的代码、文案与视觉设计由 Kimi K3 辅助生成，经作者审核和修改；作者对最终内容负责。本项目与 Kimi 或 Moonshot AI 无隶属、合作或背书关系。
+Earlier versions of this project were developed with assistance from Kimi K3. This release also uses OpenAI Codex for implementation, testing, documentation, and visual iteration. The author reviews and edits the work and remains responsible for the final project. No affiliation, sponsorship, or endorsement by Moonshot AI or OpenAI is implied.
 
-## 使用与许可
+## Use and licensing
 
-本仓库公开用于展示与学习。除 GitHub 平台服务所需的权利外，作者未授予额外的复制、修改、分发或商业使用许可。
+This repository is publicly available for demonstration and learning. Except for rights required to provide the GitHub service, the author has not granted an additional license to copy, modify, distribute, or use the project's original material commercially. This project-level notice does **not** replace, restrict, or override any third-party license: those assets remain governed by the licenses identified in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [`licenses/`](licenses/).

@@ -6,6 +6,7 @@ app/AppIcon.iconset/
 # Editor
 .vscode/
 .idea/
+.worktrees/
 *.swp
 *~
 
@@ -15,3 +16,9 @@ app/AppIcon.iconset/
 # 覆盖全局 ~/.gitignore 中的 docs/ 规则：本项目需要跟踪设计文档
 !docs/
 !docs/**
+
+# Repository Codex Skill is a V1.1 release artifact.
+!.agent/
+!.agent/skills/
+!.agent/skills/ship-browser-games/
+!.agent/skills/ship-browser-games/**
