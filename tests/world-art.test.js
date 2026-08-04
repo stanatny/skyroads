@@ -16,6 +16,7 @@ const {
   buildSpriteDrawPlan,
   roadEdgeFrame,
   worldSpriteDrawRect,
+  projectedLaneEnvelope,
   variantKey,
 } = require('../src/world-art.js');
 
@@ -75,19 +76,19 @@ function deepFreeze(value, seen = new Set()) {
 }
 
 const FINAL_MANIFEST_CONTRACT = Object.freeze({
-  droneScout: ['./assets/world/drone-scout.png', 'drone', 0],
-  droneStriker: ['./assets/world/drone-striker.png', 'drone', 1],
-  turretSentry: ['./assets/world/turret-sentry.png', 'turret', 0],
-  turretHeavy: ['./assets/world/turret-heavy.png', 'turret', 1],
-  barrierRail: ['./assets/world/barrier-rail.png', 'wallLow', 0],
-  barrierCrate: ['./assets/world/barrier-crate.png', 'wallLow', 1],
-  structurePylon: ['./assets/world/structure-pylon.png', 'wallMedium', 0],
-  structureBastion: ['./assets/world/structure-bastion.png', 'wallMedium', 1],
-  structureReactor: ['./assets/world/structure-reactor.png', 'wallHigh', 0],
-  structureTower: ['./assets/world/structure-tower.png', 'wallHigh', 1],
-  corridorLow: ['./assets/world/corridor-low.png', 'corridorLow', 0],
-  corridorMedium: ['./assets/world/corridor-medium.png', 'corridorMedium', 0],
-  gapEdge: ['./assets/world/gap-edge.png', 'gap', 0],
+  droneScout: ['./assets/world/semantic/drone-scout.png', 'drone', 0],
+  droneStriker: ['./assets/world/semantic/drone-striker.png', 'drone', 1],
+  turretSentry: ['./assets/world/semantic/turret-sentry.png', 'turret', 0],
+  turretHeavy: ['./assets/world/semantic/turret-heavy.png', 'turret', 1],
+  barrierRail: ['./assets/world/semantic/barrier-rail.png', 'wallLow', 0],
+  barrierCrate: ['./assets/world/semantic/barrier-crate.png', 'wallLow', 1],
+  structurePylon: ['./assets/world/semantic/structure-pylon.png', 'wallMedium', 0],
+  structureBastion: ['./assets/world/semantic/structure-bastion.png', 'wallMedium', 1],
+  structureReactor: ['./assets/world/semantic/structure-reactor.png', 'wallHigh', 0],
+  structureTower: ['./assets/world/semantic/structure-tower.png', 'wallHigh', 1],
+  corridorLow: ['./assets/world/semantic/corridor-low.png', 'corridorLow', 0],
+  corridorMedium: ['./assets/world/semantic/corridor-medium.png', 'corridorMedium', 0],
+  gapEdge: ['./assets/world/semantic/gap-edge.png', 'gap', 0],
 });
 
 const CATEGORY_WORLD_BOUNDS = Object.freeze({
@@ -114,6 +115,8 @@ function planOptions(metadata, {
   pixelsPerWorldUnitX = 0.2,
   pixelsPerWorldUnitY = 0.15,
   alpha = 1,
+  viewProfile = 'airborne',
+  laneOffset = null,
 } = {}) {
   return {
     metadata,
@@ -125,6 +128,8 @@ function planOptions(metadata, {
     pixelsPerWorldUnitX,
     pixelsPerWorldUnitY,
     alpha,
+    viewProfile,
+    laneOffset,
   };
 }
 
@@ -206,6 +211,63 @@ test('view blending uses wide symmetric yaw and visual-center pitch', () => {
   assert.equal(high.pitch.lowerIndex, 1);
   assert.equal(high.pitch.upperIndex, 2);
 
+  const outerHigh = selectViewBlend({
+    worldX: 2160,
+    zRel: 505,
+    cameraY: 2340,
+    objectY: 0,
+    worldBounds: { minY: 0, maxY: 2000 },
+    viewProfile: 'grounded',
+    laneOffset: 3,
+  });
+  assert.ok(Math.abs(outerHigh.pitch.angle - 31.14) < 0.1);
+  assert.equal(outerHigh.yaw.angle, 18);
+
+  const innerHigh = selectViewBlend({
+    worldX: 720,
+    zRel: 505,
+    cameraY: 2340,
+    objectY: 0,
+    worldBounds: { minY: 0, maxY: 2000 },
+    viewProfile: 'grounded',
+    laneOffset: 1,
+  });
+  assert.equal(innerHigh.yaw.angle, 6);
+
+  const distantOuterHigh = selectViewBlend({
+    worldX: 2160,
+    zRel: 2400,
+    cameraY: 2340,
+    objectY: 0,
+    worldBounds: { minY: 0, maxY: 2000 },
+    viewProfile: 'grounded',
+    laneOffset: 3,
+  });
+  assert.equal(distantOuterHigh.yaw.angle, 9);
+
+  const groundedLaneYaw = Array.from({ length: 7 }, (_, lane) => (
+    selectViewBlend({
+      worldX: (lane - 3) * 720,
+      zRel: 505,
+      cameraY: 2340,
+      objectY: 0,
+      worldBounds: { minY: 0, maxY: 2000 },
+      viewProfile: 'grounded',
+      laneOffset: lane - 3,
+    }).yaw.angle
+  ));
+  assert.deepEqual(groundedLaneYaw, [-18, -12, -6, 0, 6, 12, 18]);
+
+  const airborne = selectViewBlend({
+    worldX: 2160,
+    zRel: 505,
+    cameraY: 2340,
+    objectY: 0,
+    worldBounds: { minY: 0, maxY: 500 },
+    viewProfile: 'airborne',
+  });
+  assert.ok(airborne.yaw.angle > 75);
+
   const left = selectViewBlend({
     worldX: -100, zRel: 100, cameraY: 1000, objectY: 0, worldBounds: { minY: 0, maxY: 2000 },
   });
@@ -252,6 +314,104 @@ test('upright draw plans emit one, two, or four normalized weighted draws', () =
 
   const clampedAlpha = buildSpriteDrawPlan(planOptions(metadata, { yaw: 42.5, pitch: 67.5, alpha: 7 }));
   for (const draw of clampedAlpha.draws) approximately(draw.alpha, draw.weight);
+});
+
+test('grounded view selection keeps one crisp frontal frame at every depth', () => {
+  const metadata = syntheticUpright();
+  for (const zRel of [205, 650, 1175, 1200, 1225, 1800]) {
+    const grounded = buildSpriteDrawPlan(planOptions(metadata, {
+      yaw: 20,
+      pitch: 49,
+      zRel,
+      alpha: 1,
+      viewProfile: 'grounded',
+      laneOffset: 2,
+    }));
+    assert.equal(grounded.draws.length, 1, `depth ${zRel} should use one coherent silhouette`);
+    assert.equal(
+      Math.floor(grounded.draws[0].source.sx / metadata.frameWidth),
+      3,
+      `depth ${zRel} should use the frontal yaw column`,
+    );
+    assert.equal(
+      Math.floor(grounded.draws[0].source.sy / metadata.frameHeight),
+      1,
+      `depth ${zRel} should keep the middle pitch row`,
+    );
+    assert.equal(grounded.draws[0].alpha, 1);
+  }
+
+  const airborne = buildSpriteDrawPlan(planOptions(metadata, {
+    yaw: 20,
+    pitch: 49,
+    zRel: 205,
+    alpha: 1,
+    viewProfile: 'airborne',
+  }));
+  assert.equal(airborne.draws.length, 4);
+});
+
+test('grounded plans keep one stable pitch row while perspective scale changes', () => {
+  const metadata = WORLD_ATLAS_MANIFEST.barrierRail;
+  const planAt = (zRel) => buildSpriteDrawPlan({
+    metadata,
+    worldX: 720,
+    zRel,
+    cameraY: 2340,
+    objectY: 0,
+    projectedOrigin: { x: 480, y: 300 },
+    pixelsPerWorldUnitX: 120 / zRel,
+    pixelsPerWorldUnitY: 90 / zRel,
+    alpha: 1,
+    viewProfile: 'grounded',
+    laneOffset: 1,
+  });
+  const depths = [130, 450, 800, 1190, 1200, 1800];
+  const plans = depths.map(planAt);
+  for (const plan of plans) {
+    assert.equal(plan.draws.length, 1);
+    assert.equal(Math.floor(plan.draws[0].source.sx / metadata.frameWidth), 3);
+    assert.equal(Math.floor(plan.draws[0].source.sy / metadata.frameHeight), 1);
+    assert.equal(plan.draws[0].alpha, 1);
+  }
+  const normalizedWidths = plans.map((plan, index) => plan.bounds.width * depths[index]);
+  const normalizedHeights = plans.map((plan, index) => plan.bounds.height * depths[index]);
+  for (const value of normalizedWidths.slice(1)) approximately(value, normalizedWidths[0]);
+  for (const value of normalizedHeights.slice(1)) approximately(value, normalizedHeights[0]);
+});
+
+test('grounded structure height grows continuously while crossing the former near-frame boundary', () => {
+  const keys = ['barrierRail', 'structurePylon', 'structureTower'];
+  const depths = [1300, 1275, 1250, 1225, 1200, 1175, 1150, 1125, 1100];
+  for (const key of keys) {
+    const metadata = WORLD_ATLAS_MANIFEST[key];
+    for (let lane = 0; lane < 7; lane += 1) {
+      const laneOffset = lane - 3;
+      const heights = depths.map((zRel) => buildSpriteDrawPlan({
+        metadata,
+        worldX: laneOffset * 720,
+        zRel,
+        cameraY: 2340,
+        objectY: 0,
+        projectedOrigin: { x: 640, y: 420 },
+        pixelsPerWorldUnitX: 120 / zRel,
+        pixelsPerWorldUnitY: 90 / zRel,
+        alpha: 1,
+        viewProfile: 'grounded',
+        laneOffset,
+      }).bounds.height);
+      for (let index = 1; index < heights.length; index += 1) {
+        assert.ok(
+          heights[index] >= heights[index - 1],
+          `${key} lane ${lane} shrank from depth ${depths[index - 1]} to ${depths[index]}`,
+        );
+        assert.ok(
+          heights[index] / heights[index - 1] <= 1.04,
+          `${key} lane ${lane} jumped from depth ${depths[index - 1]} to ${depths[index]}`,
+        );
+      }
+    }
+  }
 });
 
 test('origin anchors ignore atlas placement padding and bounds union every frozen destination', () => {
@@ -658,6 +818,82 @@ test('world draw rectangles use fixed collision geometry at each viewport, depth
           assert.ok(rect.width >= 0);
           assert.ok(rect.height >= 0);
           assert.equal(Object.isFrozen(rect), true);
+        }
+      }
+    }
+  }
+});
+
+test('grounded atlas plans remain centered on projected lane envelopes without covering adjacent lanes', () => {
+  const groundedKeys = Object.keys(WORLD_ATLAS_MANIFEST).filter((key) => (
+    WORLD_ATLAS_MANIFEST[key].layout === 'upright'
+      && WORLD_ATLAS_MANIFEST[key].category !== 'drone'
+      && WORLD_ATLAS_MANIFEST[key].category !== 'turret'
+  ));
+  const viewports = [[960, 600], [1280, 800], [1920, 1080]];
+  const depths = [250, 505, 800, 1190, 1800, 3600, 6000];
+  const laneWidth = 720;
+  const footprintWidth = 648;
+  for (const [width, height] of viewports) {
+    const projectPoint = projectionFor(width, height);
+    const centerTolerance = 1.25 * width / 1280;
+    for (const zRel of depths) {
+      for (let lane = 0; lane < 7; lane += 1) {
+        const worldX = (lane - 3) * laneWidth;
+        for (const key of groundedKeys) {
+          const metadata = WORLD_ATLAS_MANIFEST[key];
+          const geometry = WORLD_GEOMETRY[metadata.category];
+          const envelope = projectedLaneEnvelope({
+            projectPoint,
+            worldX,
+            zRel,
+            laneWidth,
+            footprintWidth,
+            baseY: geometry.baseY,
+          });
+          approximately(envelope.laneCenter.x, projectPoint(worldX, geometry.baseY, zRel).x);
+          approximately(envelope.footprintCenter.x, envelope.laneCenter.x);
+          approximately(
+            envelope.footprintWidth,
+            Math.abs(projectPoint(worldX + footprintWidth / 2, geometry.baseY, zRel).x
+              - projectPoint(worldX - footprintWidth / 2, geometry.baseY, zRel).x),
+          );
+
+          const projectedOrigin = projectPoint(worldX, geometry.baseY, zRel);
+          const projectedUnitX = projectPoint(worldX + 1, geometry.baseY, zRel);
+          const projectedUnitY = projectPoint(worldX, geometry.baseY + 1, zRel);
+          const plan = buildSpriteDrawPlan({
+            metadata,
+            worldX,
+            zRel,
+            cameraY: 2340,
+            objectY: geometry.baseY,
+            projectedOrigin,
+            pixelsPerWorldUnitX: Math.abs(projectedUnitX.x - projectedOrigin.x),
+            pixelsPerWorldUnitY: Math.abs(projectedUnitY.y - projectedOrigin.y),
+            alpha: 1,
+            viewProfile: 'grounded',
+            laneOffset: lane - 3,
+          });
+          const planCenter = plan.bounds.x + plan.bounds.width / 2;
+          assert.ok(
+            Math.abs(planCenter - envelope.laneCenter.x) <= centerTolerance,
+            `${key} lane ${lane} depth ${zRel} center ${planCenter - envelope.laneCenter.x}`,
+          );
+          const laneOverhang = envelope.laneWidth * 0.15;
+          assert.ok(
+            plan.bounds.x >= envelope.footprintLeft - laneOverhang,
+            `${key} lane ${lane} depth ${zRel} left overhang`,
+          );
+          assert.ok(
+            plan.bounds.x + plan.bounds.width <= envelope.footprintRight + laneOverhang,
+            `${key} lane ${lane} depth ${zRel} right overhang`,
+          );
+          assert.ok(
+            plan.bounds.x > envelope.adjacentLeftCenter
+              && plan.bounds.x + plan.bounds.width < envelope.adjacentRightCenter,
+            `${key} lane ${lane} depth ${zRel} adjacent lane center`,
+          );
         }
       }
     }

@@ -4,8 +4,8 @@
   const MOVEMENT_TUNING = Object.freeze({
     laneCount: 7,
     tapDurationMs: 145,
-    holdDelayMs: 140,
-    repeatDurationMs: 85,
+    holdDelayMs: 220,
+    repeatDurationMs: 110,
   });
   const HITBOX = Object.freeze({
     playerHalfWidth: 0.14,

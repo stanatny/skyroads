@@ -450,7 +450,13 @@ test('the selected semantic UI assets are committed as nonempty PNGs', () => {
   for (const relativePath of [
     'assets/ui/panel-frame-cyan.png',
     'assets/ui/meter-frame-cyan.png',
+    'assets/ui/hologram-panel.png',
+    'assets/ui/industrial-meter-overlay.png',
   ]) assertPng(relativePath);
+  assert.equal(sha256('assets/ui/hologram-panel.png'),
+    '1c15f13cf8e52cd26022dc1e6be7b1b92c36e39e6b220c8ecba9e028b0ff2c6e');
+  assert.equal(sha256('assets/ui/industrial-meter-overlay.png'),
+    '0d2277fa1de504d1efed6a3cde4ff7419062e6e66bc337da1f451e3a93e57e6d');
 });
 
 test('mission controls use accessible blue gradients without the retired gold frame', () => {
@@ -501,6 +507,13 @@ test('third-party notices record every exact source, license, path, hash and dow
     'https://kenney.nl/assets/ui-pack-sci-fi',
     'PNG/Extra/Double/panel_glass_notches.png',
     'PNG/Blue/Double/bar_round_gloss_large.png',
+    'https://opengameart.org/content/free-ui-hologram-interface',
+    '1._free_hologram_interface_wenrexa.zip',
+    'assets/ui/hologram-panel.png',
+    'https://opengameart.org/content/scifi-ui',
+    'SCIFI%20UI.zip',
+    'assets/ui/industrial-meter-overlay.png',
+    'licenses/OpenGameArt-CC0-1.0.txt',
     'Phosphor',
     'https://github.com/phosphor-icons/core',
     'MIT',
@@ -522,9 +535,18 @@ test('committed license copies are byte-identical to the recorded official files
     ['licenses/Orbitron-OFL-1.1.txt', 'ab609b0e110d622435ff337cdf233288556e011bbf9bd0550be98846c0630819'],
     ['licenses/Kenney-Space-Kit-CC0.txt', 'bd4e050e69d41351282c4d53f943cd4d80a80b968593e60653ba5292637941b7'],
     ['licenses/Kenney-Modular-Space-Kit-CC0.txt', '38d94a4c79768cf5dc65e55b85f2dedd9f4bad35e325db1d0e5898fc1b7c5bbb'],
+    ['licenses/OpenGameArt-CC0-1.0.txt', 'a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499'],
   ];
   for (const [relativePath, expectedHash] of officialLicenses) {
     assert.equal(sha256(relativePath), expectedHash, `${relativePath} must preserve the official bytes`);
+    if (relativePath === 'licenses/OpenGameArt-CC0-1.0.txt') {
+      assert.equal(
+        notices.includes(`License copy: \`${relativePath}\` — official legal-code SHA-256 \`${expectedHash}\``),
+        true,
+        `${relativePath} must map its official legal-code hash explicitly`,
+      );
+      continue;
+    }
     assert.equal(
       notices.includes(`License copy: \`${relativePath}\` — upstream and committed SHA-256 \`${expectedHash}\``),
       true,
@@ -537,6 +559,8 @@ test('byte-identical runtime assets match their exact recorded upstream hashes',
   const upstreamCopies = [
     ['assets/ui/panel-frame-cyan.png', '3e8dd90c8e44f1c1729ce8d304656c64c8b467985584f9a9394f5631a204f51a'],
     ['assets/ui/meter-frame-cyan.png', 'af13ccda23a736cdf18049cbe05586178e7cde8fddb5617bcf19cd5b10fcc3b9'],
+    ['assets/ui/hologram-panel.png', '1c15f13cf8e52cd26022dc1e6be7b1b92c36e39e6b220c8ecba9e028b0ff2c6e'],
+    ['assets/ui/industrial-meter-overlay.png', '0d2277fa1de504d1efed6a3cde4ff7419062e6e66bc337da1f451e3a93e57e6d'],
     ['assets/icons/translate.svg', '1e49dc31f3a172c9c7c67361511ee5314598b3f5b32788219325f589487f76c5'],
     ['assets/icons/speaker-high.svg', 'caca5fc1ee8489ac19232301d2c96f6d4048802491d75d761bbb89d5c98e459d'],
     ['assets/icons/speaker-slash.svg', '66b75267ea8ba8759a70e4c8312bfe06b834fc8fcf0dd1710d9819877f0c8013'],
@@ -566,6 +590,27 @@ test('the documented offline render contract pins renderer and derived output ha
     );
   }
   assert.match(recipe, /swift tools\/render-ship\.swift \\\n\s+--model .*Striker\.obj \\\n\s+--texture .*Striker_Blue\.png/);
+});
+
+test('the semantic spectrum recipe pins deterministic tooling and every derived runtime hash', () => {
+  const recipe = read('docs/assets/semantic-spectrum.md').toString('utf8');
+  const manifest = JSON.parse(read('tools/semantic-assets.json'));
+  for (const relativePath of ['tools/recolor-semantic-assets.js', 'tools/semantic-assets.json']) {
+    assert.equal(
+      recipe.split('\n').some((line) => line.includes(`\`${relativePath}\``) && line.includes(sha256(relativePath))),
+      true,
+      `${relativePath} must have its current SHA-256 in the semantic recipe`,
+    );
+  }
+  for (const asset of manifest.assets) {
+    assert.equal(
+      recipe.split('\n').some((line) => line.includes(`\`${asset.output}\``) && line.includes(sha256(asset.output))),
+      true,
+      `${asset.output} must have its current SHA-256 in the semantic recipe`,
+    );
+  }
+  assert.match(recipe, /node tools\/recolor-semantic-assets\.js/);
+  assert.match(recipe, /alpha planes are byte-identical/i);
 });
 
 test('the world renderer prepares the complete SceneKit scene before taking snapshots', () => {
@@ -1899,12 +1944,14 @@ test('generated metadata exactly describes every rendered alpha crop and world-o
       const yaw = metadata.yawDegrees[column] * Math.PI / 180;
       const pitch = metadata.pitchDegrees[row] * Math.PI / 180;
       const visualCenterY = (metadata.worldBounds.minY + metadata.worldBounds.maxY) / 2;
+      const worldX = Math.tan(yaw) * depth;
+      const horizontalDistance = Math.hypot(worldX, depth);
       const projectedOrigin = { x: 500, y: 300 };
       const plan = buildSpriteDrawPlan({
         metadata,
-        worldX: Math.tan(yaw) * depth,
+        worldX,
         zRel: depth,
-        cameraY: visualCenterY + Math.tan(pitch) * depth,
+        cameraY: visualCenterY + Math.tan(pitch) * horizontalDistance,
         projectedOrigin,
         pixelsPerWorldUnitX: metadata.pixelsPerWorldUnit,
         pixelsPerWorldUnitY: metadata.pixelsPerWorldUnit,
@@ -2147,26 +2194,28 @@ test('visual preloading reports every local asset and requires both player frame
   assert.equal(result.shipFramesReady, true);
   assert.equal(result.fallbackRequired, false);
   assert.equal(result.timedOut, false);
-  assert.equal(result.loadedCount, 24);
+  assert.equal(result.loadedCount, 26);
   assert.equal(result.failedCount, 0);
   assert.equal(result.assets.ship.neutral.loaded, true);
   assert.equal(result.assets.ship.thrust.loaded, true);
-  assert.equal(Object.keys(result.assets.ui).length, 2);
+  assert.equal(Object.keys(result.assets.ui).length, 4);
+  assert.equal(result.assets.ui.hologramPanel.loaded, true);
+  assert.equal(result.assets.ui.industrialMeter.loaded, true);
   assert.equal(Object.keys(result.assets.icons).length, 6);
   assert.deepEqual(queuedPaths.slice(-13), [
-    './assets/world/drone-scout.png',
-    './assets/world/drone-striker.png',
-    './assets/world/turret-sentry.png',
-    './assets/world/turret-heavy.png',
-    './assets/world/barrier-rail.png',
-    './assets/world/barrier-crate.png',
-    './assets/world/structure-pylon.png',
-    './assets/world/structure-bastion.png',
-    './assets/world/structure-reactor.png',
-    './assets/world/structure-tower.png',
-    './assets/world/corridor-low.png',
-    './assets/world/corridor-medium.png',
-    './assets/world/gap-edge.png',
+    './assets/world/semantic/drone-scout.png',
+    './assets/world/semantic/drone-striker.png',
+    './assets/world/semantic/turret-sentry.png',
+    './assets/world/semantic/turret-heavy.png',
+    './assets/world/semantic/barrier-rail.png',
+    './assets/world/semantic/barrier-crate.png',
+    './assets/world/semantic/structure-pylon.png',
+    './assets/world/semantic/structure-bastion.png',
+    './assets/world/semantic/structure-reactor.png',
+    './assets/world/semantic/structure-tower.png',
+    './assets/world/semantic/corridor-low.png',
+    './assets/world/semantic/corridor-medium.png',
+    './assets/world/semantic/gap-edge.png',
   ]);
   assert.deepEqual(result.world.loaded, [
     'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
@@ -2300,7 +2349,7 @@ test('visual preloading returns deterministic failure diagnostics on timeout', a
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 24);
+  assert.equal(result.failedCount, 26);
 });
 
 test('timeout seals image handlers so late completion cannot mutate terminal diagnostics', async () => {
@@ -2327,7 +2376,7 @@ test('timeout seals image handlers so late completion cannot mutate terminal dia
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(JSON.stringify(result, (key, value) => key === 'element' ? undefined : value), frozenSnapshot);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 24);
+  assert.equal(result.failedCount, 26);
 });
 
 test('visual preloading survives an Image constructor security failure', async () => {
@@ -2344,7 +2393,7 @@ test('visual preloading survives an Image constructor security failure', async (
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 24);
+  assert.equal(result.failedCount, 26);
 });
 
 test('player frame selection uses thrust only when both frames are ready', () => {

@@ -14,6 +14,7 @@ class FakeEventTarget {
     this.tagName = tagName.toUpperCase();
     this.listeners = new Map();
     this.attributes = new Map();
+    this.dataset = {};
     this.children = [];
     this.hidden = false;
     this.disabled = false;
@@ -136,22 +137,40 @@ function makeGameUiSandbox({
   class FakeAudioContext {
     constructor() {
       this.currentTime = 10;
+      this.sampleRate = 48000;
       this.state = 'running';
       this.destination = {};
       this.gains = [];
       this.filters = [];
+      this.buffers = [];
+      this.sources = [];
+      this.oscillators = [];
       audioContexts.push(this);
     }
     resume() { this.state = 'running'; return Promise.resolve(); }
     close() { this.state = 'closed'; return Promise.resolve(); }
+    audioParam(value = 0) {
+      return {
+        value,
+        events: [],
+        cancelScheduledValues(time) { this.events.push(['cancel', time]); },
+        setValueAtTime(nextValue, time) {
+          this.value = nextValue;
+          this.events.push(['set', nextValue, time]);
+        },
+        linearRampToValueAtTime(nextValue, time) {
+          this.value = nextValue;
+          this.events.push(['linear', nextValue, time]);
+        },
+        exponentialRampToValueAtTime(nextValue, time) {
+          this.value = nextValue;
+          this.events.push(['exponential', nextValue, time]);
+        },
+      };
+    }
     createGain() {
       const gain = {
-        gain: {
-          value: 0,
-          cancelScheduledValues() {},
-          setValueAtTime(value) { this.value = value; },
-          linearRampToValueAtTime(value) { this.value = value; },
-        },
+        gain: this.audioParam(0),
         connect() {}, disconnect() {},
       };
       this.gains.push(gain);
@@ -159,19 +178,56 @@ function makeGameUiSandbox({
     }
     createBiquadFilter() {
       const filter = {
-        type: '', frequency: {
-          value: 0,
-          cancelScheduledValues() {},
-          setValueAtTime(value) { this.value = value; },
-          linearRampToValueAtTime(value) { this.value = value; },
-        },
+        type: '',
+        frequency: this.audioParam(0),
+        Q: this.audioParam(0),
         connect() {}, disconnect() {},
       };
       this.filters.push(filter);
       return filter;
     }
+    createBuffer(channels, length, sampleRate) {
+      const channelData = Array.from(
+        { length: channels },
+        () => new Float32Array(length),
+      );
+      const buffer = {
+        channels,
+        length,
+        sampleRate,
+        duration: length / sampleRate,
+        getChannelData(index) { return channelData[index]; },
+      };
+      this.buffers.push(buffer);
+      return buffer;
+    }
     createBufferSource() {
-      return { buffer: null, loop: false, connect() {}, disconnect() {}, start() {}, stop() {} };
+      const source = {
+        buffer: null,
+        loop: false,
+        starts: [],
+        stops: [],
+        connect() {},
+        disconnect() {},
+        start(time = 0) { this.starts.push(time); },
+        stop(time = 0) { this.stops.push(time); },
+      };
+      this.sources.push(source);
+      return source;
+    }
+    createOscillator() {
+      const oscillator = {
+        type: 'sine',
+        frequency: this.audioParam(440),
+        starts: [],
+        stops: [],
+        connect() {},
+        disconnect() {},
+        start(time = 0) { this.starts.push(time); },
+        stop(time = 0) { this.stops.push(time); },
+      };
+      this.oscillators.push(oscillator);
+      return oscillator;
     }
     decodeAudioData() { return Promise.resolve({ duration: 68.571 }); }
   }
@@ -210,7 +266,18 @@ function makeGameUiSandbox({
     Image: FakeImage,
   };
   vm.createContext(sandbox);
-  const files = ['version.js', 'i18n.js', 'leaderboard.js', 'presentation.js', 'world-art.js', 'input.js', 'obstacles.js'];
+  const files = [
+    'version.js',
+    'i18n.js',
+    'leaderboard.js',
+    'presentation.js',
+    'world-art.js',
+    'scene-style.js',
+    'drone-visual.js',
+    'input.js',
+    'obstacles.js',
+    'gap-regions.js',
+  ];
   if (loadAdaptiveAudio) files.push('audio.js');
   files.push('game.js');
   for (const file of files) {
@@ -239,6 +306,7 @@ function simulationSnapshot(sandbox) {
     playerVY: STATE.playerVY,
     jumpsUsed: STATE.jumpsUsed,
     jumpBurst: STATE.jumpBurst,
+    jumpBurstTier: STATE.jumpBurstTier,
     recoil: STATE.recoil,
     boostT: STATE.boostT,
     boostPrevSpeed: STATE.boostPrevSpeed,
@@ -317,13 +385,151 @@ test('game wiring renders the V1.1 badge and localized pause panel without takin
   assert.equal(documentObject.activeElement, preservedFocus);
 });
 
+test('active HUD keeps immediate instruments and hides historical or instructional noise', () => {
+  const { sandbox } = makeGameUiSandbox();
+  const capture = (state) => JSON.parse(vm.runInContext(`(() => {
+    Object.assign(STATE, ${JSON.stringify(state)});
+    STATE.visualAssets = {
+      assets: {
+        ui: {
+          hologramPanel: {
+            loaded: true,
+            element: { currentSrc: './assets/ui/hologram-panel.png' },
+          },
+          industrialMeter: {
+            loaded: true,
+            element: { currentSrc: './assets/ui/industrial-meter-overlay.png' },
+          },
+        },
+      },
+    };
+    const events = [];
+    const gradient = { addColorStop() {} };
+    const context = new Proxy({
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      font: '',
+      textAlign: 'left',
+      globalAlpha: 1,
+      fillText(text, x, y) { events.push({ type: 'text', text: String(text), x, y }); },
+      fillRect(...args) { events.push({ type: 'fillRect', style: this.fillStyle, args }); },
+      strokeRect(...args) { events.push({ type: 'strokeRect', style: this.strokeStyle, args }); },
+      drawImage(image, ...args) { events.push({ type: 'drawImage', image: image && image.currentSrc, args }); },
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      closePath() {},
+      fill() {},
+      stroke() {},
+      createLinearGradient() { return gradient; },
+      createRadialGradient() { return gradient; },
+    }, {
+      get(target, key) { return key in target ? target[key] : () => {}; },
+      set(target, key, value) { target[key] = value; return true; },
+    });
+    renderHUD(context);
+    return JSON.stringify(events);
+  })()`, sandbox));
+
+  const idle = capture({
+    mode: 'PLAYING',
+    fuel: 80,
+    jumpsUsed: 0,
+    chargeT: 0,
+    boostT: 0,
+    tripleT: 0,
+    magnetT: 0,
+    distanceMeters: 321,
+    elapsedMs: 4567,
+    score: 321,
+    speed: 9.4,
+  });
+  const idleText = idle.filter((event) => event.type === 'text').map((event) => event.text);
+  for (const expected of ['FUEL', 'JUMPS', 'SCORE', 'DISTANCE', 'SPEED']) {
+    assert.ok(idleText.some((text) => text.includes(expected)), expected);
+  }
+  for (const removed of ['LOCAL BEST', 'TIME', 'J: FIRE / HOLD TO CHARGE', 'AUDIO ON', 'MISSILE CHARGE']) {
+    assert.equal(idleText.some((text) => text.includes(removed)), false, removed);
+  }
+  assert.ok(idle.some((event) => event.type === 'drawImage'
+    && event.image === './assets/ui/hologram-panel.png'));
+  assert.ok(idle.some((event) => event.type === 'drawImage'
+    && event.image === './assets/ui/industrial-meter-overlay.png'));
+
+  const active = capture({
+    mode: 'PLAYING',
+    fuel: 80,
+    jumpsUsed: 0,
+    chargeT: 1.5,
+    boostT: 2,
+    tripleT: 3,
+    magnetT: 4,
+    distanceMeters: 321,
+    elapsedMs: 4567,
+    score: 321,
+    speed: 9.4,
+  });
+  const activeText = active.filter((event) => event.type === 'text').map((event) => event.text);
+  for (const expected of ['CHARGING', 'BOOST', 'SUPER', 'MAGNET']) {
+    assert.ok(activeText.some((text) => text.includes(expected)), expected);
+  }
+
+  const fallbackText = JSON.parse(vm.runInContext(`(() => {
+    STATE.visualAssets = { assets: { ui: {} } };
+    Object.assign(STATE, ${JSON.stringify({
+    mode: 'PLAYING',
+    fuel: 80,
+    jumpsUsed: 0,
+    chargeT: 0,
+    boostT: 0,
+    tripleT: 0,
+    magnetT: 0,
+    distanceMeters: 321,
+    score: 321,
+    speed: 9.4,
+  })});
+    const text = [];
+    const gradient = { addColorStop() {} };
+    const context = new Proxy({
+      fillStyle: '#000', strokeStyle: '#000', font: '', textAlign: 'left', globalAlpha: 1,
+      fillText(value) { text.push(String(value)); },
+      createLinearGradient() { return gradient; },
+      createRadialGradient() { return gradient; },
+    }, {
+      get(target, key) { return key in target ? target[key] : () => {}; },
+      set(target, key, value) { target[key] = value; return true; },
+    });
+    renderHUD(context);
+    return JSON.stringify(text);
+  })()`, sandbox));
+  for (const expected of ['FUEL', 'JUMPS', 'SCORE', 'DISTANCE', 'SPEED']) {
+    assert.ok(fallbackText.some((text) => text.includes(expected)), `fallback ${expected}`);
+  }
+});
+
+test('presentation mode exposes utilities outside active play only', () => {
+  const { sandbox, elements } = makeGameUiSandbox();
+  for (const [mode, expected] of [
+    ['MENU', 'MENU'],
+    ['PLAYING', 'PLAYING'],
+    ['PAUSED', 'PAUSED'],
+    ['GAMEOVER', 'GAMEOVER'],
+  ]) {
+    vm.runInContext(`STATE.mode = '${mode}'; refreshPresentation();`, sandbox);
+    assert.equal(elements['app-ui'].dataset.mode, expected);
+  }
+});
+
 test('release diagnostics expose complete preferred world atlas readiness', async () => {
   const { sandbox } = makeGameUiSandbox();
   vm.runInContext('startGame()', sandbox);
   const diagnostics = await vm.runInContext('Skyroads.diagnostics.ready', sandbox);
 
   assert.equal(diagnostics.scripts.worldArt, true);
+  assert.equal(diagnostics.scripts.sceneStyle, true);
+  assert.equal(diagnostics.scripts.droneVisual, true);
   assert.equal(diagnostics.scripts.obstacles, true);
+  assert.equal(diagnostics.scripts.gapRegions, true);
   assert.deepEqual(Array.from(diagnostics.visualAssets.world.loaded), [
     'droneScout', 'droneStriker', 'turretSentry', 'turretHeavy', 'barrierRail',
     'barrierCrate', 'structurePylon', 'structureBastion', 'structureReactor',
@@ -508,6 +714,356 @@ test('starting a run sends the normal adaptive music mix through the shared bus'
   assert.equal(adaptiveContext.filters[0].frequency.value, 11000);
 });
 
+function legacyAudioContext(game) {
+  return game.audioContexts[0];
+}
+
+test('second and third jumps use distinct procedural ignition recipes', () => {
+  const second = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    STATE.playerY = 500;
+    STATE.playerVY = -100;
+    STATE.jumpsUsed = 1;
+    STATE.fuel = 10;
+    tryJump();
+  `, second.sandbox);
+  const secondContext = legacyAudioContext(second);
+  const secondSignature = {
+    oscillatorStarts: secondContext.oscillators.map((oscillator) => (
+      oscillator.frequency.events.find((event) => event[0] === 'set')?.[1]
+    )),
+    noiseSources: secondContext.sources.length,
+  };
+
+  const third = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    STATE.playerY = 500;
+    STATE.playerVY = -100;
+    STATE.jumpsUsed = 2;
+    STATE.tripleT = 1;
+    STATE.fuel = 10;
+    tryJump();
+  `, third.sandbox);
+  const thirdContext = legacyAudioContext(third);
+  const thirdSignature = {
+    oscillatorStarts: thirdContext.oscillators.map((oscillator) => (
+      oscillator.frequency.events.find((event) => event[0] === 'set')?.[1]
+    )),
+    noiseSources: thirdContext.sources.length,
+  };
+
+  assert.notDeepEqual(thirdSignature, secondSignature);
+  assert.ok(thirdSignature.oscillatorStarts.length > secondSignature.oscillatorStarts.length);
+  assert.ok(secondSignature.noiseSources >= 1);
+  assert.ok(thirdSignature.noiseSources >= 1);
+});
+
+test('glide entry creates one ignition transient and one two-band two-second sustain graph', () => {
+  const game = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    sfxNoise(0.08, 0.04, 1800);
+    STATE.mode = 'PLAYING';
+    STATE.gliding = true;
+    STATE.tripleT = 0;
+    syncGlideAudio();
+  `, game.sandbox);
+  const context = legacyAudioContext(game);
+  const state = vm.runInContext(`({
+    hasNodes: Boolean(AUDIO.glideNodes),
+    sourceBufferSeconds: AUDIO.glideNodes.src.buffer.duration,
+    rumbleFilter: AUDIO.glideNodes.rumbleFilter.frequency.value,
+    rumbleGain: AUDIO.glideNodes.rumbleGain.gain.value,
+    fireFilterType: AUDIO.glideNodes.fireFilter.type,
+    fireFilter: AUDIO.glideNodes.fireFilter.frequency.value,
+    fireGain: AUDIO.glideNodes.fireGain.gain.value,
+  })`, game.sandbox);
+  assert.equal(state.hasNodes, true);
+  assert.equal(state.sourceBufferSeconds, 2);
+  assert.equal(state.rumbleFilter, 520);
+  assert.equal(state.rumbleGain, 0.125);
+  assert.equal(state.fireFilterType, 'bandpass');
+  assert.equal(state.fireFilter, 1450);
+  assert.equal(state.fireGain, 0.065);
+  assert.equal(context.buffers.some((buffer) => buffer.duration === 0.5), true);
+  assert.equal(context.buffers.some((buffer) => buffer.duration === 2), true);
+  assert.equal(context.sources.length, 3, 'one-shot probe, glide ignition, and glide sustain');
+  assert.equal(context.oscillators.length, 2);
+  assert.equal(context.filters.filter((filter) => filter.type === 'lowpass').length >= 2, true);
+  assert.equal(context.filters.some((filter) => filter.type === 'bandpass'), true);
+
+  vm.runInContext('syncGlideAudio()', game.sandbox);
+  assert.equal(context.sources.length, 3);
+  assert.equal(context.oscillators.length, 2);
+});
+
+test('active glide ramps both rumble and fire bands without rebuilding nodes', () => {
+  const game = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PLAYING';
+    STATE.gliding = true;
+    STATE.tripleT = 0;
+    syncGlideAudio();
+  `, game.sandbox);
+  const context = legacyAudioContext(game);
+  const initialNodes = vm.runInContext('AUDIO.glideNodes', game.sandbox);
+  vm.runInContext(`
+    STATE.tripleT = 1;
+    syncGlideAudio();
+  `, game.sandbox);
+  const updated = vm.runInContext(`({
+    sameNodes: AUDIO.glideNodes === globalThis.__initialGlideNodes,
+    rumbleFilter: AUDIO.glideNodes.rumbleFilter.frequency.value,
+    rumbleGain: AUDIO.glideNodes.rumbleGain.gain.value,
+    fireFilter: AUDIO.glideNodes.fireFilter.frequency.value,
+    fireGain: AUDIO.glideNodes.fireGain.gain.value,
+    rumbleFilterEvents: AUDIO.glideNodes.rumbleFilter.frequency.events,
+    rumbleGainEvents: AUDIO.glideNodes.rumbleGain.gain.events,
+    fireFilterEvents: AUDIO.glideNodes.fireFilter.frequency.events,
+    fireGainEvents: AUDIO.glideNodes.fireGain.gain.events,
+  })`, Object.assign(game.sandbox, { __initialGlideNodes: initialNodes }));
+  assert.equal(updated.sameNodes, true);
+  assert.equal(updated.rumbleFilter, 650);
+  assert.equal(updated.rumbleGain, 0.14);
+  assert.equal(updated.fireFilter, 1750);
+  assert.equal(updated.fireGain, 0.075);
+  assert.ok(Array.from(updated.rumbleFilterEvents).some((event) => (
+    event[0] === 'linear' && event[1] === 650
+  )));
+  assert.ok(Array.from(updated.rumbleGainEvents).some((event) => (
+    event[0] === 'linear' && event[1] === 0.14
+  )));
+  assert.ok(Array.from(updated.fireFilterEvents).some((event) => (
+    event[0] === 'linear' && event[1] === 1750
+  )));
+  assert.ok(Array.from(updated.fireGainEvents).some((event) => (
+    event[0] === 'linear' && event[1] === 0.075
+  )));
+  assert.equal(context.sources.length, 2);
+  assert.equal(context.oscillators.length, 2);
+});
+
+test('BOOST alone starts the strongest propulsion mode and overrides glide without rebuilding', () => {
+  const game = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PLAYING';
+    STATE.gliding = false;
+    STATE.boostT = 5;
+    syncPropulsionAudio();
+    globalThis.__boostSource = AUDIO.glideNodes.src;
+  `, game.sandbox);
+  const boost = vm.runInContext(`({
+    mode: AUDIO.glideNodes.targetMode,
+    rumbleFilter: AUDIO.glideNodes.rumbleFilter.frequency.value,
+    rumbleGain: AUDIO.glideNodes.rumbleGain.gain.value,
+    fireFilter: AUDIO.glideNodes.fireFilter.frequency.value,
+    fireGain: AUDIO.glideNodes.fireGain.gain.value,
+  })`, game.sandbox);
+  assert.deepEqual({ ...boost }, {
+    mode: 'boost',
+    rumbleFilter: 820,
+    rumbleGain: 0.175,
+    fireFilter: 2200,
+    fireGain: 0.095,
+  });
+
+  vm.runInContext(`
+    STATE.gliding = true;
+    STATE.tripleT = 10;
+    syncPropulsionAudio();
+  `, game.sandbox);
+  const overlap = vm.runInContext(`({
+    sameSource: AUDIO.glideNodes.src === globalThis.__boostSource,
+    mode: AUDIO.glideNodes.targetMode,
+  })`, game.sandbox);
+  assert.deepEqual({ ...overlap }, { sameSource: true, mode: 'boost' });
+  assert.equal(legacyAudioContext(game).sources.length, 1,
+    'one shared BOOST sustain source');
+});
+
+test('collecting BOOST starts its continuous propulsion graph in the pickup frame', () => {
+  const game = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  const result = vm.runInContext(`(() => {
+    startGame();
+    const segment = { lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD) };
+    segment.lanes[3] = LANE_TYPE.BOOST;
+    const collected = collectPickup(segment, 3, LANE_TYPE.BOOST);
+    return {
+      collected,
+      laneType: segment.lanes[3],
+      boostT: STATE.boostT,
+      mode: AUDIO.glideNodes && AUDIO.glideNodes.targetMode,
+    };
+  })()`, game.sandbox);
+  assert.deepEqual({ ...result }, {
+    collected: true,
+    laneType: 'ROAD',
+    boostT: 5,
+    mode: 'boost',
+  });
+});
+
+test('BOOST expiry during glide ramps the shared graph back to glide parameters', () => {
+  const game = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PLAYING';
+    STATE.gliding = true;
+    STATE.tripleT = 0;
+    STATE.boostT = 1;
+    syncPropulsionAudio();
+    globalThis.__boostSource = AUDIO.glideNodes.src;
+    STATE.boostT = 0;
+    syncPropulsionAudio();
+  `, game.sandbox);
+  const result = vm.runInContext(`({
+    sameSource: AUDIO.glideNodes.src === globalThis.__boostSource,
+    mode: AUDIO.glideNodes.targetMode,
+    rumbleFilter: AUDIO.glideNodes.rumbleFilter.frequency.value,
+    rumbleGain: AUDIO.glideNodes.rumbleGain.gain.value,
+    fireFilter: AUDIO.glideNodes.fireFilter.frequency.value,
+    fireGain: AUDIO.glideNodes.fireGain.gain.value,
+  })`, game.sandbox);
+  assert.deepEqual({ ...result }, {
+    sameSource: true,
+    mode: 'ordinary',
+    rumbleFilter: 520,
+    rumbleGain: 0.125,
+    fireFilter: 1450,
+    fireGain: 0.065,
+  });
+});
+
+test('BOOST sustain respects pause blur hidden-page and modal audio ownership', () => {
+  const game = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    STATE.boostT = 5;
+    syncPropulsionAudio();
+  `, game.sandbox);
+  assert.equal(vm.runInContext('Boolean(AUDIO.glideNodes)', game.sandbox), true);
+
+  game.windowObject.dispatch('blur');
+  vm.runInContext('syncPropulsionAudio()', game.sandbox);
+  assert.equal(vm.runInContext('AUDIO.glideNodes', game.sandbox), null);
+
+  game.windowObject.dispatch('focus');
+  vm.runInContext('syncPropulsionAudio()', game.sandbox);
+  assert.equal(vm.runInContext('Boolean(AUDIO.glideNodes)', game.sandbox), true);
+
+  game.documentObject.hidden = true;
+  game.documentObject.dispatch('visibilitychange');
+  vm.runInContext('syncPropulsionAudio()', game.sandbox);
+  assert.equal(vm.runInContext('AUDIO.glideNodes', game.sandbox), null);
+
+  game.documentObject.hidden = false;
+  game.documentObject.dispatch('visibilitychange');
+  vm.runInContext('syncPropulsionAudio()', game.sandbox);
+  assert.equal(vm.runInContext('Boolean(AUDIO.glideNodes)', game.sandbox), true);
+
+  game.elements['leaderboard-dialog'].hidden = false;
+  game.dispatchOverlayMutation();
+  vm.runInContext('syncPropulsionAudio()', game.sandbox);
+  assert.equal(vm.runInContext('AUDIO.glideNodes', game.sandbox), null);
+
+  game.elements['leaderboard-dialog'].hidden = true;
+  game.dispatchOverlayMutation();
+  vm.runInContext('syncPropulsionAudio()', game.sandbox);
+  assert.equal(vm.runInContext('Boolean(AUDIO.glideNodes)', game.sandbox), true);
+
+  game.windowObject.dispatch('keydown', { code: 'KeyP' });
+  vm.runInContext('syncPropulsionAudio()', game.sandbox);
+  assert.equal(vm.runInContext('AUDIO.glideNodes', game.sandbox), null);
+});
+
+test('glide stop fades both bands for 120ms and stops sustain nodes after 120ms', () => {
+  const game = makeGameUiSandbox({ loadAdaptiveAudio: false });
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PLAYING';
+    STATE.gliding = true;
+    syncGlideAudio();
+    globalThis.__activeGlideNodes = AUDIO.glideNodes;
+    STATE.gliding = false;
+    syncGlideAudio();
+  `, game.sandbox);
+  const result = vm.runInContext(`({
+    cleared: AUDIO.glideNodes === null,
+    rumbleGainEvents: __activeGlideNodes.rumbleGain.gain.events,
+    fireGainEvents: __activeGlideNodes.fireGain.gain.events,
+    sourceStops: __activeGlideNodes.src.stops,
+    lfoStops: __activeGlideNodes.lfo.stops,
+    lfo2Stops: __activeGlideNodes.lfo2.stops,
+  })`, game.sandbox);
+  assert.equal(result.cleared, true);
+  assert.ok(Array.from(result.rumbleGainEvents).some((event) => (
+    event[0] === 'exponential'
+      && event[1] === 0.0001
+      && Math.abs(event[2] - 10.12) < 1e-9
+  )));
+  assert.ok(Array.from(result.fireGainEvents).some((event) => (
+    event[0] === 'exponential'
+      && event[1] === 0.0001
+      && Math.abs(event[2] - 10.12) < 1e-9
+  )));
+  assert.deepEqual(Array.from(result.sourceStops), [10.12]);
+  assert.deepEqual(Array.from(result.lfoStops), [10.12]);
+  assert.deepEqual(Array.from(result.lfo2Stops), [10.12]);
+});
+
+test('muting SFX from the utility stops an active glide graph immediately', () => {
+  const game = makeGameUiSandbox({ musicMuted: false, sfxMuted: false });
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PLAYING';
+    STATE.gliding = true;
+    syncGlideAudio();
+    globalThis.__activeGlideNodes = AUDIO.glideNodes;
+  `, game.sandbox);
+  assert.equal(vm.runInContext('Boolean(AUDIO.glideNodes)', game.sandbox), true);
+
+  vm.runInContext("STATE.ui.sfxButton.dispatch('click')", game.sandbox);
+
+  const stopped = vm.runInContext(`({
+    cleared: AUDIO.glideNodes === null,
+    sourceStops: __activeGlideNodes.src.stops,
+    lfoStops: __activeGlideNodes.lfo.stops,
+    lfo2Stops: __activeGlideNodes.lfo2.stops,
+  })`, game.sandbox);
+  assert.equal(stopped.cleared, true);
+  assert.deepEqual(Array.from(stopped.sourceStops), [10.12]);
+  assert.deepEqual(Array.from(stopped.lfoStops), [10.12]);
+  assert.deepEqual(Array.from(stopped.lfo2Stops), [10.12]);
+});
+
+test('total mute shortcut stops an active glide graph immediately', () => {
+  const game = makeGameUiSandbox({ musicMuted: false, sfxMuted: false });
+  vm.runInContext(`
+    startGame();
+    STATE.mode = 'PLAYING';
+    STATE.gliding = true;
+    syncGlideAudio();
+    globalThis.__activeGlideNodes = AUDIO.glideNodes;
+  `, game.sandbox);
+
+  game.windowObject.dispatch('keydown', { key: 'm', code: 'KeyM' });
+
+  const stopped = vm.runInContext(`({
+    cleared: AUDIO.glideNodes === null,
+    sourceStops: __activeGlideNodes.src.stops,
+    lfoStops: __activeGlideNodes.lfo.stops,
+    lfo2Stops: __activeGlideNodes.lfo2.stops,
+  })`, game.sandbox);
+  assert.equal(stopped.cleared, true);
+  assert.deepEqual(Array.from(stopped.sourceStops), [10.12]);
+  assert.deepEqual(Array.from(stopped.lfoStops), [10.12]);
+  assert.deepEqual(Array.from(stopped.lfo2Stops), [10.12]);
+});
+
 test('a saved partial preference keeps the shared legacy bus audible for the enabled channel', () => {
   const { sandbox } = makeGameUiSandbox({ musicMuted: true, sfxMuted: false });
   vm.runInContext('startGame()', sandbox);
@@ -596,6 +1152,10 @@ test('P toggles only PLAYING and PAUSED after editing and dialog guards', () => 
   documentObject.activeElement = utility;
   pressPause();
   assert.equal(vm.runInContext('STATE.mode', sandbox), 'PAUSED');
+  assert.deepEqual(Array.from(vm.runInContext(
+    '[STATE.ui.languageButton.tabIndex, STATE.ui.musicButton.tabIndex, STATE.ui.sfxButton.tabIndex]',
+    sandbox,
+  )), [0, 0, 0]);
   assert.deepEqual({ ...vm.runInContext('Skyroads.diagnostics.snapshot().overlays', sandbox) }, {
     title: false, pause: true, gameOver: false,
   });
@@ -608,7 +1168,11 @@ test('P toggles only PLAYING and PAUSED after editing and dialog guards', () => 
   pressPause();
   assert.equal(vm.runInContext('STATE.mode', sandbox), 'PLAYING');
   assert.equal(vm.runInContext('STATE.lastTime', sandbox), 0);
-  assert.equal(documentObject.activeElement, utility);
+  assert.equal(documentObject.activeElement, elements.game);
+  assert.deepEqual(Array.from(vm.runInContext(
+    '[STATE.ui.languageButton.tabIndex, STATE.ui.musicButton.tabIndex, STATE.ui.sfxButton.tabIndex]',
+    sandbox,
+  )), [-1, -1, -1]);
   assert.equal(prevented, 2);
 
   windowObject.dispatch('keyup', { code: 'KeyP', target: utility });
@@ -1277,7 +1841,7 @@ test('fuel and reward icons retain their silhouettes while sharing metal rims an
   }
 });
 
-test('reduced-motion freezes gap embers, ship navigation lights, energy dashes, and orbit effects', () => {
+test('reduced-motion freezes event-horizon decoration, ship navigation lights, energy dashes, and orbit effects', () => {
   const { sandbox } = makeGameUiSandbox();
   const capture = (renderer, reduced, time) => JSON.parse(vm.runInContext(`(() => {
     STATE.reducedMotion = ${reduced};

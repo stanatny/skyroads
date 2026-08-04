@@ -31,7 +31,13 @@ function createGameLogicHarness() {
     requestAnimationFrame() {},
   };
   vm.createContext(sandbox);
-  for (const file of ['src/input.js', 'src/presentation.js', 'src/world-art.js', 'src/obstacles.js']) {
+  for (const file of [
+    'src/input.js',
+    'src/presentation.js',
+    'src/world-art.js',
+    'src/obstacles.js',
+    'src/gap-regions.js',
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
   }
   const gameSource = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
@@ -111,10 +117,18 @@ test('tap completes exactly one lane in 145ms', () => {
   assert.equal(state.lanePosition, 4);
 });
 
-test('hold carries leftover time into an 85ms repeat segment', () => {
+test('holding for 180ms still finishes only the first lane', () => {
   const state = createMovementState(1);
   pressDirection(state, 1);
-  advanceMovement(state, 187.5);
+  advanceMovement(state, 180);
+  assert.equal(state.lanePosition, 2);
+  assert.equal(state.segmentActive, false);
+});
+
+test('hold carries leftover time into a 110ms repeat segment after the deliberate delay', () => {
+  const state = createMovementState(1);
+  pressDirection(state, 1);
+  advanceMovement(state, 275);
   assert.equal(state.lanePosition, 2.5);
 });
 
@@ -151,12 +165,11 @@ test('first segment completes at 145ms, not 144ms', () => {
   assert.equal(state.lanePosition, 4);
 });
 
-test('hold shorter than 140ms does not repeat', () => {
+test('hold shorter than 220ms does not repeat', () => {
   const state = createMovementState(3);
   pressDirection(state, 1);
-  advanceMovement(state, 139);
+  advanceMovement(state, 219);
   releaseDirection(state, 1);
-  advanceMovement(state, 6);
   assert.equal(state.lanePosition, 4);
   advanceMovement(state, 500);
   assert.equal(state.lanePosition, 4);
@@ -165,18 +178,20 @@ test('hold shorter than 140ms does not repeat', () => {
 test('holding through the delay starts repeat at the first boundary', () => {
   const state = createMovementState(3);
   pressDirection(state, 1);
-  advanceMovement(state, 145);
+  advanceMovement(state, 220);
   assert.equal(state.lanePosition, 4);
+  assert.equal(state.segmentActive, false);
+  advanceMovement(state, 1);
   assert.equal(state.segmentActive, true);
   assert.equal(state.segmentTarget, 5);
-  assert.equal(state.segmentDurationMs, 85);
+  assert.equal(state.segmentDurationMs, 110);
 });
 
 test('same timeline is frame-rate independent', () => {
   const run = (frameDurationMs) => {
     const state = createMovementState(1);
     pressDirection(state, 1);
-    let remainingMs = 187.5;
+    let remainingMs = 275;
     while (remainingMs > 0) {
       const deltaMs = Math.min(frameDurationMs, remainingMs);
       advanceMovement(state, deltaMs);
@@ -185,7 +200,7 @@ test('same timeline is frame-rate independent', () => {
     return state.lanePosition;
   };
 
-  assert.ok(Math.abs(run(187.5) - 2.5) <= 1e-9);
+  assert.ok(Math.abs(run(275) - 2.5) <= 1e-9);
   assert.ok(Math.abs(run(1000 / 30) - 2.5) <= 1e-9);
   assert.ok(Math.abs(run(1000 / 60) - 2.5) <= 1e-9);
   assert.ok(Math.abs(run(1000 / 120) - 2.5) <= 1e-9);
@@ -194,9 +209,9 @@ test('same timeline is frame-rate independent', () => {
 test('release during repeat finishes the current lane and discards future lanes', () => {
   const state = createMovementState(3);
   pressDirection(state, 1);
-  advanceMovement(state, 160);
+  advanceMovement(state, 240);
   releaseDirection(state, 1);
-  advanceMovement(state, 70);
+  advanceMovement(state, 90);
   assert.equal(state.lanePosition, 5);
   advanceMovement(state, 500);
   assert.equal(state.lanePosition, 5);
@@ -356,9 +371,21 @@ test('ordinary flight rejects a third jump', () => {
     STATE.tripleT = 0;
     STATE.fuel = 10;
     tryJump();
-    return JSON.stringify({ jumpsUsed: STATE.jumpsUsed, playerVY: STATE.playerVY, fuel: STATE.fuel });
+    return JSON.stringify({
+      jumpsUsed: STATE.jumpsUsed,
+      playerVY: STATE.playerVY,
+      fuel: STATE.fuel,
+      jumpBurst: STATE.jumpBurst,
+      jumpBurstTier: STATE.jumpBurstTier,
+    });
   })()`, sandbox));
-  assert.deepEqual(result, { jumpsUsed: 2, playerVY: -100, fuel: 10 });
+  assert.deepEqual(result, {
+    jumpsUsed: 2,
+    playerVY: -100,
+    fuel: 10,
+    jumpBurst: 0,
+    jumpBurstTier: 0,
+  });
 });
 
 test('super flight accepts a third jump', () => {
@@ -370,30 +397,108 @@ test('super flight accepts a third jump', () => {
     STATE.tripleT = 1;
     STATE.fuel = 10;
     tryJump();
-    return JSON.stringify({ jumpsUsed: STATE.jumpsUsed, playerVY: STATE.playerVY });
+    return JSON.stringify({
+      jumpsUsed: STATE.jumpsUsed,
+      playerVY: STATE.playerVY,
+      fuel: STATE.fuel,
+      jumpBurst: STATE.jumpBurst,
+      jumpBurstTier: STATE.jumpBurstTier,
+    });
   })()`, sandbox));
-  assert.deepEqual(result, { jumpsUsed: 3, playerVY: 7500 });
+  assert.deepEqual(result, {
+    jumpsUsed: 3,
+    playerVY: 7500,
+    fuel: 7,
+    jumpBurst: 0.36,
+    jumpBurstTier: 3,
+  });
 });
 
-for (const [label, jumpsUsed, powered] of [
-  ['second', 1, false],
-  ['third', 2, true],
+for (const [label, jumpsUsed, powered, expectedTier, expectedDuration] of [
+  ['second', 1, false, 2, 0.30],
+  ['third', 2, true, 3, 0.36],
 ]) {
-  test(label + ' jump consumes exactly 3 fuel', () => {
+  test(label + ' jump consumes exactly 3 fuel and records its ignition tier', () => {
     const sandbox = createGameLogicHarness();
     Object.assign(sandbox, { __jumpsUsed: jumpsUsed, __powered: powered });
-    const fuel = vm.runInContext(`(() => {
+    const result = JSON.parse(vm.runInContext(`(() => {
       STATE.playerY = 500;
       STATE.playerVY = -100;
       STATE.jumpsUsed = __jumpsUsed;
       STATE.tripleT = __powered ? 1 : 0;
       STATE.fuel = 10;
       tryJump();
-      return STATE.fuel;
-    })()`, sandbox);
-    assert.equal(fuel, 7);
+      return JSON.stringify({
+        fuel: STATE.fuel,
+        jumpBurst: STATE.jumpBurst,
+        jumpBurstTier: STATE.jumpBurstTier,
+      });
+    })()`, sandbox));
+    assert.deepEqual(result, {
+      fuel: 7,
+      jumpBurst: expectedDuration,
+      jumpBurstTier: expectedTier,
+    });
   });
 }
+
+test('first jump does not create an airborne ignition burst', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    STATE.playerY = 0;
+    STATE.playerVY = 0;
+    STATE.jumpsUsed = 0;
+    STATE.jumpBurst = 0;
+    STATE.jumpBurstTier = 3;
+    tryJump();
+    return JSON.stringify({
+      jumpsUsed: STATE.jumpsUsed,
+      playerVY: STATE.playerVY,
+      jumpBurst: STATE.jumpBurst,
+      jumpBurstTier: STATE.jumpBurstTier,
+    });
+  })()`, sandbox));
+  assert.deepEqual(result, {
+    jumpsUsed: 1,
+    playerVY: 7500,
+    jumpBurst: 0,
+    jumpBurstTier: 0,
+  });
+});
+
+test('burst expiry and run transitions clear ignition tier without changing gameplay', () => {
+  const sandbox = createGameLogicHarness();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    STATE.jumpBurst = 0.05;
+    STATE.jumpBurstTier = 3;
+    updateEffects(0.06);
+    const expired = {
+      jumpBurst: STATE.jumpBurst,
+      jumpBurstTier: STATE.jumpBurstTier,
+    };
+    STATE.jumpBurst = 0.2;
+    STATE.jumpBurstTier = 2;
+    resetGame();
+    const restarted = {
+      jumpBurst: STATE.jumpBurst,
+      jumpBurstTier: STATE.jumpBurstTier,
+    };
+    STATE.mode = 'PLAYING';
+    STATE.jumpBurst = 0.2;
+    STATE.jumpBurstTier = 2;
+    gotoMenu();
+    const menu = {
+      jumpBurst: STATE.jumpBurst,
+      jumpBurstTier: STATE.jumpBurstTier,
+    };
+    return JSON.stringify({ expired, restarted, menu });
+  })()`, sandbox));
+  assert.deepEqual(result, {
+    expired: { jumpBurst: 0, jumpBurstTier: 0 },
+    restarted: { jumpBurst: 0, jumpBurstTier: 0 },
+    menu: { jumpBurst: 0, jumpBurstTier: 0 },
+  });
+});
 
 test('glide gravity requires airborne descent, a held jump, and positive fuel', () => {
   const gliding = runAirbornePhysics(createGameLogicHarness(), {

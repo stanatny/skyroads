@@ -2,6 +2,8 @@
 
 The runtime set contains twelve perspective-correct upright atlases plus the preserved legacy road-edge atlas. The upright atlases are deterministic offline renders of CC0 Kenney models downloaded on **2026-08-03**. Each is a `2240 × 960` transparent PNG containing 21 own-cell crops: yaw `[-80, -55, -30, 0, 30, 55, 80]` across three pitch rows `[20, 55, 80]`, with `320 × 320` cells. `assets/world/gap-edge.png` remains the byte-identical `3584 × 512` legacy road-edge atlas with seven `512 × 512` yaw frames `[-30, -20, -10, 0, 10, 20, 30]`. Source archives, extracted OBJ/MTL files, and textures are render inputs only and are not committed.
 
+The active gameplay runtime loads color-only derivatives from `assets/world/semantic/`. They preserve this source set's dimensions, frame order, alpha crops, and world-origin metadata and are reproduced by `node tools/recolor-semantic-assets.js`; see `docs/assets/semantic-spectrum.md`.
+
 ## Official sources and licenses
 
 | Source | Official page | Archive | Archive SHA-256 | License copy | License SHA-256 |

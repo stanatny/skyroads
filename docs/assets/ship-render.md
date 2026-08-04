@@ -2,6 +2,8 @@
 
 The runtime player frames are deterministic SceneKit renders derived from Quaternius' CC0 Striker model. Both frames use exactly the same model transform, camera, crop, material, and lights. The thrust frame adds emissive exhaust geometry only.
 
+The active gameplay runtime loads color-only derivatives from `assets/ship/semantic/`. Those files preserve these source renders' dimensions and alpha plane and are reproduced by `node tools/recolor-semantic-assets.js`; see `docs/assets/semantic-spectrum.md`.
+
 ## Source inputs
 
 Downloaded on 2026-08-02 from the official Ultimate Spaceships page and its Google Drive folder.

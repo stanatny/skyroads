@@ -87,6 +87,33 @@ The two Kenney kits were normalized and assembled only as declared in `tools/wor
   - `PNG/Blue/Double/bar_round_gloss_large.png` — upstream and committed SHA-256 `af13ccda23a736cdf18049cbe05586178e7cde8fddb5617bcf19cd5b10fcc3b9` → `assets/ui/meter-frame-cyan.png`
 - Modifications: selected PNGs were renamed semantically; their pixels and alpha dimensions are unchanged.
 
+## Wenrexa — Free UI Hologram Interface
+
+- Official source: https://opengameart.org/content/free-ui-hologram-interface
+- Official archive: https://opengameart.org/sites/default/files/1._free_hologram_interface_wenrexa.zip
+- Archive SHA-256: `23e2a76ab0e4fcd2bafe64435c57019653ffedd04e6ba02fed284bb0784879b7`
+- License: Creative Commons Zero, CC0 1.0 Universal
+- License copy: `licenses/OpenGameArt-CC0-1.0.txt` — official legal-code SHA-256 `a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499`
+- Selected upstream file:
+  - `1. Free Hologram Interface Wenrexa/Card X1/Panel Empty.png` — upstream and committed SHA-256 `1c15f13cf8e52cd26022dc1e6be7b1b92c36e39e6b220c8ecba9e028b0ff2c6e` → `assets/ui/hologram-panel.png`
+- Modifications: renamed semantically; pixels and alpha dimensions are unchanged.
+
+## Anton Revin — SCIFI UI
+
+- Official source: https://opengameart.org/content/scifi-ui
+- Official archive: https://opengameart.org/sites/default/files/SCIFI%20UI.zip
+- Archive SHA-256: `8bfda504e0330773321e9a1dbd33aca7e20a33d3fe7742662897d6493805c769`
+- License: Creative Commons Zero, CC0 1.0 Universal
+- Optional upstream credit: Anton Revin
+- License copy: `licenses/OpenGameArt-CC0-1.0.txt` — official legal-code SHA-256 `a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499`
+- Selected upstream file:
+  - `SCIFI UI/progress bars/progress_overlay.png` — upstream and committed SHA-256 `0d2277fa1de504d1efed6a3cde4ff7419062e6e66bc337da1f451e3a93e57e6d` → `assets/ui/industrial-meter-overlay.png`
+- Modifications: renamed semantically; pixels and alpha dimensions are unchanged.
+
+## Semantic Spectrum derived runtime artwork
+
+The runtime ship and world images under `assets/ship/semantic/` and `assets/world/semantic/` are deterministic color-only derivatives of the already documented Quaternius and Kenney source-derived PNGs. `tools/recolor-semantic-assets.js` verifies every source SHA-256, preserves dimensions and the alpha plane byte-for-byte, clears RGB under zero alpha, and writes deterministic RGBA PNGs from `tools/semantic-assets.json`. No third-party model geometry, crop, frame order, world origin, collision dimension, or license changes.
+
 ## Phosphor Icons Core
 
 - Official source: https://github.com/phosphor-icons/core

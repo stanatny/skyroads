@@ -56,12 +56,14 @@
 
   const VISUAL_ASSET_MANIFEST = Object.freeze({
     ship: Object.freeze({
-      neutral: './assets/ship/player-neutral.png',
-      thrust: './assets/ship/player-thrust.png',
+      neutral: './assets/ship/semantic/player-neutral.png',
+      thrust: './assets/ship/semantic/player-thrust.png',
     }),
     ui: Object.freeze({
       panel: './assets/ui/panel-frame-cyan.png',
       meter: './assets/ui/meter-frame-cyan.png',
+      hologramPanel: './assets/ui/hologram-panel.png',
+      industrialMeter: './assets/ui/industrial-meter-overlay.png',
     }),
     icons: Object.freeze({
       translate: './assets/icons/translate.svg',
@@ -241,6 +243,12 @@
     return frame.element || null;
   }
 
+  function resolveUiAsset(visualAssets, key) {
+    if (!visualAssets || !visualAssets.assets || !visualAssets.assets.ui) return null;
+    const asset = visualAssets.assets.ui[key];
+    return asset && asset.loaded ? asset.element || null : null;
+  }
+
   function resolveWorldAtlas(visualAssets, atlasKey) {
     if (!visualAssets || !visualAssets.assets || !visualAssets.assets.world) return null;
     const atlas = visualAssets.assets.world[atlasKey];
@@ -262,19 +270,83 @@
     return Object.freeze({ shipFrame, layers: Object.freeze(layers) });
   }
 
+  function thrusterFeedbackState({
+    gliding = false,
+    jumpBurst = 0,
+    jumpBurstTier = 0,
+    boostActive = false,
+    superActive = false,
+    reducedMotion = false,
+  } = {}) {
+    const burst = Math.max(0, Number(jumpBurst) || 0);
+    const tier = Number(jumpBurstTier);
+    const mode = burst > 0 && tier === 3
+      ? 'triple'
+      : burst > 0 && tier === 2
+      ? 'double'
+      : boostActive
+      ? 'boost'
+      : gliding
+      ? 'glide'
+      : 'normal';
+    const duration = mode === 'triple' ? 0.36 : mode === 'double' ? 0.30 : 1;
+    return Object.freeze({
+      mode,
+      burstProgress: mode === 'triple' || mode === 'double'
+        ? Math.max(0, Math.min(1, burst / duration))
+        : 0,
+      sustained: Boolean(gliding),
+      boostActive: Boolean(boostActive),
+      superPowered: Boolean(superActive),
+      reducedMotion: Boolean(reducedMotion),
+    });
+  }
+
   function computeHudLayout(viewportWidth, viewportHeight) {
     const width = finiteDimension(viewportWidth);
-    const utilityBottom = 60;
-    const rightTop = utilityBottom + 20;
-    const lineHeight = 20;
-    const lineCount = 6;
-    return {
-      utilityBottom,
-      rightX: Math.max(16, width - 16),
-      rightTop,
-      rightBottom: rightTop + lineHeight * (lineCount - 1),
-      lineHeight,
-    };
+    const height = finiteDimension(viewportHeight);
+    const safeInset = Math.max(20, Math.min(64, Math.min(width, height) * 0.05));
+    const clusterWidth = Math.max(180, Math.min(224, width * 0.22));
+    return Object.freeze({
+      safeInset,
+      leftX: safeInset,
+      leftY: safeInset,
+      leftWidth: clusterWidth,
+      rightX: width - safeInset,
+      rightY: safeInset,
+      rightWidth: clusterWidth,
+      lineHeight: Math.max(18, Math.min(22, height * 0.025)),
+    });
+  }
+
+  function hudVisibilityPlan({
+    charging = false,
+    chargeReady = false,
+    boostActive = false,
+    superActive = false,
+    magnetActive = false,
+  } = {}) {
+    return Object.freeze({
+      charge: Boolean(charging || chargeReady),
+      boost: Boolean(boostActive),
+      super: Boolean(superActive),
+      magnet: Boolean(magnetActive),
+    });
+  }
+
+  function worldDepthTreatment(zRel, maxZRel, nearZRel = 130) {
+    const near = Math.max(0, Number(nearZRel) || 0);
+    const far = Number(maxZRel);
+    const depth = Number(zRel);
+    const span = Number.isFinite(far) && far > near ? far - near : 0;
+    const depthRatio = span > 0
+      ? Math.max(0, Math.min(1, ((Number.isFinite(depth) ? depth : near) - near) / span))
+      : 0;
+    return Object.freeze({
+      depthRatio,
+      worldAlpha: 1 - depthRatio * 0.48,
+      seamAlpha: 0.36 - depthRatio * 0.26,
+    });
   }
 
   function canvasMetrics(cssWidth, cssHeight, devicePixelRatio = 1) {
@@ -802,6 +874,11 @@
     if (!ui || !translator || !snapshot) return;
     const documentObject = ui.startButton && ui.startButton.ownerDocument ? ui.startButton.ownerDocument : root.document;
     setOverlayMode(ui, mode);
+    if (ui.appUi && ui.appUi.dataset) ui.appUi.dataset.mode = String(mode);
+    const utilitiesAvailable = mode !== 'PLAYING';
+    for (const button of [ui.languageButton, ui.musicButton, ui.sfxButton]) {
+      if (button) button.tabIndex = utilitiesAvailable ? 0 : -1;
+    }
     if (ui.utilityControls.setAttribute) ui.utilityControls.setAttribute('aria-label', translator.t('settings.label'));
     ui.languageButton.textContent = `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`;
     ui.languageButton.setAttribute('aria-label', `${translator.t('language.switchToChinese')} / ${translator.t('language.switchToEnglish')}`);
@@ -905,9 +982,13 @@
     VISUAL_ASSET_MANIFEST,
     preloadVisualAssets,
     resolvePlayerShipFrame,
+    resolveUiAsset,
     resolveWorldAtlas,
     playerVisualLayerPlan,
+    thrusterFeedbackState,
     computeHudLayout,
+    hudVisibilityPlan,
+    worldDepthTreatment,
     canvasMetrics,
     overlayForMode,
     setOverlayMode,

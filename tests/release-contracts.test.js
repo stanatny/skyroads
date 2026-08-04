@@ -112,7 +112,7 @@ test('the hidden WebKit smoke keeps its storage ephemeral without changing norma
   );
 });
 
-test('Git whitespace suppression is limited to the six byte-identical license copies', () => {
+test('Git whitespace suppression is limited to the seven byte-identical license copies', () => {
   const licensePaths = [
     'licenses/Quaternius-Ultimate-Spaceships-CC0.txt',
     'licenses/Kenney-UI-Pack-Sci-Fi-CC0.txt',
@@ -120,6 +120,7 @@ test('Git whitespace suppression is limited to the six byte-identical license co
     'licenses/Orbitron-OFL-1.1.txt',
     'licenses/Kenney-Space-Kit-CC0.txt',
     'licenses/Kenney-Modular-Space-Kit-CC0.txt',
+    'licenses/OpenGameArt-CC0-1.0.txt',
   ];
   const ordinaryPaths = ['README.md', 'app/main.swift', 'src/game.js'];
   const output = execFileSync(

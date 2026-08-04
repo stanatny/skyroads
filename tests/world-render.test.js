@@ -10,23 +10,41 @@ const root = path.resolve(__dirname, '..');
 const worldArt = require('../src/world-art.js');
 
 function makeRecordingContext() {
-  const gradient = { addColorStop() {} };
   const stateStack = [];
   let currentPath = [];
   let currentTransform = [1, 0, 0, 1, 0, 0];
   let currentClip = null;
+  function gradient(kind, args) {
+    const stops = [];
+    return {
+      kind,
+      args,
+      stops,
+      addColorStop(offset, color) { stops.push([offset, color]); },
+    };
+  }
+  function recordedStyle(style) {
+    if (!style || typeof style !== 'object') return style;
+    return {
+      kind: style.kind,
+      args: [...style.args],
+      stops: style.stops.map((stop) => [...stop]),
+    };
+  }
   const target = {
     events: [],
     globalAlpha: 1,
     fillStyle: '#000',
     strokeStyle: '#000',
     lineWidth: 1,
+    lineCap: 'butt',
     save() {
       stateStack.push({
         globalAlpha: this.globalAlpha,
         fillStyle: this.fillStyle,
         strokeStyle: this.strokeStyle,
         lineWidth: this.lineWidth,
+        lineCap: this.lineCap,
         transform: [...currentTransform],
         clip: currentClip && currentClip.map((part) => [...part]),
       });
@@ -47,9 +65,26 @@ function makeRecordingContext() {
     closePath() { currentPath.push(['closePath']); },
     arc(...args) { currentPath.push(['arc', ...args]); },
     ellipse(...args) { currentPath.push(['ellipse', ...args]); },
+    quadraticCurveTo(...args) { currentPath.push(['quadraticCurveTo', ...args]); },
     rect(...args) { currentPath.push(['rect', ...args]); },
-    fill() { this.events.push({ type: 'fill', style: this.fillStyle, path: currentPath.map((part) => [...part]) }); },
-    stroke() { this.events.push({ type: 'stroke', style: this.strokeStyle, path: currentPath.map((part) => [...part]) }); },
+    fill() {
+      this.events.push({
+        type: 'fill',
+        style: recordedStyle(this.fillStyle),
+        path: currentPath.map((part) => [...part]),
+        clip: currentClip && currentClip.map((part) => [...part]),
+      });
+    },
+    stroke() {
+      this.events.push({
+        type: 'stroke',
+        style: recordedStyle(this.strokeStyle),
+        path: currentPath.map((part) => [...part]),
+        lineWidth: this.lineWidth,
+        lineCap: this.lineCap,
+        clip: currentClip && currentClip.map((part) => [...part]),
+      });
+    },
     clip() {
       currentClip = currentPath.map((part) => [...part]);
       this.events.push({ type: 'clip', path: currentClip.map((part) => [...part]) });
@@ -87,8 +122,8 @@ function makeRecordingContext() {
         clip: currentClip && currentClip.map((part) => [...part]),
       });
     },
-    createLinearGradient() { return gradient; },
-    createRadialGradient() { return gradient; },
+    createLinearGradient(...args) { return gradient('linear', args); },
+    createRadialGradient(...args) { return gradient('radial', args); },
   };
   return new Proxy(target, {
     get(object, property) {
@@ -104,7 +139,7 @@ function makeRecordingContext() {
   });
 }
 
-function createHarness({ loaded = true, missing = [] } = {}) {
+function createHarness({ loaded = true, missing = [], droneVisual = true } = {}) {
   const context = makeRecordingContext();
   const sandbox = {
     console,
@@ -116,7 +151,15 @@ function createHarness({ loaded = true, missing = [] } = {}) {
     __ctx: context,
   };
   vm.createContext(sandbox);
-  for (const file of ['src/input.js', 'src/presentation.js', 'src/world-art.js', 'src/obstacles.js']) {
+  for (const file of [
+    'src/input.js',
+    'src/presentation.js',
+    'src/world-art.js',
+    'src/scene-style.js',
+    ...(droneVisual ? ['src/drone-visual.js'] : []),
+    'src/obstacles.js',
+    'src/gap-regions.js',
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
   }
   const gameSource = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
@@ -222,6 +265,38 @@ function renderGapFixture(harness, gapLanes, { segIndex = 10 } = {}) {
   };
 }
 
+function renderGapRows(harness, rows, {
+  position = 0,
+  time = 1,
+  reduced = false,
+} = {}) {
+  harness.context.events.length = 0;
+  harness.sandbox.__gapRows = rows;
+  const randomCalls = vm.runInContext(`(() => {
+    STATE.position = ${position};
+    STATE.time = ${time};
+    STATE.reducedMotion = ${reduced};
+    STATE.track = __gapRows.map((lanes, index) => ({ index, lanes }));
+    const previousRandom = Math.random;
+    let calls = 0;
+    Math.random = () => { calls += 1; return 0.5; };
+    try {
+      renderTrack(__ctx);
+      return calls;
+    } finally {
+      Math.random = previousRandom;
+    }
+  })()`, harness.sandbox);
+  return {
+    events: harness.context.events.map((event) => ({
+      ...event,
+      path: event.path && event.path.map((part) => [...part]),
+      clip: event.clip && event.clip.map((part) => [...part]),
+    })),
+    randomCalls,
+  };
+}
+
 function setupCorridorFixture(harness, type, { lane = 3, start = 10, length = 5 } = {}) {
   vm.runInContext(`
     STATE.position = 0;
@@ -311,49 +386,72 @@ function sourceTuple(metadata, frameIndex) {
   return [sx, sy, sw, sh];
 }
 
-test('loaded enemy atlases use final yaw-pitch crops anchored to their projected world origins', () => {
+test('road deck uses neutral steel layers and grounded structures draw semantic contact footprints', () => {
   const harness = createHarness();
-  const cases = [
-    { lane: 2, frameIndices: [8, 9, 15, 16] },
-    { lane: 3, frameIndices: [10, 17] },
-    { lane: 4, frameIndices: [11, 12, 18, 19] },
-  ];
-  const metadata = worldArt.WORLD_ATLAS_MANIFEST.droneScout;
-  for (const { lane, frameIndices } of cases) {
-    const enemy = { type: 'drone', lane, fromLane: lane, toLane: lane, state: 'rest', phase: 0, visualVariant: 'droneScout' };
-    const calls = imageCalls(drawEnemy(harness, enemy));
-    assert.equal(calls.length, frameIndices.length, `lane ${lane} final draw count`);
-    assert.deepEqual(calls.map((call) => call.image), frameIndices.map(() => 'droneScout'));
-    assert.deepEqual(calls.map((call) => call.args.slice(0, 4)),
-      frameIndices.map((index) => sourceTuple(metadata, index)));
-    assert.ok(Math.abs(calls.reduce((sum, call) => sum + call.alpha, 0) - 1) < 1e-12);
-    const expectedOrigin = vm.runInContext(
-      `project(laneCenterX(${lane}), Math.sin(1 * 2.2) * 40, 525)`,
-      harness.sandbox,
-    );
-    for (const call of calls) {
-      const frame = metadata.frames.find(({ source }) => (
-        source.sx === call.args[0] && source.sy === call.args[1]
-      ));
-      const runtimeScaleX = vm.runInContext(
-        `Math.abs(project(laneCenterX(${lane}) + 1, Math.sin(1 * 2.2) * 40, 525).x
-          - project(laneCenterX(${lane}), Math.sin(1 * 2.2) * 40, 525).x)`,
-        harness.sandbox,
-      );
-      const runtimeScaleY = vm.runInContext(
-        `Math.abs(project(laneCenterX(${lane}), Math.sin(1 * 2.2) * 40 + 1, 525).y
-          - project(laneCenterX(${lane}), Math.sin(1 * 2.2) * 40, 525).y)`,
-        harness.sandbox,
-      );
-      const anchoredX = call.args[4]
-        + (frame.origin.x - frame.source.sx) / metadata.pixelsPerWorldUnit * runtimeScaleX;
-      const anchoredY = call.args[5]
-        + (frame.origin.y - frame.source.sy) / metadata.pixelsPerWorldUnit * runtimeScaleY;
-      assert.ok(Math.abs(anchoredX - expectedOrigin.x) < 1e-8);
-      assert.ok(Math.abs(anchoredY - expectedOrigin.y) < 1e-8);
-    }
-  }
+  vm.runInContext(`
+    STATE.position = 0;
+    STATE.track = Array.from({ length: CONFIG.RENDER_DISTANCE + 2 }, (_, index) => ({
+      index,
+      lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD),
+    }));
+    renderTrack(__ctx);
+  `, harness.sandbox);
+  const deckFills = harness.context.events
+    .filter((event) => event.type === 'fill')
+    .map((event) => event.style);
+  assert.ok(deckFills.includes('#222a34'));
+  assert.ok(deckFills.includes('#28323d'));
+  assert.equal(deckFills.includes('#3a3a55'), false);
+  assert.equal(deckFills.includes('#34344e'), false);
+  const seamAlphas = harness.context.events
+    .filter((event) => event.type === 'stroke'
+      && typeof event.style === 'string'
+      && event.style.startsWith('rgba(151,166,176,'))
+    .map((event) => Number(event.style.slice('rgba(151,166,176,'.length, -1)));
+  assert.ok(seamAlphas.length > 1);
+  assert.ok(Math.max(...seamAlphas) > Math.min(...seamAlphas));
 
+  const wall = drawWall(harness, 'wallHigh', {
+    lane: 0, segIndex: 10, zNear: 480, zFar: 530,
+  }).events;
+  const imageIndex = wall.findIndex((event) => event.type === 'drawImage');
+  const contactFillIndex = wall.findIndex((event) => event.type === 'fill'
+    && typeof event.style === 'string'
+    && event.style.startsWith('rgba(2,8,18,'));
+  const contactStrokeIndex = wall.findIndex((event) => event.type === 'stroke'
+    && typeof event.style === 'string'
+    && event.style.startsWith('rgba(255,155,69,'));
+  assert.ok(contactFillIndex >= 0 && contactFillIndex < imageIndex);
+  assert.ok(contactStrokeIndex >= 0 && contactStrokeIndex < imageIndex);
+
+  const turret = drawEnemy(harness, {
+    type: 'turret',
+    lane: 0,
+    phase: 0,
+    visualVariant: 'turretSentry',
+  }, { zNear: 480, zFar: 530 });
+  const turretImageIndex = turret.findIndex((event) => event.type === 'drawImage');
+  const turretContactIndex = turret.findIndex((event) => event.type === 'stroke'
+    && typeof event.style === 'string'
+    && event.style.startsWith('rgba(255,155,69,'));
+  assert.ok(turretContactIndex >= 0 && turretContactIndex < turretImageIndex);
+
+  const drone = drawEnemy(harness, {
+    type: 'drone',
+    lane: 6,
+    fromLane: 6,
+    toLane: 6,
+    state: 'rest',
+    phase: 0,
+    visualVariant: 'droneScout',
+  });
+  assert.equal(drone.some((event) => event.type === 'fill'
+    && typeof event.style === 'string'
+    && event.style.startsWith('rgba(2,8,18,')), false);
+});
+
+test('loaded turret atlases use final grounded crops anchored to projected world origins', () => {
+  const harness = createHarness();
   const nearCalls = imageCalls(drawEnemy(harness, {
     type: 'turret', lane: 3, phase: 0, visualVariant: 'turretSentry',
   }, { zNear: 300, zFar: 350 }));
@@ -362,12 +460,12 @@ test('loaded enemy atlases use final yaw-pitch crops anchored to their projected
   }, { zNear: 900, zFar: 950 }));
   assert.deepEqual(nearCalls.map((call) => call.args.slice(0, 4)), [
     sourceTuple(worldArt.WORLD_ATLAS_MANIFEST.turretSentry, 10),
-    sourceTuple(worldArt.WORLD_ATLAS_MANIFEST.turretSentry, 17),
   ]);
   assert.deepEqual(farCalls.map((call) => call.args.slice(0, 4)), [
     sourceTuple(worldArt.WORLD_ATLAS_MANIFEST.turretSentry, 10),
-    sourceTuple(worldArt.WORLD_ATLAS_MANIFEST.turretSentry, 17),
   ]);
+  assert.equal(nearCalls[0].alpha, 1);
+  assert.equal(farCalls[0].alpha, 1);
   const unionWidth = (calls) => Math.max(...calls.map((call) => call.args[4] + call.args[6]))
     - Math.min(...calls.map((call) => call.args[4]));
   const unionHeight = (calls) => Math.max(...calls.map((call) => call.args[5] + call.args[7]))
@@ -376,19 +474,89 @@ test('loaded enemy atlases use final yaw-pitch crops anchored to their projected
   assert.ok(unionHeight(nearCalls) > unionHeight(farCalls));
 });
 
-test('missing atlases call the named procedural fallbacks without drawing images', () => {
+test('missing atlases call the named procedural turret fallback without drawing images', () => {
   const harness = createHarness({ loaded: false });
-  const drone = drawEnemy(harness, {
-    type: 'drone', lane: 3, fromLane: 3, toLane: 3, state: 'rest', phase: 0, visualVariant: 'droneScout',
-  });
   const turret = drawEnemy(harness, {
     type: 'turret', lane: 3, phase: 0, visualVariant: 'turretSentry',
   });
-  assert.equal(imageCalls(drone).length, 0);
   assert.equal(imageCalls(turret).length, 0);
-  assert.ok(drone.some((event) => event.type === 'fill'));
   assert.ok(turret.some((event) => event.type === 'fill'));
   assert.equal(vm.runInContext("typeof drawProceduralDrone + ':' + typeof drawProceduralTurret", harness.sandbox), 'function:function');
+});
+
+test('Heavy Swarm is the primary drone path and keeps Scout and Striker silhouettes distinct', () => {
+  const harness = createHarness();
+  const scout = drawEnemy(harness, {
+    type: 'drone', lane: 3, fromLane: 3, toLane: 3,
+    state: 'rest', phase: 0, visualVariant: 'droneScout',
+  });
+  const striker = drawEnemy(harness, {
+    type: 'drone', lane: 3, fromLane: 3, toLane: 3,
+    state: 'rest', phase: 0, visualVariant: 'droneStriker',
+  });
+
+  assert.equal(imageCalls(scout).length, 0);
+  assert.equal(imageCalls(striker).length, 0);
+  assert.ok(scout.some((event) => event.type === 'fill' && event.style === '#171d26'));
+  assert.ok(striker.some((event) => event.type === 'fill' && event.style === '#171d26'));
+  const scoutPaths = scout
+    .filter((event) => (event.type === 'fill' || event.type === 'stroke') && event.path)
+    .map((event) => event.path);
+  const strikerPaths = striker
+    .filter((event) => (event.type === 'fill' || event.type === 'stroke') && event.path)
+    .map((event) => event.path);
+  assert.notDeepEqual(strikerPaths, scoutPaths);
+});
+
+test('Heavy Swarm uses one projected 432 by 360 envelope for hull and warning cues', () => {
+  const harness = createHarness();
+  const captured = JSON.parse(vm.runInContext(`(() => {
+    const previousCues = drawDroneDirectionCues;
+    let cueBounds = null;
+    drawDroneDirectionCues = (...args) => {
+      cueBounds = args[4];
+      return previousCues(...args);
+    };
+    __ctx.events.length = 0;
+    try {
+      drawEnemy(__ctx, {
+        type: 'drone', lane: 2, fromLane: 2, toLane: 3,
+        state: 'warn', phase: 0, visualVariant: 'droneStriker',
+      }, 20, 500, 550);
+      const geometry = Skyroads.worldArt.WORLD_GEOMETRY.drone;
+      const bob = Math.sin(STATE.time * 2.2) * 40;
+      const expected = worldSpriteDrawRect(Skyroads.worldArt, {
+        worldX: laneCenterX(2),
+        zRel: 525,
+        worldWidth: geometry.worldWidth,
+        worldHeight: geometry.worldHeight,
+        baseY: geometry.baseY + bob,
+      });
+      return JSON.stringify({ cueBounds, expected });
+    } finally {
+      drawDroneDirectionCues = previousCues;
+    }
+  })()`, harness.sandbox));
+  assert.deepEqual(captured.cueBounds, captured.expected);
+});
+
+test('missing Heavy Swarm module falls back to atlas and then procedural drone', () => {
+  const atlasHarness = createHarness({ droneVisual: false });
+  const atlasEvents = drawEnemy(atlasHarness, {
+    type: 'drone', lane: 3, fromLane: 3, toLane: 3,
+    state: 'rest', phase: 0, visualVariant: 'droneScout',
+  });
+  assert.ok(imageCalls(atlasEvents).length > 0);
+  assert.ok(imageCalls(atlasEvents).every((event) => event.image === 'droneScout'));
+
+  const proceduralHarness = createHarness({ droneVisual: false, loaded: false });
+  const proceduralEvents = drawEnemy(proceduralHarness, {
+    type: 'drone', lane: 3, fromLane: 3, toLane: 3,
+    state: 'rest', phase: 0, visualVariant: 'droneScout',
+  });
+  assert.equal(imageCalls(proceduralEvents).length, 0);
+  assert.ok(proceduralEvents.some((event) => event.type === 'fill'
+    && event.style && event.style.kind === 'linear'));
 });
 
 test('turret barrels use the atlas visual mount while procedural fallback keeps collision height', () => {
@@ -450,7 +618,7 @@ test('warn drones bank toward movement and independently draw a target chevron a
     assert.equal(Math.sign(bank.angle), sign);
 
     const target = vm.runInContext(`project(laneCenterX(${toLane}), 0, 525)`, harness.sandbox);
-    const marker = events.find((event) => event.type === 'stroke' && event.style === '#ff6b83'
+    const marker = events.find((event) => event.type === 'stroke' && event.style === '#ff4f63'
       && event.path.some((part) => part[0] === 'ellipse' && Math.abs(part[1] - target.x) < 1e-6));
     assert.ok(marker, 'landing marker must be centered on the projected target lane');
 
@@ -461,7 +629,7 @@ test('warn drones bank toward movement and independently draw a target chevron a
   }
 });
 
-test('moving drone atlas uses bob-only origin while keeping readable art and gameplay geometry', () => {
+test('moving Heavy Swarm drone uses bob-only origin while keeping gameplay geometry', () => {
   const harness = createHarness();
   const enemy = {
     type: 'drone', lane: 2, spawnLane: 2, fromLane: 2, toLane: 3,
@@ -473,46 +641,40 @@ test('moving drone atlas uses bob-only origin while keeping readable art and gam
     STATE.width = 1280;
     STATE.height = 800;
     STATE.time = 1;
-    const previous = Skyroads.worldArt;
-    let options = null;
-    let bounds = null;
-    Skyroads.worldArt = {
-      ...previous,
-      buildSpriteDrawPlan(nextOptions) {
-        const plan = previous.buildSpriteDrawPlan(nextOptions);
-        options = nextOptions;
-        bounds = plan && plan.bounds;
-        return plan;
-      },
+    const lane = enemyLane(__enemy);
+    const bob = Math.sin(STATE.time * 2.2 + __enemy.phase) * 40;
+    const geometry = Skyroads.worldArt.WORLD_GEOMETRY.drone;
+    const bounds = worldSpriteDrawRect(Skyroads.worldArt, {
+      worldX: laneCenterX(lane),
+      zRel: 505,
+      worldWidth: geometry.worldWidth,
+      worldHeight: geometry.worldHeight,
+      baseY: geometry.baseY + bob,
+    });
+    drawEnemy(__ctx, __enemy, 20, 480, 530);
+    return {
+      bob,
+      projectedOrigin: project(laneCenterX(lane), bob, 505),
+      bounds,
+      lane,
+      droneHeight: CONFIG.DRONE_HEIGHT,
+      hitboxHalfWidth: HITBOX.droneHalfWidth,
+      warnTime: CONFIG.DRONE_WARN_TIME,
+      moveTime: CONFIG.DRONE_MOVE_TIME,
     };
-    try {
-      drawEnemy(__ctx, __enemy, 20, 480, 530);
-      return {
-        objectY: options && options.objectY,
-        projectedOrigin: options && options.projectedOrigin,
-        bounds,
-        lane: enemyLane(__enemy),
-        droneHeight: CONFIG.DRONE_HEIGHT,
-        hitboxHalfWidth: HITBOX.droneHalfWidth,
-        warnTime: CONFIG.DRONE_WARN_TIME,
-        moveTime: CONFIG.DRONE_MOVE_TIME,
-      };
-    } finally {
-      Skyroads.worldArt = previous;
-    }
   })()`, harness.sandbox);
   const events = harness.context.events;
-  const call = imageCalls(events)[0];
   const anchor = events.find((event) => event.type === 'translate');
   const bob = Math.sin(2.2) * 40;
   const expected = vm.runInContext(`project(laneCenterX(enemyLane(__enemy)), ${bob}, 505)`, harness.sandbox);
   assert.ok(Math.abs(anchor.x - expected.x) < 1e-6);
   assert.ok(Math.abs(anchor.y - expected.y) < 1e-6);
-  assert.ok(Math.abs(captured.objectY - bob) < 1e-10);
+  assert.ok(Math.abs(captured.bob - bob) < 1e-10);
   assert.ok(Math.abs(captured.projectedOrigin.x - expected.x) < 1e-6);
   assert.ok(Math.abs(captured.projectedOrigin.y - expected.y) < 1e-6);
   assert.ok(captured.bounds.width >= 27, `near drone width ${captured.bounds.width}`);
-  assert.equal(call.image, 'droneStriker');
+  assert.equal(imageCalls(events).length, 0);
+  assert.ok(events.some((event) => event.type === 'fill' && event.style === '#171d26'));
   assert.equal(enemy.visualVariant, 'droneStriker');
   assert.deepEqual({
     lane: captured.lane,
@@ -529,8 +691,8 @@ test('moving drone atlas uses bob-only origin while keeping readable art and gam
   });
 });
 
-test('missing drone art keeps the 432-unit silhouette, bank, warning chevron, and landing marker', () => {
-  const harness = createHarness({ missing: ['droneScout'] });
+test('missing Heavy Swarm module and drone art keep procedural silhouette bank and cues', () => {
+  const harness = createHarness({ droneVisual: false, missing: ['droneScout'] });
   vm.runInContext('STATE.width = 1280; STATE.height = 800', harness.sandbox);
   const base = {
     type: 'drone', lane: 2, fromLane: 2, toLane: 3, phase: 0,
@@ -551,12 +713,12 @@ test('missing drone art keeps the 432-unit silhouette, bank, warning chevron, an
     assert.ok(events.some((event) => event.type === 'rotate' && event.angle > 0), `${state} bank`);
     if (state === 'warn') {
       assert.ok(events.some((event) => event.type === 'fill' && event.style === '#fff4f7'));
-      assert.ok(events.some((event) => event.type === 'stroke' && event.style === '#ff6b83'));
+      assert.ok(events.some((event) => event.type === 'stroke' && event.style === '#ff4f63'));
     }
   }
 });
 
-test('reduced motion freezes atlas bob and warning pulse while retaining bank, chevron, and marker', () => {
+test('reduced motion freezes Heavy Swarm bob and warning pulse while retaining bank and cues', () => {
   const harness = createHarness();
   const enemy = {
     type: 'drone', lane: 2, fromLane: 2, toLane: 3, state: 'warn', phase: 0.4, visualVariant: 'droneScout',
@@ -567,7 +729,7 @@ test('reduced motion freezes atlas bob and warning pulse while retaining bank, c
   for (const events of [first, second]) {
     assert.ok(events.some((event) => event.type === 'rotate' && event.angle > 0));
     assert.ok(events.some((event) => event.type === 'fill' && event.style === '#fff4f7'));
-    assert.ok(events.some((event) => event.type === 'stroke' && event.style === '#ff6b83'));
+    assert.ok(events.some((event) => event.type === 'stroke' && event.style === '#ff4f63'));
   }
 });
 
@@ -595,7 +757,7 @@ test('enemy creation assigns a deterministic variant once from segment and spawn
   assert.equal(vm.runInContext('__enemy.visualVariant', harness.sandbox), stable);
 });
 
-test('far-to-near enemy traversal preserves atlas depth order', () => {
+test('far-to-near enemy traversal preserves depth order across atlas and Heavy Swarm paths', () => {
   const harness = createHarness();
   harness.context.events.length = 0;
   vm.runInContext(`
@@ -608,9 +770,14 @@ test('far-to-near enemy traversal preserves atlas depth order', () => {
     STATE.track[20].enemies = [{ type: 'turret', lane: 3, phase: 0, visualVariant: 'turretSentry' }];
     renderTrack(__ctx);
   `, harness.sandbox);
-  const orderedImages = imageCalls(harness.context.events).map((call) => call.image)
-    .filter((image, index, images) => index === 0 || image !== images[index - 1]);
-  assert.deepEqual(orderedImages, ['turretSentry', 'droneScout']);
+  const turretIndex = harness.context.events.findIndex((event) => (
+    event.type === 'drawImage' && event.image === 'turretSentry'
+  ));
+  const droneIndex = harness.context.events.findIndex((event) => (
+    event.type === 'fill' && event.style === '#171d26'
+  ));
+  assert.ok(turretIndex >= 0);
+  assert.ok(droneIndex > turretIndex, `drone event ${droneIndex} must follow turret ${turretIndex}`);
 });
 
 test('upright atlas renderer expands exact, one-axis, and two-axis plans around one origin', () => {
@@ -741,15 +908,15 @@ test('atlas renderer returns culled plans and rotates conservative bounds with o
 test('loaded low, medium, and high wall variants use exact final plans and shared heights', () => {
   const harness = createHarness();
   const cases = [
-    ['wallLow', 2, [8, 9, 15, 16], 600],
-    ['wallLow', 3, [10, 17], 600],
-    ['wallLow', 4, [11, 12, 18, 19], 600],
-    ['wallMedium', 2, [8, 9, 15, 16], 1250],
-    ['wallMedium', 3, [10, 17], 1250],
-    ['wallMedium', 4, [11, 12, 18, 19], 1250],
-    ['wallHigh', 2, [8, 9, 15, 16], 2000],
-    ['wallHigh', 3, [10, 17], 2000],
-    ['wallHigh', 4, [11, 12, 18, 19], 2000],
+    ['wallLow', 2, [10], 600],
+    ['wallLow', 3, [10], 600],
+    ['wallLow', 4, [10], 600],
+    ['wallMedium', 2, [10], 1250],
+    ['wallMedium', 3, [10], 1250],
+    ['wallMedium', 4, [10], 1250],
+    ['wallHigh', 2, [10], 2000],
+    ['wallHigh', 3, [10], 2000],
+    ['wallHigh', 4, [10], 2000],
   ];
   const zMid = 525;
   const segIndex = 10;
@@ -790,14 +957,24 @@ test('loaded low, medium, and high wall variants use exact final plans and share
 
   const nearYaw = imageCalls(drawWall(harness, 'wallLow', {
     lane: 2, segIndex: 10, zNear: 500, zFar: 550,
-  }).events).map((call) => call.args[0]);
+  }).events);
   const farYaw = imageCalls(drawWall(harness, 'wallLow', {
     lane: 2, segIndex: 10, zNear: 4000, zFar: 4050,
-  }).events).map((call) => call.args[0]);
-  assert.notDeepEqual(farYaw, nearYaw, 'the same lane must select a shallower yaw as depth increases');
+  }).events);
+  const metadata = worldArt.WORLD_ATLAS_MANIFEST[nearYaw[0].image];
+  const yawColumns = (calls) => calls.map((call) => Math.floor(call.args[0] / metadata.frameWidth));
+  const nearColumns = [...new Set(yawColumns(nearYaw))];
+  const farColumns = [...new Set(yawColumns(farYaw))];
+  assert.deepEqual(nearColumns, [3], 'near grounded views use one crisp frontal yaw column');
+  assert.deepEqual(farColumns, [3], 'far grounded views keep the same crisp frontal yaw column');
+  const frontWeight = (calls) => calls
+    .filter((call) => Math.floor(call.args[0] / metadata.frameWidth) === 3)
+    .reduce((sum, call) => sum + call.alpha, 0);
+  assert.equal(frontWeight(nearYaw), 1, 'near grounded view keeps one fully opaque frame');
+  assert.equal(frontWeight(farYaw), 1, 'distant grounded view keeps the same fully opaque frame');
 });
 
-test('outer-lane high structures use symmetric wide yaw columns across both pitch rows', () => {
+test('grounded outer-lane structures stay frontal while Heavy Swarm follows outer-lane projection', () => {
   const harness = createHarness();
   const leftCalls = imageCalls(drawWall(harness, 'wallHigh', {
     lane: 0, segIndex: 10, zNear: 480, zFar: 530,
@@ -807,16 +984,31 @@ test('outer-lane high structures use symmetric wide yaw columns across both pitc
   }).events);
   const leftMetadata = worldArt.WORLD_ATLAS_MANIFEST[leftCalls[0].image];
   const rightMetadata = worldArt.WORLD_ATLAS_MANIFEST[rightCalls[0].image];
-  assert.deepEqual(leftCalls.map((call) => call.args.slice(0, 4)), [7, 8, 14, 15]
+  assert.deepEqual(leftCalls.map((call) => call.args.slice(0, 4)), [10]
     .map((index) => sourceTuple(leftMetadata, index)));
-  assert.deepEqual(rightCalls.map((call) => call.args.slice(0, 4)), [12, 13, 19, 20]
+  assert.deepEqual(rightCalls.map((call) => call.args.slice(0, 4)), [10]
     .map((index) => sourceTuple(rightMetadata, index)));
-  for (let row = 0; row < 2; row += 1) {
-    const leftWeights = leftCalls.slice(row * 2, row * 2 + 2).map((call) => call.alpha);
-    const rightWeights = rightCalls.slice(row * 2, row * 2 + 2).map((call) => call.alpha);
-    assert.ok(Math.abs(leftWeights[0] - rightWeights[1]) < 1e-12);
-    assert.ok(Math.abs(leftWeights[1] - rightWeights[0]) < 1e-12);
-  }
+  assert.equal(leftCalls[0].alpha, 1);
+  assert.equal(rightCalls[0].alpha, 1);
+
+  const droneEvents = drawEnemy(harness, {
+    type: 'drone',
+    lane: 6,
+    fromLane: 6,
+    toLane: 6,
+    state: 'rest',
+    phase: 0,
+    visualVariant: 'droneScout',
+  }, { zNear: 480, zFar: 530 });
+  const droneOrigin = droneEvents.find((event) => event.type === 'translate');
+  const expectedOrigin = vm.runInContext(
+    'project(laneCenterX(6), Math.sin(STATE.time * 2.2) * 40, 505)',
+    harness.sandbox,
+  );
+  assert.equal(imageCalls(droneEvents).length, 0);
+  assert.ok(droneEvents.some((event) => event.type === 'fill' && event.style === '#171d26'));
+  assert.ok(Math.abs(droneOrigin.x - expectedOrigin.x) < 1e-6);
+  assert.ok(Math.abs(droneOrigin.y - expectedOrigin.y) < 1e-6);
 });
 
 test('each unavailable wall variant falls back procedurally without substituting its sibling atlas', () => {
@@ -876,7 +1068,7 @@ test('procedural wall tiers use shared heights and the one-two-two signal hierar
       .flatMap((event) => event.path.filter((part) => part.length >= 3).map((part) => part[2]));
     assert.ok(projectedYs.some((value) => Math.abs(value - expectedTopY) < 1e-8), `${category} height`);
     const signals = events
-      .filter((event) => event.type === 'stroke' && event.style === '#64dcff')
+      .filter((event) => event.type === 'stroke' && event.style === '#ff9b45')
       .flatMap((event) => event.path)
       .filter((part) => part[0] === 'moveTo');
     assert.equal(signals.length, signalCount, `${category} cyan signal count`);
@@ -914,7 +1106,7 @@ test('loaded and fallback corridors leave unclipped atlas topology to live dual 
   assert.ok(calls.every((call) => call.clip === null),
     'body-only corridor atlas layers must not use a topology clip');
   const lowConduitPath = fixture.events
-    .filter((event) => event.type === 'stroke' && event.style === '#3de6ff')
+    .filter((event) => event.type === 'stroke' && event.style === '#ff713d')
     .flatMap((event) => event.path)
     .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo');
   const expectedLowConduits = JSON.parse(vm.runInContext(`JSON.stringify(
@@ -935,7 +1127,7 @@ test('loaded and fallback corridors leave unclipped atlas topology to live dual 
   assert.equal(fallback.events.filter((event) => event.type === 'clip').length, 0,
     'procedural fallback must not depend on an atlas clip');
   const mediumConduitPath = fallback.events
-    .filter((event) => event.type === 'stroke' && event.style === '#3de6ff')
+    .filter((event) => event.type === 'stroke' && event.style === '#ff713d')
     .flatMap((event) => event.path)
     .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo');
   const expectedMediumConduits = JSON.parse(vm.runInContext(`JSON.stringify(
@@ -1011,9 +1203,9 @@ test('live plinths and dual conduits obey every corridor phase and mismatch boun
             project(laneCenterX(3) + offset, ${conduitY}, ${interiorFar})
           ])
         })`, harness.sandbox));
-        assert.deepEqual(pathPoints(fixture.events, 'fill', '#101b2a'),
+        assert.deepEqual(pathPoints(fixture.events, 'fill', '#1c2730'),
           expected.plinth.map((point) => [point.x, point.y]), `${label} plinth`);
-        assert.deepEqual(pathPoints(fixture.events, 'stroke', '#3de6ff'),
+        assert.deepEqual(pathPoints(fixture.events, 'stroke', '#ff713d'),
           expected.conduits.map((point) => [point.x, point.y]), `${label} conduits`);
       }
     }
@@ -1043,9 +1235,9 @@ test('live low and medium corridors split immediately after destruction in atlas
       setupCorridorFixture(harness, type);
       const initial = renderCorridorSnapshot(harness);
       assert.deepEqual(initial.descriptors, expectedInitial(category, height));
-      assert.equal(eventCount(initial.events, 'stroke', '#3de6ff'), 10);
-      assert.equal(eventCount(initial.events, 'stroke', '#b8f7ff'), 2);
-      assert.equal(eventCount(initial.events, 'fill', '#54e7ff'), 1);
+      assert.equal(eventCount(initial.events, 'stroke', '#ff713d'), 10);
+      assert.equal(eventCount(initial.events, 'stroke', '#aebbc2'), 2);
+      assert.equal(eventCount(initial.events, 'fill', '#ff713d'), 1);
       const initialImages = imageCalls(initial.events);
       if (loaded) {
         assert.ok(initialImages.length > 0);
@@ -1064,20 +1256,20 @@ test('live low and medium corridors split immediately after destruction in atlas
         { phase: 'start', category, height, connectBefore: false, connectAfter: true },
         { phase: 'end', category, height, connectBefore: true, connectAfter: false },
       ]);
-      assert.equal(eventCount(split.events, 'stroke', '#3de6ff'), 8);
-      assert.equal(eventCount(split.events, 'stroke', '#b8f7ff'), 4);
-      assert.equal(eventCount(split.events, 'fill', '#54e7ff'), 2);
+      assert.equal(eventCount(split.events, 'stroke', '#ff713d'), 8);
+      assert.equal(eventCount(split.events, 'stroke', '#aebbc2'), 4);
+      assert.equal(eventCount(split.events, 'fill', '#ff713d'), 2);
       const destroyedDepth = vm.runInContext('(zRelOf(12) + zRelOf(13)) / 2', harness.sandbox);
       if (loaded) {
         assert.equal(split.bodyDepths.length, 4, 'destroyed center must have no atlas body');
         assert.equal(split.bodyDepths.some((depth) => Math.abs(depth - destroyedDepth) < 1e-10), false);
       } else {
-        const bodySignals = eventCount(split.events, 'stroke', '#64dcff');
+        const bodySignals = eventCount(split.events, 'stroke', '#ff9b45');
         assert.equal(bodySignals, (height === 600 ? 1 : 2) * 4,
           'destroyed center must have no procedural body');
       }
       const conduitPoints = split.events
-        .filter((event) => event.type === 'stroke' && event.style === '#3de6ff')
+        .filter((event) => event.type === 'stroke' && event.style === '#ff713d')
         .flatMap((event) => event.path)
         .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo')
         .map((part) => [part[1], part[2]]);
@@ -1107,9 +1299,9 @@ test('live low and medium corridors split immediately after destruction in atlas
       assert.deepEqual(isolated.descriptors[0], {
         phase: 'single', category, height, connectBefore: false, connectAfter: false,
       });
-      assert.equal(eventCount(isolated.events, 'stroke', '#3de6ff'), 6);
-      assert.equal(eventCount(isolated.events, 'stroke', '#b8f7ff'), 4);
-      assert.equal(eventCount(isolated.events, 'fill', '#54e7ff'), 2);
+      assert.equal(eventCount(isolated.events, 'stroke', '#ff713d'), 6);
+      assert.equal(eventCount(isolated.events, 'stroke', '#aebbc2'), 4);
+      assert.equal(eventCount(isolated.events, 'fill', '#ff713d'), 2);
     }
   }
 });
@@ -1139,7 +1331,7 @@ test('corridor connectivity rejects different ids, lane records, and wall types'
 test('corridor plinths stop before split holes and id lane or type mismatches', () => {
   function plinthPoints(events) {
     return events
-      .filter((event) => event.type === 'fill' && event.style === '#101b2a')
+      .filter((event) => event.type === 'fill' && event.style === '#1c2730')
       .flatMap((event) => event.path)
       .filter((part) => part[0] === 'moveTo' || part[0] === 'lineTo')
       .map((part) => ({ x: part[1], y: part[2] }));
@@ -1192,135 +1384,214 @@ test('corridor plinths stop before split holes and id lane or type mismatches', 
   }
 });
 
-test('gap edge rendering uses only the validated center road frame and never builds an upright plan', () => {
+test('one connected gap region emits one exact union clip and one black core', () => {
   const harness = createHarness();
-  vm.runInContext(`
-    globalThis.__previousGapWorldArt = Skyroads.worldArt;
-    globalThis.__roadEdgeFrameCalls = 0;
-    Skyroads.worldArt = {
-      ...globalThis.__previousGapWorldArt,
-      buildSpriteDrawPlan() { throw new Error('gap entered upright plan builder'); },
-      roadEdgeFrame(metadata) {
-        globalThis.__roadEdgeFrameCalls += 1;
-        return globalThis.__previousGapWorldArt.roadEdgeFrame(metadata);
-      },
-    };
-  `, harness.sandbox);
-  let fixture;
-  try {
-    fixture = renderGapFixture(harness, [3]);
-  } finally {
-    vm.runInContext('Skyroads.worldArt = globalThis.__previousGapWorldArt', harness.sandbox);
-  }
-  assert.equal(vm.runInContext('globalThis.__roadEdgeFrameCalls', harness.sandbox), 1);
-  const calls = imageCalls(fixture.events).filter((call) => call.image === 'gapEdge');
-  assert.ok(calls.length > 0);
-  for (const call of calls) {
-    assert.deepEqual(call.args.slice(0, 4), [1536, 0, 512, 512]);
-    assert.ok(call.args[6] <= 48 + 1e-9);
-    assert.ok(call.clip);
-  }
-
-  vm.runInContext(`
-    globalThis.__previousGapWorldArt = Skyroads.worldArt;
-    Skyroads.worldArt = {
-      ...globalThis.__previousGapWorldArt,
-      buildSpriteDrawPlan() { throw new Error('invalid gap entered upright plan builder'); },
-      roadEdgeFrame() { return null; },
-    };
-  `, harness.sandbox);
-  let invalid;
-  try {
-    invalid = renderGapFixture(harness, [3]);
-  } finally {
-    vm.runInContext('Skyroads.worldArt = globalThis.__previousGapWorldArt', harness.sandbox);
-  }
-  assert.equal(imageCalls(invalid.events).filter((call) => call.image === 'gapEdge').length, 0);
-  assert.ok(invalid.events.some((event) => event.type === 'stroke'
-    && typeof event.style === 'string' && event.style.startsWith('rgba(255,60,70,')));
+  const { events, randomCalls } = renderGapRows(harness, [
+    Array(7).fill('ROAD'),
+    ['ROAD', 'GAP', 'GAP', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+    ['ROAD', 'GAP', 'GAP', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+  ], { reduced: true });
+  const clips = events.filter((event) => event.type === 'clip');
+  const cores = events.filter((event) => (
+    event.type === 'fill'
+      && event.style === '#000005'
+      && event.path.some((part) => part[0] === 'ellipse')
+  ));
+  assert.equal(clips.length, 1);
+  assert.equal(clips[0].path.filter((part) => part[0] === 'closePath').length, 6);
+  assert.equal(cores.length, 1);
+  assert.equal(imageCalls(events).filter((event) => event.image === 'gapEdge').length, 0);
+  assert.equal(randomCalls, 0);
 });
 
-test('tessellated gap modules preserve authoritative one-lane, bridge, and full-width quadrilaterals', () => {
-  for (const gapLanes of [[3], [0, 1, 2, 4, 5, 6], [0, 1, 2, 3, 4, 5, 6]]) {
-    const harness = createHarness();
-    const { expectedPaths, events, randomCalls } = renderGapFixture(harness, gapLanes);
-    const voidPaths = events
-      .filter((event) => event.type === 'fill' && event.style === '#05050d')
-      .map((event) => event.path);
-    assert.deepEqual(voidPaths, expectedPaths, 'decoration must not alter any projected opening corner');
-    assert.ok(events.some((event) => event.type === 'stroke'
-      && typeof event.style === 'string' && event.style.startsWith('rgba(100,220,255,')),
-    'the abyss must expose a cyan perspective grid instead of the retired flat void');
-    assert.ok(events.some((event) => event.type === 'stroke'
-      && typeof event.style === 'string' && event.style.startsWith('rgba(204,92,255,')),
-    'the abyss must retain a violet energy-depth accent');
+test('event horizon removes the retired grid depth lines embers and atlas modules', () => {
+  const harness = createHarness();
+  const { events } = renderGapRows(harness, [
+    Array(7).fill('ROAD'),
+    ['ROAD', 'ROAD', 'ROAD', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+  ]);
+  assert.equal(events.some((event) => (
+    event.type === 'stroke'
+      && event.style === 'rgba(255,159,59,0.480)'
+  )), false);
+  assert.equal(events.some((event) => (
+    event.type === 'stroke'
+      && event.style === 'rgba(212,78,255,0.720)'
+  )), false);
+  assert.equal(imageCalls(events).filter((event) => event.image === 'gapEdge').length, 0);
+  assert.equal(events.some((event) => (
+    event.type === 'fill'
+      && event.style === '#000005'
+      && event.path.some((part) => part[0] === 'ellipse')
+  )), true);
+});
 
-    const calls = imageCalls(events).filter((call) => call.image === 'gapEdge');
-    assert.ok(calls.length > 0, 'loaded gap atlas must decorate the projected boundaries');
-    const allowedClips = new Set(expectedPaths.map((pathValue) => JSON.stringify(pathValue)));
-    for (const call of calls) {
-      assert.ok(allowedClips.has(JSON.stringify(call.clip)), 'each module must be clipped to its exact gap quadrilateral');
-      assert.ok(call.args[6] <= 48 + 1e-9, 'no screen-space edge unit may exceed 48 CSS pixels');
-      const [a, b, c, d, e, f] = call.transform;
-      const dx = call.args[4];
-      const bottomY = call.args[5] + call.args[7];
-      for (const localX of [dx, dx + call.args[6]]) {
-        const x = a * localX + c * bottomY + e;
-        const y = b * localX + d * bottomY + f;
-        assert.ok(x >= -1e-9 && x <= 960 + 1e-9);
-        assert.ok(y >= -1e-9 && y <= 600 + 1e-9);
+test('event horizon draws warning dashes only on exposed near edges', () => {
+  const harness = createHarness();
+  const { events } = renderGapRows(harness, [
+    Array(7).fill('ROAD'),
+    ['ROAD', 'ROAD', 'GAP', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+  ], { reduced: true });
+  const warnings = events.filter((event) => (
+    event.type === 'stroke'
+      && (event.style === '#ff6b4d' || event.style === '#ffb24c')
+  ));
+  assert.ok(warnings.length >= 2);
+  assert.ok(warnings.every((event) => event.lineCap === 'round'));
+  assert.ok(events.some((event) => (
+    event.type === 'stroke'
+      && event.style === 'rgba(93,232,255,0.600)'
+  )));
+  assert.ok(events.some((event) => (
+    event.type === 'stroke'
+      && event.style === 'rgba(93,232,255,0.260)'
+  )));
+});
+
+test('a narrow bridge keeps two separately clipped event horizons', () => {
+  const harness = createHarness();
+  const { events } = renderGapRows(harness, [
+    ['GAP', 'GAP', 'GAP', 'ROAD', 'GAP', 'GAP', 'GAP'],
+    ['GAP', 'GAP', 'GAP', 'ROAD', 'GAP', 'GAP', 'GAP'],
+  ], { reduced: true });
+  const clips = events.filter((event) => event.type === 'clip');
+  const cores = events.filter((event) => (
+    event.type === 'fill'
+      && event.style === '#000005'
+      && event.path.some((part) => part[0] === 'ellipse')
+  ));
+  assert.equal(clips.length, 2);
+  assert.equal(cores.length, 2);
+  assert.equal(clips.reduce((sum, event) => (
+    sum + event.path.filter((part) => part[0] === 'closePath').length
+  ), 0), 12);
+});
+
+test('normal event-horizon decoration moves deterministically while reduced motion freezes it', () => {
+  const rows = [
+    Array(7).fill('ROAD'),
+    ['ROAD', 'GAP', 'GAP', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+  ];
+  const decorativePaths = (events) => events
+    .filter((event) => (
+      (event.type === 'stroke' && event.path.some((part) => (
+        part[0] === 'ellipse' || part[0] === 'quadraticCurveTo'
+      )))
+    ))
+    .map((event) => event.path);
+  const normalA = decorativePaths(renderGapRows(createHarness(), rows, { time: 1 }).events);
+  const normalB = decorativePaths(renderGapRows(createHarness(), rows, { time: 2 }).events);
+  const reducedA = decorativePaths(renderGapRows(createHarness(), rows, {
+    time: 1, reduced: true,
+  }).events);
+  const reducedB = decorativePaths(renderGapRows(createHarness(), rows, {
+    time: 2, reduced: true,
+  }).events);
+  assert.notDeepEqual(normalA, normalB);
+  assert.deepEqual(reducedA, reducedB);
+});
+
+test('loaded and missing gap-edge art produce equivalent event-horizon cues', () => {
+  const rows = [
+    Array(7).fill('ROAD'),
+    ['ROAD', 'ROAD', 'ROAD', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+  ];
+  const summarize = (events) => events
+    .filter((event) => (
+      event.type === 'clip'
+        || (event.type === 'fill' && event.style === '#000005')
+        || (event.type === 'stroke' && [
+          '#ff6b4d',
+          '#ffb24c',
+          'rgba(93,232,255,0.600)',
+          'rgba(93,232,255,0.260)',
+        ].includes(event.style))
+    ))
+    .map((event) => ({
+      type: event.type,
+      style: event.style,
+      path: event.path,
+      lineWidth: event.lineWidth,
+      lineCap: event.lineCap,
+    }));
+  const loaded = renderGapRows(createHarness(), rows, { reduced: true }).events;
+  const missing = renderGapRows(createHarness({ missing: ['gapEdge'] }), rows, {
+    reduced: true,
+  }).events;
+  assert.deepEqual(summarize(loaded), summarize(missing));
+  assert.equal(imageCalls(loaded).filter((event) => event.image === 'gapEdge').length, 0);
+  assert.equal(imageCalls(missing).filter((event) => event.image === 'gapEdge').length, 0);
+});
+
+test('concave gap regions keep their event-horizon center inside a projected gap cell', () => {
+  const harness = createHarness();
+  const result = vm.runInContext(`(() => {
+    const road = () => Array(CONFIG.LANES).fill(LANE_TYPE.ROAD);
+    STATE.position = 0;
+    STATE.track = Array.from({ length: 8 }, (_, index) => ({
+      index, lanes: road(), enemies: null,
+    }));
+    for (const lane of [2, 3, 4]) {
+      STATE.track[2].lanes[lane] = LANE_TYPE.GAP;
+      STATE.track[4].lanes[lane] = LANE_TYPE.GAP;
+    }
+    STATE.track[3].lanes[2] = LANE_TYPE.GAP;
+    STATE.track[3].lanes[4] = LANE_TYPE.GAP;
+    const [region] = Skyroads.gapRegions.collectGapRegions({
+      track: STATE.track,
+      startIndex: 7,
+      endIndex: 0,
+      laneCount: CONFIG.LANES,
+      gapType: LANE_TYPE.GAP,
+    });
+    const projected = projectGapRegion(region);
+    const pointInCell = (point, cell) => {
+      const vertices = [cell.nearLeft, cell.nearRight, cell.farRight, cell.farLeft];
+      let sign = 0;
+      for (let index = 0; index < vertices.length; index += 1) {
+        const start = vertices[index];
+        const end = vertices[(index + 1) % vertices.length];
+        const cross = (end.x - start.x) * (point.y - start.y)
+          - (end.y - start.y) * (point.x - start.x);
+        if (Math.abs(cross) < 1e-9) continue;
+        const nextSign = Math.sign(cross);
+        if (sign && nextSign !== sign) return false;
+        sign = nextSign;
       }
-    }
-    assert.equal(randomCalls, 0, 'gap decoration must not consume gameplay randomness');
-    assert.equal(harness.context.globalAlpha, 1);
-  }
+      return true;
+    };
+    return {
+      center: projected.center,
+      inside: projected.cells.some((cell) => pointInCell(projected.center, cell)),
+    };
+  })()`, harness.sandbox);
+  assert.equal(result.inside, true, JSON.stringify(result));
 });
 
-test('adjoining gap modules overlap by no more than one pixel and leave no boundary seams', () => {
+test('event-horizon rendering restores the incoming Canvas line cap', () => {
   const harness = createHarness();
-  const { events } = renderGapFixture(harness, [0, 1, 2, 3, 4, 5, 6], { segIndex: 0 });
-  const unique = new Map();
-  for (const call of imageCalls(events).filter((event) => event.image === 'gapEdge')) {
-    const key = JSON.stringify([call.transform, call.args.slice(4)]);
-    unique.set(key, call);
-  }
-  const groups = new Map();
-  for (const call of unique.values()) {
-    const [a, b, c, d, e, f] = call.transform;
-    const leftX = a * call.args[4] + c * (call.args[5] + call.args[7]) + e;
-    const leftY = b * call.args[4] + d * (call.args[5] + call.args[7]) + f;
-    const rightX = a * (call.args[4] + call.args[6]) + c * (call.args[5] + call.args[7]) + e;
-    const rightY = b * (call.args[4] + call.args[6]) + d * (call.args[5] + call.args[7]) + f;
-    const width = Math.hypot(rightX - leftX, rightY - leftY);
-    const tangent = [(rightX - leftX) / width, (rightY - leftY) / width];
-    const midpoint = [(leftX + rightX) / 2, (leftY + rightY) / 2];
-    const center = midpoint[0] * tangent[0] + midpoint[1] * tangent[1];
-    const halfWidth = width / 2;
-    const normalOffset = midpoint[0] * -tangent[1] + midpoint[1] * tangent[0];
-    const groupKey = JSON.stringify([
-      call.clip,
-      Math.round(Math.atan2(b, a) * 1e8),
-      Math.round(normalOffset * 1e8),
-    ]);
-    const intervals = groups.get(groupKey) || [];
-    intervals.push([center - halfWidth, center + halfWidth]);
-    groups.set(groupKey, intervals);
-  }
-  assert.ok(groups.size > 0);
-  for (const [groupKey, intervals] of groups.entries()) {
-    intervals.sort((left, right) => left[0] - right[0]);
-    for (let index = 1; index < intervals.length; index++) {
-      const overlap = intervals[index - 1][1] - intervals[index][0];
-      assert.ok(overlap >= -1e-7, `gap edge seam of ${-overlap}px`);
-      assert.ok(overlap <= 1 + 1e-7, `gap edge overlap of ${overlap}px in ${groupKey}: ${JSON.stringify(intervals)}`);
-    }
-  }
+  harness.context.lineCap = 'square';
+  renderGapRows(harness, [
+    Array(7).fill('ROAD'),
+    ['ROAD', 'ROAD', 'GAP', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+  ], { reduced: true });
+  assert.equal(harness.context.lineCap, 'square');
 });
 
-test('missing gap atlas retains the procedural warning edge without atlas substitution', () => {
-  const harness = createHarness({ missing: ['gapEdge'] });
-  const { events } = renderGapFixture(harness, [3]);
-  assert.equal(imageCalls(events).filter((call) => call.image === 'gapEdge').length, 0);
-  assert.ok(events.some((event) => event.type === 'stroke'
-    && typeof event.style === 'string' && event.style.startsWith('rgba(255,60,70,')));
+test('missing gap topology module keeps an isolated gap visibly dangerous', () => {
+  const harness = createHarness();
+  vm.runInContext('Skyroads.gapRegions = null', harness.sandbox);
+  const { events } = renderGapRows(harness, [
+    Array(7).fill('ROAD'),
+    ['ROAD', 'ROAD', 'ROAD', 'GAP', 'ROAD', 'ROAD', 'ROAD'],
+  ], { reduced: true });
+  assert.ok(events.some((event) => (
+    event.type === 'fill'
+      && event.style === '#000005'
+      && event.path.some((part) => part[0] === 'ellipse')
+  )));
+  assert.ok(events.some((event) => (
+    event.type === 'stroke'
+      && (event.style === '#ff6b4d' || event.style === '#ffb24c')
+  )));
 });

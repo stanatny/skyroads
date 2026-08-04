@@ -4,6 +4,10 @@
   const YAW_DEGREES = Object.freeze([-80, -55, -30, 0, 30, 55, 80]);
   const PITCH_DEGREES = Object.freeze([20, 55, 80]);
   const LEGACY_YAW_DEGREES = Object.freeze([-30, -20, -10, 0, 10, 20, 30]);
+  const VIEW_PROFILES = Object.freeze({
+    airborne: Object.freeze({ minYaw: -80, maxYaw: 80 }),
+    grounded: Object.freeze({ minYaw: -18, maxYaw: 18 }),
+  });
 
   const GENERATED_UPRIGHT_ATLAS_DATA = (() => {
     const deepFreeze = (value) => {
@@ -51,19 +55,19 @@
   }
 
   const WORLD_ATLAS_MANIFEST = Object.freeze({
-    droneScout: uprightAtlas('drone-scout', './assets/world/drone-scout.png', 'drone', 0),
-    droneStriker: uprightAtlas('drone-striker', './assets/world/drone-striker.png', 'drone', 1),
-    turretSentry: uprightAtlas('turret-sentry', './assets/world/turret-sentry.png', 'turret', 0),
-    turretHeavy: uprightAtlas('turret-heavy', './assets/world/turret-heavy.png', 'turret', 1),
-    barrierRail: uprightAtlas('barrier-rail', './assets/world/barrier-rail.png', 'wallLow', 0),
-    barrierCrate: uprightAtlas('barrier-crate', './assets/world/barrier-crate.png', 'wallLow', 1),
-    structurePylon: uprightAtlas('structure-pylon', './assets/world/structure-pylon.png', 'wallMedium', 0),
-    structureBastion: uprightAtlas('structure-bastion', './assets/world/structure-bastion.png', 'wallMedium', 1),
-    structureReactor: uprightAtlas('structure-reactor', './assets/world/structure-reactor.png', 'wallHigh', 0),
-    structureTower: uprightAtlas('structure-tower', './assets/world/structure-tower.png', 'wallHigh', 1),
-    corridorLow: uprightAtlas('corridor-low', './assets/world/corridor-low.png', 'corridorLow', 0),
-    corridorMedium: uprightAtlas('corridor-medium', './assets/world/corridor-medium.png', 'corridorMedium', 0),
-    gapEdge: roadEdgeAtlas('./assets/world/gap-edge.png', 'gap', 0),
+    droneScout: uprightAtlas('drone-scout', './assets/world/semantic/drone-scout.png', 'drone', 0),
+    droneStriker: uprightAtlas('drone-striker', './assets/world/semantic/drone-striker.png', 'drone', 1),
+    turretSentry: uprightAtlas('turret-sentry', './assets/world/semantic/turret-sentry.png', 'turret', 0),
+    turretHeavy: uprightAtlas('turret-heavy', './assets/world/semantic/turret-heavy.png', 'turret', 1),
+    barrierRail: uprightAtlas('barrier-rail', './assets/world/semantic/barrier-rail.png', 'wallLow', 0),
+    barrierCrate: uprightAtlas('barrier-crate', './assets/world/semantic/barrier-crate.png', 'wallLow', 1),
+    structurePylon: uprightAtlas('structure-pylon', './assets/world/semantic/structure-pylon.png', 'wallMedium', 0),
+    structureBastion: uprightAtlas('structure-bastion', './assets/world/semantic/structure-bastion.png', 'wallMedium', 1),
+    structureReactor: uprightAtlas('structure-reactor', './assets/world/semantic/structure-reactor.png', 'wallHigh', 0),
+    structureTower: uprightAtlas('structure-tower', './assets/world/semantic/structure-tower.png', 'wallHigh', 1),
+    corridorLow: uprightAtlas('corridor-low', './assets/world/semantic/corridor-low.png', 'corridorLow', 0),
+    corridorMedium: uprightAtlas('corridor-medium', './assets/world/semantic/corridor-medium.png', 'corridorMedium', 0),
+    gapEdge: roadEdgeAtlas('./assets/world/semantic/gap-edge.png', 'gap', 0),
   });
 
   const WORLD_GEOMETRY = Object.freeze({
@@ -93,12 +97,29 @@
     });
   }
 
-  function selectViewBlend({ worldX, zRel, cameraY, objectY = 0, worldBounds } = {}) {
+  function selectViewBlend({
+    worldX,
+    zRel,
+    cameraY,
+    objectY = 0,
+    worldBounds,
+    viewProfile = 'airborne',
+    laneOffset = null,
+  } = {}) {
     const bounds = worldBounds || { minY: 0, maxY: 0 };
     const depth = Math.max(1, Number(zRel) || 1);
-    const yawAngle = Math.atan2(Number(worldX) || 0, depth) * 180 / Math.PI;
+    const lateral = Number(worldX) || 0;
+    const profile = VIEW_PROFILES[viewProfile] || VIEW_PROFILES.airborne;
+    const requestedYaw = Math.atan2(lateral, depth) * 180 / Math.PI;
+    const groundedLaneOffset = Number(laneOffset);
+    const laneYaw = Number.isFinite(groundedLaneOffset)
+      ? groundedLaneOffset * 6 * Math.min(1, 1200 / depth)
+      : requestedYaw;
+    const yawAngle = Math.max(profile.minYaw, Math.min(profile.maxYaw,
+      viewProfile === 'grounded' ? laneYaw : requestedYaw));
     const centerY = (Number(objectY) || 0) + (Number(bounds.minY) + Number(bounds.maxY)) / 2;
-    const pitchAngle = Math.atan2((Number(cameraY) || 0) - centerY, depth) * 180 / Math.PI;
+    const horizontalDistance = Math.max(1, Math.hypot(lateral, depth));
+    const pitchAngle = Math.atan2((Number(cameraY) || 0) - centerY, horizontalDistance) * 180 / Math.PI;
     return Object.freeze({
       yaw: selectAxisBlend(yawAngle, YAW_DEGREES),
       pitch: selectAxisBlend(pitchAngle, PITCH_DEGREES),
@@ -319,6 +340,8 @@
       pixelsPerWorldUnitX,
       pixelsPerWorldUnitY,
       alpha = 1,
+      viewProfile = 'airborne',
+      laneOffset = null,
     } = options;
     if (!validateAtlasMetadata(metadata)
       || !projectedOrigin
@@ -335,14 +358,21 @@
       cameraY,
       objectY,
       worldBounds: metadata.worldBounds,
+      viewProfile,
+      laneOffset,
     });
-    const yawParts = view.yaw.lowerIndex === view.yaw.upperIndex
+    const groundedProfile = viewProfile === 'grounded';
+    const yawParts = groundedProfile
+      ? [{ index: Math.floor(YAW_DEGREES.length / 2), weight: 1 }]
+      : view.yaw.lowerIndex === view.yaw.upperIndex
       ? [{ index: view.yaw.lowerIndex, weight: 1 }]
       : [
         { index: view.yaw.lowerIndex, weight: 1 - view.yaw.mix },
         { index: view.yaw.upperIndex, weight: view.yaw.mix },
       ];
-    const pitchParts = view.pitch.lowerIndex === view.pitch.upperIndex
+    const pitchParts = groundedProfile
+      ? [{ index: 1, weight: 1 }]
+      : view.pitch.lowerIndex === view.pitch.upperIndex
       ? [{ index: view.pitch.lowerIndex, weight: 1 }]
       : [
         { index: view.pitch.lowerIndex, weight: 1 - view.pitch.mix },
@@ -431,6 +461,51 @@
     return Object.freeze({ x: bottom.x - width / 2, y: bottom.y - height, width, height });
   }
 
+  function projectedLaneEnvelope({
+    projectPoint,
+    worldX,
+    zRel,
+    laneWidth,
+    footprintWidth,
+    baseY = 0,
+  } = {}) {
+    if (typeof projectPoint !== 'function'
+      || !Number.isFinite(Number(worldX))
+      || !(Number(zRel) > 0)
+      || !(Number(laneWidth) > 0)
+      || !(Number(footprintWidth) > 0)
+      || Number(footprintWidth) > Number(laneWidth)
+      || !Number.isFinite(Number(baseY))) return null;
+    const centerX = Number(worldX);
+    const depth = Number(zRel);
+    const y = Number(baseY);
+    const lane = Number(laneWidth);
+    const footprint = Number(footprintWidth);
+    const laneCenter = projectPoint(centerX, y, depth);
+    const laneLeft = projectPoint(centerX - lane / 2, y, depth);
+    const laneRight = projectPoint(centerX + lane / 2, y, depth);
+    const footprintLeft = projectPoint(centerX - footprint / 2, y, depth);
+    const footprintRight = projectPoint(centerX + footprint / 2, y, depth);
+    const adjacentLeftCenter = projectPoint(centerX - lane, y, depth);
+    const adjacentRightCenter = projectPoint(centerX + lane, y, depth);
+    const footprintCenter = Object.freeze({
+      x: (footprintLeft.x + footprintRight.x) / 2,
+      y: (footprintLeft.y + footprintRight.y) / 2,
+    });
+    return Object.freeze({
+      laneCenter: Object.freeze({ x: laneCenter.x, y: laneCenter.y }),
+      laneLeft: Math.min(laneLeft.x, laneRight.x),
+      laneRight: Math.max(laneLeft.x, laneRight.x),
+      laneWidth: Math.abs(laneRight.x - laneLeft.x),
+      footprintCenter,
+      footprintLeft: Math.min(footprintLeft.x, footprintRight.x),
+      footprintRight: Math.max(footprintLeft.x, footprintRight.x),
+      footprintWidth: Math.abs(footprintRight.x - footprintLeft.x),
+      adjacentLeftCenter: Math.min(adjacentLeftCenter.x, adjacentRightCenter.x),
+      adjacentRightCenter: Math.max(adjacentLeftCenter.x, adjacentRightCenter.x),
+    });
+  }
+
   const VARIANT_KEYS = Object.freeze({
     drone: Object.freeze(['droneScout', 'droneStriker']),
     turret: Object.freeze(['turretSentry', 'turretHeavy']),
@@ -464,6 +539,7 @@
     buildSpriteDrawPlan,
     roadEdgeFrame,
     worldSpriteDrawRect,
+    projectedLaneEnvelope,
     variantKey,
   });
 

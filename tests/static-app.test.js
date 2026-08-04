@@ -85,6 +85,13 @@ test('the route guide uses a compact centered muted layout', () => {
   assert.match(rule, /text-align:\s*center\s*;/);
 });
 
+test('active play removes command chrome while non-playing modes retain utilities', () => {
+  assert.match(css, /#app-ui\[data-mode="PLAYING"\]\s+#utility-controls\s*\{[^}]*opacity:\s*0\s*;[^}]*pointer-events:\s*none\s*;/s);
+  assert.match(css, /#app-ui\[data-mode="PLAYING"\]\s+#command-frame\s*\{[^}]*opacity:\s*0\s*;/s);
+  assert.match(css, /#utility-controls\s*\{[^}]*transition:\s*opacity\s+150ms/s);
+  assert.match(css, /#command-frame\s*\{[^}]*transition:\s*opacity\s+150ms/s);
+});
+
 test('English and Chinese READMEs explain equivalent obstacle routes and local play', () => {
   assert.match(englishReadme, /^## Obstacle route language$/m);
   assert.match(chineseReadme, /^## 障碍路线提示$/m);
@@ -150,6 +157,33 @@ test('the world-art contract loads as a classic script after presentation and be
   assert.ok(worldArtIndex < gameIndex, 'world-art must initialize before the game consumes it');
 });
 
+test('the semantic scene contract loads after world art and before the game', () => {
+  const scripts = [...html.matchAll(/<script defer src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+  const worldArtIndex = scripts.indexOf('./src/world-art.js');
+  const sceneStyleIndex = scripts.indexOf('./src/scene-style.js');
+  const gameIndex = scripts.indexOf('./src/game.js');
+  assert.ok(sceneStyleIndex > worldArtIndex, 'scene-style must initialize after world-art');
+  assert.ok(sceneStyleIndex < gameIndex, 'scene-style must initialize before the game consumes it');
+});
+
+test('the Heavy Swarm visual contract loads after scene style and before the game', () => {
+  const scripts = [...html.matchAll(/<script defer src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+  const sceneStyleIndex = scripts.indexOf('./src/scene-style.js');
+  const droneVisualIndex = scripts.indexOf('./src/drone-visual.js');
+  const gameIndex = scripts.indexOf('./src/game.js');
+  assert.ok(droneVisualIndex > sceneStyleIndex, 'drone-visual must initialize after scene-style');
+  assert.ok(droneVisualIndex < gameIndex, 'drone-visual must initialize before the game consumes it');
+});
+
+test('gap topology loads after obstacle vocabulary and before the game', () => {
+  const scripts = [...html.matchAll(/<script defer src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+  const obstaclesIndex = scripts.indexOf('./src/obstacles.js');
+  const gapRegionsIndex = scripts.indexOf('./src/gap-regions.js');
+  const gameIndex = scripts.indexOf('./src/game.js');
+  assert.ok(gapRegionsIndex > obstaclesIndex);
+  assert.ok(gapRegionsIndex < gameIndex);
+});
+
 test('startup exposes a locked adaptive-audio diagnostic without creating AudioContext', () => {
   let contextConstructions = 0;
   class GuardAudioContext { constructor() { contextConstructions++; } }
@@ -169,7 +203,7 @@ test('startup exposes a locked adaptive-audio diagnostic without creating AudioC
     fetch: async () => { throw new Error('must not fetch before a gesture'); },
   };
   vm.createContext(sandbox);
-  for (const file of ['version.js', 'i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
+  for (const file of ['version.js', 'i18n.js', 'input.js', 'obstacles.js', 'gap-regions.js', 'audio.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
   }
 
@@ -181,6 +215,8 @@ test('startup exposes a locked adaptive-audio diagnostic without creating AudioC
   assert.equal(diagnostic.version.tag, 'v1.1.0');
   assert.equal(Object.isFrozen(diagnostic.version), true);
   assert.equal(diagnostic.scripts.audio, true);
+  assert.equal(diagnostic.scripts.sceneStyle, false);
+  assert.equal(diagnostic.scripts.droneVisual, false);
   assert.equal(diagnostic.audio.status, 'locked');
   assert.equal(diagnostic.audio.decoded, false);
 });
@@ -231,7 +267,7 @@ function makeAudioDiagnosticSandbox({ fetchFails = false } = {}) {
 async function runPostGestureDiagnostics(options) {
   const sandbox = makeAudioDiagnosticSandbox(options);
   vm.createContext(sandbox);
-  for (const file of ['version.js', 'i18n.js', 'input.js', 'obstacles.js', 'audio.js', 'game.js']) {
+  for (const file of ['version.js', 'i18n.js', 'input.js', 'obstacles.js', 'gap-regions.js', 'audio.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox);
   }
   return vm.runInContext('startGame(); Skyroads.diagnostics.ready', sandbox);

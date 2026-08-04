@@ -7,10 +7,14 @@ const {
   fallbackShipLayout,
   VISUAL_ASSET_MANIFEST,
   preloadVisualAssets,
+  resolveUiAsset,
   resolveWorldAtlas,
   playerVisualLayerPlan,
+  thrusterFeedbackState,
   canvasMotionPolicy,
   computeHudLayout,
+  hudVisibilityPlan,
+  worldDepthTreatment,
   canvasMetrics,
   overlayForMode,
   setOverlayMode,
@@ -38,6 +42,13 @@ function imageAssetCount() {
     0,
   );
 }
+
+test('visual manifest points player frames at the semantic derivatives', () => {
+  assert.deepEqual(VISUAL_ASSET_MANIFEST.ship, {
+    neutral: './assets/ship/semantic/player-neutral.png',
+    thrust: './assets/ship/semantic/player-thrust.png',
+  });
+});
 
 function recordingImageCtor(dimensionsForPath) {
   const record = { constructed: 0, sources: [], instances: [] };
@@ -102,6 +113,66 @@ test('loaded neutral and thrust frames retain charge boost and super layers in d
   const fallback = playerVisualLayerPlan(null, { chargeActive: true, boostActive: true, superActive: true });
   assert.equal(fallback.shipFrame, null);
   assert.deepEqual(fallback.layers, ['procedural-ship', 'super-surface', 'charge', 'boost-aura', 'super-aura']);
+});
+
+test('thruster feedback derives frozen priority progress and sustained glide state', () => {
+  assert.deepEqual(thrusterFeedbackState({}), {
+    mode: 'normal',
+    burstProgress: 0,
+    sustained: false,
+    boostActive: false,
+    superPowered: false,
+    reducedMotion: false,
+  });
+  assert.deepEqual(thrusterFeedbackState({
+    gliding: true,
+    boostActive: true,
+    superActive: true,
+    reducedMotion: true,
+  }), {
+    mode: 'boost',
+    burstProgress: 0,
+    sustained: true,
+    boostActive: true,
+    superPowered: true,
+    reducedMotion: true,
+  });
+  const second = thrusterFeedbackState({
+    gliding: true,
+    jumpBurst: 0.15,
+    jumpBurstTier: 2,
+    boostActive: true,
+  });
+  assert.equal(second.mode, 'double');
+  assert.equal(second.burstProgress, 0.5);
+  assert.equal(second.sustained, true);
+  const third = thrusterFeedbackState({
+    jumpBurst: 0.18,
+    jumpBurstTier: 3,
+  });
+  assert.equal(third.mode, 'triple');
+  assert.equal(third.burstProgress, 0.5);
+  assert.equal(Object.isFrozen(third), true);
+});
+
+test('UI asset resolution exposes only loaded hologram and industrial elements', () => {
+  const hologram = { id: 'hologram-panel' };
+  const meter = { id: 'industrial-meter' };
+  const visualAssets = {
+    assets: {
+      ui: {
+        hologramPanel: { loaded: true, element: hologram },
+        industrialMeter: { loaded: true, element: meter },
+        missing: { loaded: false, element: { id: 'missing' } },
+      },
+    },
+  };
+
+  assert.equal(resolveUiAsset(visualAssets, 'hologramPanel'), hologram);
+  assert.equal(resolveUiAsset(visualAssets, 'industrialMeter'), meter);
+  assert.equal(resolveUiAsset(visualAssets, 'missing'), null);
+  assert.equal(resolveUiAsset(visualAssets, 'unknown'), null);
+  assert.equal(resolveUiAsset(null, 'hologramPanel'), null);
 });
 
 test('world atlas resolution isolates unavailable variants from loaded atlases', () => {
@@ -347,15 +418,55 @@ test('the fallback renderer layout consumes the shared ship draw rectangle', () 
   }
 });
 
-test('right HUD starts below utility controls at all target viewports', () => {
-  for (const locale of ['zh-CN', 'en']) {
-    for (const [width, height] of [[960, 600], [1280, 800], [1440, 900], [1920, 1080]]) {
-      const layout = computeHudLayout(width, height, locale);
-      assert.ok(layout.rightTop > layout.utilityBottom, `${locale} ${width}x${height}`);
-      assert.ok(layout.rightBottom <= height, `${locale} ${width}x${height}`);
-      assert.equal(layout.rightX, width - 16);
-    }
-  }
+test('HUD layout stays inside a bounded five-percent safe area', () => {
+  assert.deepEqual(computeHudLayout(1280, 800), {
+    safeInset: 40,
+    leftX: 40,
+    leftY: 40,
+    leftWidth: 224,
+    rightX: 1240,
+    rightY: 40,
+    rightWidth: 224,
+    lineHeight: 20,
+  });
+  assert.equal(computeHudLayout(960, 600).safeInset, 30);
+  assert.equal(computeHudLayout(320, 200).safeInset, 20);
+  assert.equal(computeHudLayout(3840, 2160).safeInset, 64);
+});
+
+test('HUD visibility keeps transient instruments contextual', () => {
+  assert.deepEqual(hudVisibilityPlan({}), {
+    charge: false,
+    boost: false,
+    super: false,
+    magnet: false,
+  });
+  assert.equal(hudVisibilityPlan({ charging: true }).charge, true);
+  assert.equal(hudVisibilityPlan({ chargeReady: true }).charge, true);
+  assert.deepEqual(hudVisibilityPlan({
+    boostActive: true,
+    superActive: true,
+    magnetActive: true,
+  }), {
+    charge: false,
+    boost: true,
+    super: true,
+    magnet: true,
+  });
+});
+
+test('world depth treatment reduces distant decoration without hiding it', () => {
+  const near = worldDepthTreatment(130, 6130);
+  const middle = worldDepthTreatment(3130, 6130);
+  const far = worldDepthTreatment(6130, 6130);
+  assert.equal(near.depthRatio, 0);
+  assert.equal(near.worldAlpha, 1);
+  assert.ok(middle.worldAlpha < near.worldAlpha);
+  assert.ok(far.worldAlpha < middle.worldAlpha);
+  assert.ok(far.worldAlpha > 0);
+  assert.ok(near.seamAlpha > middle.seamAlpha);
+  assert.ok(middle.seamAlpha > far.seamAlpha);
+  assert.deepEqual(worldDepthTreatment(-50, 0), near);
 });
 
 test('only the mode overlay selected by game state is visible', () => {

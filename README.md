@@ -13,7 +13,8 @@ Current version: [v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1
 - Responsive held movement crosses multiple lanes smoothly and reverses immediately; `Space` / `Enter` starts or restarts a mission, and `P` pauses or resumes play.
 - A bilingual interstellar command center follows Chinese system languages and otherwise starts in English, with a remembered manual language switch and a compact `V1.1` identity.
 - The original 144 BPM, three-stem adaptive **Nebula Cruise** soundtrack keeps its cinematic electronic palette while adding a faster, joyful, slightly tense pulse.
-- Perspective-aware **Orbital Defense** world art gives low, medium, and high structures distinct silhouettes, connected defense corridors, and larger drones that preserve their warning and movement-direction cues.
+- Perspective-aware **Orbital Defense** world art gives low, medium, and high structures distinct silhouettes, connected defense corridors, a dangerous event-horizon treatment for missing road, and Heavy Swarm drones that preserve their warning and movement-direction cues.
+- Semantic Spectrum colors separate the gold player ship, graphite/orange structures, crimson hostile units, and cold-black gaps, while vector jets and synchronized propulsion audio distinguish second jump, third jump, glide, and BOOST.
 - A reliable local Top 15 stays in this browser. The first pilot name comes from a safe original sci-fi call-sign list, is reused automatically, and can be changed whenever you want.
 - An endless, progressively faster course keeps ordinary bypass lanes around the new advanced defenses while retaining fuel pressure, gaps, bridges, enemies, BOOST, super form, magnet, and slowdown power-ups.
 
@@ -88,7 +89,7 @@ The exact output is `Nebula Cruise.app` in the repository root. It runs the comp
 
 ## Third-party assets
 
-Visual assets and fonts are copied into this repository; nothing is hotlinked at runtime. Sources, upstream licenses, selected files, and modifications are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), with license texts in [`licenses/`](licenses/). The adaptive soundtrack is original to this project.
+Visual assets and fonts are copied into this repository; nothing is hotlinked at runtime. Gameplay uses local Semantic Spectrum color derivatives so the ship, structures, hostile units, and gaps keep distinct visual roles without changing their geometry, anchors, or collision. The deterministic recipe and hashes are in [`docs/assets/semantic-spectrum.md`](docs/assets/semantic-spectrum.md). Sources, upstream licenses, selected files, and modifications are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), with license texts in [`licenses/`](licenses/). The adaptive soundtrack is original to this project.
 
 ## AI assistance
 
