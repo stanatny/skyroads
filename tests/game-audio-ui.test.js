@@ -460,7 +460,7 @@ test('active HUD keeps immediate instruments and hides historical or instruction
     mode: 'PLAYING',
     fuel: 80,
     jumpsUsed: 0,
-    chargeT: 1.5,
+    chargeT: 0.75,
     boostT: 2,
     tripleT: 3,
     magnetT: 4,
@@ -645,7 +645,7 @@ for (const [label, prepare] of [
     const { sandbox, windowObject } = game;
     vm.runInContext(`
       KEYS.KeyJ = true;
-      STATE.chargeT = 2;
+      STATE.chargeT = 1.5;
       STATE.chargeStage = 2;
       STATE.gliding = true;
       STATE.movement.heldLeft = true;
@@ -666,7 +666,7 @@ for (const [label, prepare] of [
       heldLeft: true,
       activeDirection: -1,
       keyJ: true,
-      chargeT: 2,
+      chargeT: 1.5,
       chargeStage: 2,
       gliding: true,
     });
@@ -1173,7 +1173,7 @@ test('held gameplay actions use stable codes and ignore repeated keydown events'
   });
 });
 
-test('charged-shot release switches from bullet to missile at two seconds', () => {
+test('charged-shot release switches from bullet to missile at one and a half seconds', () => {
   const { sandbox, windowObject } = makeGameUiSandbox();
   vm.runInContext('startGame()', sandbox);
   const releaseAt = (seconds) => {
@@ -1188,11 +1188,11 @@ test('charged-shot release switches from bullet to missile at two seconds', () =
     return vm.runInContext('STATE.shots[0] && STATE.shots[0].kind', sandbox);
   };
 
-  assert.equal(releaseAt(1.999), 'bullet');
-  assert.equal(releaseAt(2), 'missile');
+  assert.equal(releaseAt(1.499), 'bullet');
+  assert.equal(releaseAt(1.5), 'missile');
 });
 
-test('charge cues track one-third two-thirds and full two-second progress', () => {
+test('charge cues track half one and one-and-a-half-second progress', () => {
   const { sandbox } = makeGameUiSandbox();
   const result = JSON.parse(vm.runInContext(`(() => {
     const cues = [];
@@ -1226,8 +1226,8 @@ test('charge cues track one-third two-thirds and full two-second progress', () =
   })()`, sandbox));
 
   assert.deepEqual(result, {
-    chargeTime: 2,
-    chargeT: 2,
+    chargeTime: 1.5,
+    chargeT: 1.5,
     chargeStage: 3,
     cues: ['tick:1', 'tick:2', 'ready'],
   });

@@ -166,14 +166,14 @@ const CONFIG = {
   MAGNET_RANGE: 3,             // 吸附车道半径：±3 车道内的燃料自动飞来（无视高度；7 车道几乎全幅）
   MAGNET_SEG_AHEAD: 2,         // 吸附纵深：当前段 + 前方 2 段
 
-  // ---- 战斗系统（K 跳/按住滑翔 · J 点按子弹 / 按住 2 秒蓄力导弹）----
+  // ---- 战斗系统（K 跳/按住滑翔 · J 点按子弹 / 按住 1.5 秒蓄力导弹）----
   // 敌人是挂在 segment 上的独立实体（seg.enemies），不是 LANE_TYPE ——
   //   不占障碍名额、不参与车道类型不变量；可解性红线：
   //   敌人绝不刷在当段保证车道（簇内避开 clusterLane、缓冲避开 safeLane），
   //   因此"沿保证车道前进"永远是无敌安全解，敌人只是高风险高收益的遭遇战。
-  // 第六轮：L 键与弹药系统拆除 —— 导弹改为 J 蓄力 CHARGE_TIME(2)s 松手发射，
+  // 第六轮：L 键与弹药系统拆除 —— 导弹改为 J 蓄力 CHARGE_TIME(1.5)s 松手发射，
   //   无弹药概念（蓄力时间就是成本），操作键位收敛到 J/K 两个。
-  CHARGE_TIME: 2,              // J 蓄力满所需秒数；未满松手 = 普通子弹
+  CHARGE_TIME: 1.5,            // J 蓄力满所需秒数；未满松手 = 普通子弹
   CHARGE_HUD_DELAY: 0.5,      // 点射不闪 HUD；持续按住达到 0.5s 后显示蓄力条
   BULLET_COOLDOWN: 0.22,       // 子弹射速上限（秒/发）；子弹无限
   BULLET_SPEED: 40,            // 弹速 = 玩家速度 + 40 段/秒（对地）
@@ -229,7 +229,7 @@ const STATE = {
   // 滑翔（按住跳跃键 + 下落中 + 有燃料）
   gliding: false,
   fuelFlash: 0,                // 高耗油警示（秒）：二段跳扣燃料时置 0.6，HUD 燃料条变橙提示
-  // 战斗（第六轮：J 点按子弹 / 按住 CHARGE_TIME(2)s 蓄力导弹，无弹药概念）
+  // 战斗（第六轮：J 点按子弹 / 按住 CHARGE_TIME(1.5)s 蓄力导弹，无弹药概念）
   chargeT: 0,                  // J 蓄力进度（秒，0..CHARGE_TIME；松手时判子弹/导弹）
   chargeStage: 0,              // 蓄力提示音已发档位（0..3：1/3、2/3 进度 tick + 满蓄 ding）
   shots: [],                   // 飞行中的子弹/导弹 { kind, seg, lanePosition }（发射瞬间连续位置）
@@ -464,7 +464,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyK':
       tryJump(); break;
     case 'KeyJ':
-      // 开始蓄力（0.001 标记"已按下"，松手时判定：满 2s 导弹 / 未满子弹）
+      // 开始蓄力（0.001 标记"已按下"，松手时判定：满 1.5s 导弹 / 未满子弹）
       STATE.chargeT = 0.001;
       STATE.chargeStage = 0;
       break;
@@ -483,7 +483,7 @@ window.addEventListener('keyup', (e) => {
     if (STATE.mode === 'PLAYING' && result.reversed) sfxLane();
     return;
   }
-  // J 松手发射：蓄满 CHARGE_TIME(2)s → 蓄力导弹；未满 → 普通子弹
+  // J 松手发射：蓄满 CHARGE_TIME(1.5)s → 蓄力导弹；未满 → 普通子弹
   if (code === 'KeyJ' && STATE.mode === 'PLAYING' && STATE.chargeT > 0) {
     if (shouldHandleGameInput(gameInputDescriptor(e))) {
       if (STATE.chargeT >= CONFIG.CHARGE_TIME) fireMissile();
@@ -603,7 +603,7 @@ function jumpHeld() {
   return !!(KEYS.Space || KEYS.ArrowUp || KEYS.KeyW || KEYS.KeyK);
 }
 
-// ---- 开火：J 点按子弹（无限，冷却 0.22s）/ 按住 2 秒蓄力导弹（松手发射）----
+// ---- 开火：J 点按子弹（无限，冷却 0.22s）/ 按住 1.5 秒蓄力导弹（松手发射）----
 // 弹体在 updatePhysics 子步扫掠内推进（与玩家同帧同子步），杜绝高速穿段漏判。
 function fireBullet() {
   if (STATE.mode !== 'PLAYING') return;
@@ -622,7 +622,7 @@ function fireBullet() {
   sfxShoot();
 }
 
-// 蓄力导弹（J 按住蓄满 CHARGE_TIME(2)s 松手发射）：无弹药概念，蓄力时间就是成本
+// 蓄力导弹（J 按住蓄满 CHARGE_TIME(1.5)s 松手发射）：无弹药概念，蓄力时间就是成本
 function fireMissile() {
   if (STATE.mode !== 'PLAYING') return;
   let n = 0;
@@ -3673,7 +3673,7 @@ function renderSideDecor(ctx) {
 // 7. 物理与碰撞 Physics —— 子步扫掠，杜绝高速穿段漏判
 // ============================================================
 function updatePhysics(dt) {
-  // J 蓄力累积：按住期间在 1/3、2/3 进度提示 tick，满 CHARGE_TIME(2)s 就绪 ding；
+  // J 蓄力累积：按住期间在 0.5s、1.0s 提示 tick，满 CHARGE_TIME(1.5)s 就绪 ding；
   // 松手判定在 keyup（满蓄导弹 / 未满子弹），这里只负责进度与提示
   if (KEYS.KeyJ) {
     if (STATE.chargeT > 0 && STATE.chargeT < CONFIG.CHARGE_TIME) {

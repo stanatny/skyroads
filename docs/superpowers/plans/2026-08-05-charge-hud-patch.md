@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stabilize the contextual HUD during tap fire, reduce charged-missile time to two seconds, and prepare a consistent V1.1.1 patch release.
+**Goal:** Stabilize the contextual HUD during tap fire, reduce charged-missile time to 1.5 seconds, and prepare a consistent V1.1.1 patch release.
 
 **Architecture:** Keep pure HUD visibility policy in `src/presentation.js` and keep simulation timing, audio stages, input release, and Canvas ordering in `src/game.js`. Reuse the existing VM integration harnesses to prove visible order and real key-release behavior, then update every canonical version surface from one `1.1.1` contract without changing the V1.1 display badge.
 
@@ -13,7 +13,7 @@
 - Start from `origin/main` commit `e1c9583f92213f5e7b2abc96296b22d5f411b7ab`.
 - Show the charge HUD only when elapsed charge is at least `0.5` seconds.
 - Render contextual status in exact order: BOOST, super form, magnet, missile charge.
-- Set full charge to exactly `2.0` seconds.
+- Set full charge to exactly `1.5` seconds.
 - Play intermediate charge ticks at one-third and two-thirds progress, then the ready cue at full progress.
 - Preserve bullet/missile rules and every unrelated gameplay, input, collision, score, power-up, storage, asset, and audio behavior.
 - Use only the public target repository and public open-source sources.
@@ -199,14 +199,14 @@ git commit -m "fix: stabilize charged-shot HUD" \
 
 **Interfaces:**
 - Consumes: existing keyboard `keydown`/`keyup`, `updatePhysics(dt)`, `fireBullet()`, and `fireMissile()`.
-- Produces: `CONFIG.CHARGE_TIME === 2`, proportional `chargeStage` thresholds, and unchanged projectile kinds on release.
+- Produces: `CONFIG.CHARGE_TIME === 1.5`, proportional `chargeStage` thresholds, and unchanged projectile kinds on release.
 
 - [ ] **Step 1: Write the failing release-boundary test**
 
 Add to `tests/game-audio-ui.test.js`:
 
 ```js
-test('charged-shot release switches from bullet to missile at two seconds', () => {
+test('charged-shot release switches from bullet to missile at one and a half seconds', () => {
   const { sandbox, windowObject } = makeGameUiSandbox();
   vm.runInContext('startGame()', sandbox);
   const releaseAt = (seconds) => {
@@ -221,8 +221,8 @@ test('charged-shot release switches from bullet to missile at two seconds', () =
     return vm.runInContext('STATE.shots[0] && STATE.shots[0].kind', sandbox);
   };
 
-  assert.equal(releaseAt(1.999), 'bullet');
-  assert.equal(releaseAt(2), 'missile');
+  assert.equal(releaseAt(1.499), 'bullet');
+  assert.equal(releaseAt(1.5), 'missile');
 });
 ```
 
@@ -231,18 +231,18 @@ test('charged-shot release switches from bullet to missile at two seconds', () =
 Run:
 
 ```bash
-node --test --test-name-pattern='switches from bullet to missile at two seconds' \
+node --test --test-name-pattern='switches from bullet to missile at one and a half seconds' \
   tests/game-audio-ui.test.js
 ```
 
-Expected: FAIL because the current two-second release is still below `CHARGE_TIME = 3`.
+Expected: FAIL because the current 1.5-second release is still below `CHARGE_TIME = 3`.
 
 - [ ] **Step 3: Write the failing proportional-cue test**
 
 Add to `tests/game-audio-ui.test.js`:
 
 ```js
-test('charge cues track one-third two-thirds and full two-second progress', () => {
+test('charge cues track half one and one-and-a-half-second progress', () => {
   const { sandbox } = makeGameUiSandbox();
   const result = JSON.parse(vm.runInContext(`(() => {
     const cues = [];
@@ -276,8 +276,8 @@ test('charge cues track one-third two-thirds and full two-second progress', () =
   })()`, sandbox));
 
   assert.deepEqual(result, {
-    chargeTime: 2,
-    chargeT: 2,
+    chargeTime: 1.5,
+    chargeT: 1.5,
     chargeStage: 3,
     cues: ['tick:1', 'tick:2', 'ready'],
   });
@@ -292,14 +292,14 @@ Run:
 node --test --test-name-pattern='charge cues track one-third' tests/game-audio-ui.test.js
 ```
 
-Expected: FAIL because the current charge duration is three seconds and cue thresholds are hardcoded at one and two seconds.
+Expected: FAIL because the current charge duration is three seconds.
 
 - [ ] **Step 5: Implement the minimal timing change**
 
 In `src/game.js`:
 
 ```js
-  CHARGE_TIME: 2,
+  CHARGE_TIME: 1.5,
 ```
 
 Replace hardcoded stage thresholds with:
@@ -312,18 +312,18 @@ Replace hardcoded stage thresholds with:
         : (STATE.chargeT >= secondChargeCue ? 2 : (STATE.chargeT >= firstChargeCue ? 1 : 0));
 ```
 
-Update nearby comments from three seconds and one-/two-second ticks to the new proportional two-second contract.
+Update nearby comments from three seconds to the new proportional 1.5-second contract.
 
 - [ ] **Step 6: Update player documentation**
 
 Change the charged-missile control rows in both READMEs:
 
 ```md
-| Charged missile | Hold `J` for 2 seconds, then release | Keyboard only |
+| Charged missile | Hold `J` for 1.5 seconds, then release | Keyboard only |
 ```
 
 ```md
-| 蓄力导弹 | 按住 `J` 2 秒后松开 | 仅键盘 |
+| 蓄力导弹 | 按住 `J` 1.5 秒后松开 | 仅键盘 |
 ```
 
 Update the HUD description in both languages to explain that charge appears after a deliberate hold rather than on every tap.
@@ -333,7 +333,7 @@ Update the HUD description in both languages to explain that charge appears afte
 Run:
 
 ```bash
-node --test --test-name-pattern='switches from bullet to missile at two seconds|charge cues track one-third|active HUD keeps immediate instruments' \
+node --test --test-name-pattern='switches from bullet to missile at one and a half seconds|charge cues track half one|active HUD keeps immediate instruments' \
   tests/game-audio-ui.test.js
 npm run check
 ```
@@ -426,7 +426,7 @@ V1.1.1 是一次战斗 HUD 与蓄力节奏补丁：
 
 - 点射 `J` 不再闪现蓄力状态；按住达到 0.5 秒后才显示。
 - 蓄力状态固定在 BOOST、超级形态和磁铁状态之后，其他状态不再上下跳动。
-- 导弹蓄满时间从 3 秒缩短到 2 秒，中间提示音按进度等比例提前。
+- 导弹蓄满时间从 3 秒缩短到 1.5 秒，中间提示音在 0.5 秒和 1.0 秒给出反馈。
 
 在线游玩目标：https://stanatny.github.io/skyroads/
 
@@ -440,7 +440,7 @@ V1.1.1 is a combat-HUD and charge-pacing patch:
 
 - Tapping `J` no longer flashes the charge status; it appears only after a 0.5-second hold.
 - Charge stays below BOOST, super form, and magnet so existing status instruments no longer jump.
-- Full missile charge drops from three seconds to two, with proportionally earlier intermediate cues.
+- Full missile charge drops from three seconds to one and a half seconds, with intermediate cues at 0.5 and 1.0 seconds.
 
 Canonical web target: https://stanatny.github.io/skyroads/
 
@@ -554,8 +554,8 @@ Open the machine-reachable URL for port `8766` and verify in English and Chinese
 1. Repeated quick `J` taps fire bullets and never show a charge panel.
 2. While BOOST, super form, or magnet is active, quick taps do not move its status panel.
 3. Holding `J` for 0.5 seconds reveals charge below every active power-up status.
-4. Releasing before two seconds fires a bullet.
-5. Reaching two seconds shows ready state; releasing fires a missile.
+4. Releasing before 1.5 seconds fires a bullet.
+5. Reaching 1.5 seconds shows ready state; releasing fires a missile.
 6. Pause, blur, menu, restart, and game over still clear charge.
 7. The command center badge remains `V1.1`; diagnostics report semver `1.1.1`.
 8. Browser console has no new error.

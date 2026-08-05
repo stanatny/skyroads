@@ -2,7 +2,7 @@
 
 ## Summary
 
-Nebula Cruise V1.1.1 will prevent quick `J` taps from making the contextual HUD stack jump, shorten missile charging from 3 seconds to 2 seconds, and publish the change as a patch release based on the latest merged `main`.
+Nebula Cruise V1.1.1 will prevent quick `J` taps from making the contextual HUD stack jump, shorten missile charging from 3 seconds to 1.5 seconds, and publish the change as a patch release based on the latest merged `main`.
 
 The approved player-facing direction is:
 
@@ -21,19 +21,19 @@ The charge visibility contract also treats every positive `chargeT` as meaningfu
 
 ### Charge timing
 
-- `CHARGE_TIME` becomes exactly `2.0` seconds.
-- Releasing `J` before 2.0 seconds fires an ordinary bullet under the existing cooldown and projectile limits.
-- Releasing `J` at or after 2.0 seconds fires a missile under the existing missile limit.
-- Holding beyond 2.0 seconds remains clamped at the ready state.
+- `CHARGE_TIME` becomes exactly `1.5` seconds.
+- Releasing `J` before 1.5 seconds fires an ordinary bullet under the existing cooldown and projectile limits.
+- Releasing `J` at or after 1.5 seconds fires a missile under the existing missile limit.
+- Holding beyond 1.5 seconds remains clamped at the ready state.
 - Charge accumulation remains simulation-time based and keeps the existing pause, blur, visibility, dialog, restart, menu, and game-over cancellation behavior.
 
 ### Audio timing
 
-The two intermediate charge ticks retain their relative pacing instead of remaining at the old absolute one- and two-second marks:
+The two intermediate charge ticks retain their relative pacing:
 
-- First tick: `CHARGE_TIME / 3`, approximately 0.67 seconds.
-- Second tick: `CHARGE_TIME * 2 / 3`, approximately 1.33 seconds.
-- Ready cue: `CHARGE_TIME`, exactly 2.0 seconds.
+- First tick: `CHARGE_TIME / 3`, exactly 0.5 seconds.
+- Second tick: `CHARGE_TIME * 2 / 3`, exactly 1.0 second.
+- Ready cue: `CHARGE_TIME`, exactly 1.5 seconds.
 
 No new sound source or asset is introduced.
 
@@ -72,7 +72,7 @@ When no power-up instrument is active, the delayed charge instrument occupies th
 
 `src/game.js` remains responsible for gameplay timing and Canvas integration:
 
-- Configuration owns the 2.0-second total and 0.5-second HUD reveal delay.
+- Configuration owns the 1.5-second total and 0.5-second HUD reveal delay.
 - Physics derives audio stages from proportional thresholds.
 - `renderHUD()` asks the presentation policy whether charge is visible and renders charge after all timed power-ups.
 
@@ -128,8 +128,8 @@ The exact implementation plan may remove a listed test file if inspection shows 
 - A 0.50-second charge exposes it.
 - With BOOST, super form, magnet, and charge active together, text coordinates prove that charge is below every power-up status.
 - A quick press and release still fires one ordinary bullet without displaying charge.
-- A hold just below 2.0 seconds fires an ordinary bullet.
-- A hold reaching 2.0 seconds fires a missile.
+- A hold just below 1.5 seconds fires an ordinary bullet.
+- A hold reaching 1.5 seconds fires a missile.
 - Charge audio stages advance at one-third, two-thirds, and full progress.
 - All runtime, HTML, package, macOS, documentation, tag, and archive version forms agree on V1.1.1.
 
@@ -142,7 +142,7 @@ The exact implementation plan may remove a listed test file if inspection shows 
   - Repeated quick `J` taps do not flash the charge panel.
   - Active BOOST and super-form panels do not move during quick taps or delayed charge reveal.
   - Holding `J` reveals charge at the bottom after 0.5 seconds.
-  - Releasing before and after 2.0 seconds produces bullet and missile behavior respectively.
+  - Releasing before and after 1.5 seconds produces bullet and missile behavior respectively.
   - English and Chinese status labels remain readable.
 
 ### Release order

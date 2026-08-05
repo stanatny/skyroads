@@ -27,7 +27,7 @@ Current version: [v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1
 | Double jump | Press jump again in the air; costs 3 fuel | Tap again in the air |
 | Glide | Hold a jump key while falling; consumes fuel | Keyboard only |
 | Fire | Tap `J` | Keyboard only |
-| Charged missile | Hold `J` for 2 seconds, then release | Keyboard only |
+| Charged missile | Hold `J` for 1.5 seconds, then release | Keyboard only |
 | Start / fly again | `Space` or `Enter` | Use the on-screen button |
 | Pause / resume | `P` | Keyboard only |
 | Return to command center (mission over) | `Esc` | Use the Command Center button |

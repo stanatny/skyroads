@@ -101,8 +101,8 @@ test('the bilingual V1.1.1 release notes describe the charge HUD patch without a
   assert.match(release, /Nebula-Cruise-macOS-v1\.1\.1\.zip/);
   assert.match(release, /0\.5 秒/);
   assert.match(release, /0\.5-second/);
-  assert.match(release, /2 秒/);
-  assert.match(release, /two/);
+  assert.match(release, /1\.5 秒/);
+  assert.match(release, /one and a half seconds/);
   assert.match(release, /BOOST、超级形态和磁铁状态之后/);
   assert.match(release, /below BOOST, super form, and magnet/);
   assert.doesNotMatch(release, /V1\.1\.1 is now live|archive is now available|V1\.1\.1 现已上线|安装包现已可下载/i);
