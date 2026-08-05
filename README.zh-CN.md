@@ -6,7 +6,7 @@
 
 在线游玩：https://stanatny.github.io/skyroads/
 
-当前版本：[v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1.0)
+当前版本：[v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1.1)
 
 ## 游戏亮点
 
@@ -85,7 +85,7 @@ npm run check
 bash app/build.sh
 ```
 
-准确的输出文件名是仓库根目录下的 `Nebula Cruise.app`。应用会在本地 WebKit 中运行完整游戏和全部内置素材。合并并完成发布验证后，V1.1 工作流的通用 macOS 发布资产目标为 `Nebula-Cruise-macOS-v1.1.0.zip`；已发布版本会列在 [GitHub Releases](https://github.com/stanatny/skyroads/releases)。
+准确的输出文件名是仓库根目录下的 `Nebula Cruise.app`。应用会在本地 WebKit 中运行完整游戏和全部内置素材。合并并完成发布验证后，V1.1.1 工作流的通用 macOS 发布资产目标为 `Nebula-Cruise-macOS-v1.1.1.zip`；已发布版本会列在 [GitHub Releases](https://github.com/stanatny/skyroads/releases)。
 
 ## 第三方素材
 

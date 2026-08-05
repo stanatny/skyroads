@@ -210,9 +210,9 @@ test('startup exposes a locked adaptive-audio diagnostic without creating AudioC
   const diagnostic = sandbox.Skyroads.diagnostics.snapshot();
   assert.equal(contextConstructions, 0);
   assert.equal(diagnostic.scripts.version, true);
-  assert.equal(diagnostic.version.semver, '1.1.0');
+  assert.equal(diagnostic.version.semver, '1.1.1');
   assert.equal(diagnostic.version.display, 'V1.1');
-  assert.equal(diagnostic.version.tag, 'v1.1.0');
+  assert.equal(diagnostic.version.tag, 'v1.1.1');
   assert.equal(Object.isFrozen(diagnostic.version), true);
   assert.equal(diagnostic.scripts.audio, true);
   assert.equal(diagnostic.scripts.sceneStyle, false);

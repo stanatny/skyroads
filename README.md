@@ -6,7 +6,7 @@ Nebula Cruise is a fast, polished sci-fi lane runner for the browser. Pilot a de
 
 Play online: https://stanatny.github.io/skyroads/
 
-Current version: [v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1.0)
+Current version: [v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1.1)
 
 ## Highlights
 
@@ -85,7 +85,7 @@ On macOS 12 or later with Xcode command-line tools installed, build the universa
 bash app/build.sh
 ```
 
-The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. After merge and release verification, the V1.1 workflow targets the universal release asset `Nebula-Cruise-macOS-v1.1.0.zip`; releases are listed on [GitHub Releases](https://github.com/stanatny/skyroads/releases).
+The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. After merge and release verification, the V1.1.1 workflow targets the universal release asset `Nebula-Cruise-macOS-v1.1.1.zip`; releases are listed on [GitHub Releases](https://github.com/stanatny/skyroads/releases).
 
 ## Third-party assets
 
