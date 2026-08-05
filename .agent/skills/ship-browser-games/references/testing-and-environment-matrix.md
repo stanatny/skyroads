@@ -22,6 +22,18 @@ Before implementing a behavior change, add or identify a focused test that fails
 
 Run fresh focused checks after each relevant edit and fresh full checks after the final edit. Never reuse stale output as completion evidence.
 
+## Wait for Readiness, Not Time
+
+- Use condition-based readiness such as `document.readyState`, a diagnostics object, terminal asset state, decoded-or-fallback audio state, or the first actionable scene.
+- A fixed sleep is useful only as a diagnostic aid. It is not proof that deferred scripts, assets, audio, service workers, or engine scenes are ready.
+- Browser and target-runtime automation must use the actual input path and inspect console, runtime, network, or crash errors.
+
+## Separate Platform Suites
+
+- Provide and report a platform-independent suite separately from platform-only checks such as macOS image/audio inspection, signing, universal binaries, device builds, or store validation.
+- A platform-only failure caused by a missing host tool does not invalidate independent logic evidence, but it leaves that platform gate incomplete.
+- Name the exact unavailable evidence instead of presenting a mostly green aggregate as complete.
+
 ## Cover the Runtime Matrix
 
 Select combinations from actual supported boundaries rather than an arbitrary browser list:
@@ -35,6 +47,8 @@ Select combinations from actual supported boundaries rather than an arbitrary br
 - debug and release packages, required architectures, signatures, and resource manifests.
 
 Capture reproducible commands plus the tested commit. For visual proof, capture representative gameplay rather than only menus or isolated sprites. For audio, combine automated synchronization/format checks with real playback and at least the required listening duration.
+
+For visual option comparison, keep camera, viewport, background, scale, gameplay state, information density, and reduced-motion policy constant.
 
 ## Gate Completion
 

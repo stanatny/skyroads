@@ -24,6 +24,13 @@ Load this reference before researching, downloading, generating, transforming, i
 - Handle autoplay rejection, suspended contexts, `file://` restrictions, decode/load timeout, partial stem failure, visibility changes, pause transitions, restart, cleanup, mute preference, and seamless looping. Preserve programmatic or single-stem fallback behavior.
 - Verify levels, headroom, transition clicks, loop seams, fatigue, and state pacing on real target runtimes. Require at least two uninterrupted full human listening loops before approving music.
 
+## Own Sustained Feedback Once
+
+- Give each sustained sound family a single owner and an explicit priority table. Overlapping gameplay states retarget one shared graph instead of stacking independent loops.
+- Smoothly change filter, gain, pitch, or mix parameters when priority changes. Rebuilding the graph is a fallback, not the normal transition path.
+- Use one ownership predicate for pause, blur, hidden pages, modal focus, mute, menu, game over, restart, teardown, and active gameplay. Stop and restore from that predicate rather than scattering lifecycle patches.
+- Preferred audio or visual resources and their procedural fallback must preserve equivalent player-facing cues even when their fidelity differs.
+
 ## Evidence to Retain
 
 Keep source/license records, deterministic recipes, hash and dimension checks, runtime fallback tests, browser screenshots at representative depths/viewports, and listening notes. A valid license does not prove visual fit; a deterministic render does not prove collision alignment; passing decode tests do not replace human listening.
