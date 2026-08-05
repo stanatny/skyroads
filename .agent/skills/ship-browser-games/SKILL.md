@@ -11,6 +11,8 @@ Ship static browser-game changes with effort proportional to their risk. Preserv
 
 Use a different primary workflow for server-authoritative multiplayer, native-engine projects, backend-heavy economies, or platform-store submissions; those products require infrastructure and release controls beyond this Skill.
 
+When a cross-engine game-development lifecycle Skill is available, use it for discussion, option selection, stage gates, and retrospective structure. This repository Skill remains self-contained and owns static-browser implementation and release evidence. Repository-specific contracts override generic examples.
+
 ## Classify Before Expanding Scope
 
 Classify the request before planning or editing, and escalate when a new risk appears:
@@ -53,13 +55,15 @@ Derive every display, package, tag, and release form from one canonical product 
 
 Read [release and production proof](references/release-and-production-proof.md) for any version, PR, deployment, tag, or downloadable release task.
 
+For static deployments, use `scripts/verify-static-deploy.mjs` to compare selected online files byte-for-byte with a Git ref. Treat that result as static evidence only; still verify real gameplay and runtime errors separately.
+
 ## Reference Routing
 
 - Load [scope and design gates](references/scope-and-design-gates.md) for baseline discovery, S/M/L routing, alternatives, approvals, or plan review.
 - Load [gameplay, UI, and persistence](references/gameplay-ui-and-persistence.md) for state machines, controls, collision, DOM/Canvas ownership, localization, accessibility, or browser storage.
-- Load [assets, audio, and licensing](references/assets-audio-and-licensing.md) for external sources, derived artwork, adaptive music, codecs, playback restrictions, provenance, or fallbacks.
-- Load the [testing and environment matrix](references/testing-and-environment-matrix.md) to define evidence across logic, browsers, viewports, failures, direct-file/WebView, and packages.
-- Load [release and production proof](references/release-and-production-proof.md) for version contracts, PRs, Pages/static deployment, tags, artifacts, and release failure handling.
+- Load [assets, audio, and licensing](references/assets-audio-and-licensing.md) for external sources, derived artwork, adaptive music, sustained effect ownership, codecs, playback restrictions, provenance, or equivalent fallbacks.
+- Load the [testing and environment matrix](references/testing-and-environment-matrix.md) to define evidence across logic, browsers, viewports, condition-based readiness, failures, platform-specific suites, direct-file/WebView, and packages.
+- Load [release and production proof](references/release-and-production-proof.md) for version contracts, PRs, Pages/static deployment, the five shipping states, tags, artifacts, and release failure handling.
 - Load the [Skyroads case study](references/skyroads-case-study.md) only when working in this repository or when a concrete example of these contracts would clarify another static browser game.
 
 ## Stop Conditions

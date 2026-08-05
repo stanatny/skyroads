@@ -27,6 +27,19 @@ Load this reference when work affects game state, timing, input, collision, Canv
 - Keep hidden overlays non-focusable and non-clickable; set visibility, pointer events, focus restoration, and the active primary action together.
 - Respect reduced motion by removing nonessential parallax, shake, pulsing, and transition travel without changing game timing or hiding required cues.
 
+## Keep Transient HUD Stable
+
+- Give a transient instrument an explicit reveal threshold and removal rule. Do not insert a status panel for every tap when immediate feedback already exists on the player object.
+- Keep contextual instruments in a stable semantic order. Lower-priority information appears after higher-priority state instead of shifting unrelated instruments.
+- Assert the coordinates of existing instruments before and after a transient appears. Correct text alone does not prove that the HUD stopped reflowing.
+- Preserve immediate player-object feedback when the HUD panel is deliberately delayed.
+
+## Preserve Fairness While Changing Presentation
+
+- Compare visual directions with the same camera, scale, background, gameplay state, and information density.
+- Keep collision bounds, visible art bounds, warning cues, direction cues, escape routes, and solution vocabulary separate and explicit.
+- A new preferred renderer may replace the visual path, but missing preferred art must retain equivalent danger, target, direction, and readiness cues.
+
 ## Preserve Locale and Text Safety
 
 - Keep catalog keys and meaning at parity across supported locales; test every key, placeholder, control hint, result, and error path.
