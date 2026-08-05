@@ -29,7 +29,7 @@ if (diagnostic.diagnostics?.initialized !== true) throw new Error('game did not 
 for (const script of ['version', 'i18n', 'leaderboard', 'presentation', 'worldArt', 'sceneStyle', 'droneVisual', 'input', 'obstacles', 'gapRegions', 'audio', 'game']) {
   if (diagnostic.diagnostics?.scripts?.[script] !== true) throw new Error(`classic script missing: ${script}`);
 }
-if (diagnostic.diagnostics?.version?.semver !== '1.1.0') throw new Error('V1.1 product diagnostics unavailable');
+if (diagnostic.diagnostics?.version?.semver !== '1.1.1') throw new Error('V1.1.1 product diagnostics unavailable');
 if (diagnostic.diagnostics?.visualAssets?.shipFramesReady !== true) throw new Error('ship frames did not load');
 const world = diagnostic.diagnostics?.visualAssets?.world;
 if (!world) throw new Error('world atlas diagnostics unavailable');

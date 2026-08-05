@@ -6,7 +6,7 @@
 
 在线游玩：https://stanatny.github.io/skyroads/
 
-当前版本：[v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1.0)
+当前版本：[v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1.1)
 
 ## 游戏亮点
 
@@ -27,13 +27,13 @@
 | 二段跳 | 空中再次按跳跃键，消耗 3 点燃料 | 空中再次点按 |
 | 滑翔 | 下落时按住跳跃键，会持续消耗燃料 | 仅键盘 |
 | 开火 | 点按 `J` | 仅键盘 |
-| 蓄力导弹 | 按住 `J` 3 秒后松开 | 仅键盘 |
+| 蓄力导弹 | 按住 `J` 1.5 秒后松开 | 仅键盘 |
 | 开始 / 再来一局 | `Space` 或 `Enter` | 使用画面按钮 |
 | 暂停 / 继续 | `P` | 仅键盘 |
 | 任务结束后返回指挥中心 | `Esc` | 使用“返回指挥中心”按钮 |
 | 总声音开关 | `M` | 使用独立的音乐、音效按钮 |
 
-矮墙可以跳过；高塔需要变道、超级形态跳跃或武器处理。子弹和蓄力导弹采用不同的碰撞规则；下落时按住跳跃键会进入消耗燃料的滑翔。HUD 会显示燃料、跳跃次数、得分、距离、用时、速度、蓄力、强化倒计时和声音状态。
+矮墙可以跳过；高塔需要变道、超级形态跳跃或武器处理。子弹和蓄力导弹采用不同的碰撞规则；下落时按住跳跃键会进入消耗燃料的滑翔。HUD 会显示燃料、跳跃次数、得分、距离、用时、速度、强化倒计时和声音状态；只有持续按住后才会显示蓄力，快速点射不会让状态框闪现。
 
 ## 障碍路线提示
 
@@ -85,7 +85,7 @@ npm run check
 bash app/build.sh
 ```
 
-准确的输出文件名是仓库根目录下的 `Nebula Cruise.app`。应用会在本地 WebKit 中运行完整游戏和全部内置素材。合并并完成发布验证后，V1.1 工作流的通用 macOS 发布资产目标为 `Nebula-Cruise-macOS-v1.1.0.zip`；已发布版本会列在 [GitHub Releases](https://github.com/stanatny/skyroads/releases)。
+准确的输出文件名是仓库根目录下的 `Nebula Cruise.app`。应用会在本地 WebKit 中运行完整游戏和全部内置素材。合并并完成发布验证后，V1.1.1 工作流的通用 macOS 发布资产目标为 `Nebula-Cruise-macOS-v1.1.1.zip`；已发布版本会列在 [GitHub Releases](https://github.com/stanatny/skyroads/releases)。
 
 ## 第三方素材
 

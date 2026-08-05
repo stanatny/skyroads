@@ -460,7 +460,7 @@ test('active HUD keeps immediate instruments and hides historical or instruction
     mode: 'PLAYING',
     fuel: 80,
     jumpsUsed: 0,
-    chargeT: 1.5,
+    chargeT: 0.75,
     boostT: 2,
     tripleT: 3,
     magnetT: 4,
@@ -473,6 +473,42 @@ test('active HUD keeps immediate instruments and hides historical or instruction
   for (const expected of ['CHARGING', 'BOOST', 'SUPER', 'MAGNET']) {
     assert.ok(activeText.some((text) => text.includes(expected)), expected);
   }
+
+  const quickTap = capture({
+    mode: 'PLAYING',
+    fuel: 80,
+    jumpsUsed: 0,
+    chargeT: 0.49,
+    boostT: 2,
+    tripleT: 3,
+    magnetT: 4,
+    distanceMeters: 321,
+    elapsedMs: 4567,
+    score: 321,
+    speed: 9.4,
+  });
+  const quickTapText = quickTap.filter((event) => event.type === 'text');
+  assert.equal(quickTapText.some((event) => event.text.includes('CHARGING')), false);
+
+  const visibleCharge = capture({
+    mode: 'PLAYING',
+    fuel: 80,
+    jumpsUsed: 0,
+    chargeT: 0.5,
+    boostT: 2,
+    tripleT: 3,
+    magnetT: 4,
+    distanceMeters: 321,
+    elapsedMs: 4567,
+    score: 321,
+    speed: 9.4,
+  });
+  const statusY = (fragment) => visibleCharge.find(
+    (event) => event.type === 'text' && event.text.includes(fragment),
+  ).y;
+  assert.ok(statusY('BOOST') < statusY('SUPER'));
+  assert.ok(statusY('SUPER') < statusY('MAGNET'));
+  assert.ok(statusY('MAGNET') < statusY('CHARGING'));
 
   const fallbackText = JSON.parse(vm.runInContext(`(() => {
     STATE.visualAssets = { assets: { ui: {} } };
@@ -609,7 +645,7 @@ for (const [label, prepare] of [
     const { sandbox, windowObject } = game;
     vm.runInContext(`
       KEYS.KeyJ = true;
-      STATE.chargeT = 2;
+      STATE.chargeT = 1.5;
       STATE.chargeStage = 2;
       STATE.gliding = true;
       STATE.movement.heldLeft = true;
@@ -630,7 +666,7 @@ for (const [label, prepare] of [
       heldLeft: true,
       activeDirection: -1,
       keyJ: true,
-      chargeT: 2,
+      chargeT: 1.5,
       chargeStage: 2,
       gliding: true,
     });
@@ -1134,6 +1170,66 @@ test('held gameplay actions use stable codes and ignore repeated keydown events'
     jumpsUsed: 1,
     chargeT: 0.001,
     heldCodes: ['KeyJ', 'KeyK', 'KeyM'],
+  });
+});
+
+test('charged-shot release switches from bullet to missile at one and a half seconds', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const releaseAt = (seconds) => {
+    vm.runInContext(`
+      STATE.shots = [];
+      STATE.bulletCD = 0;
+      STATE.chargeT = ${seconds};
+      STATE.chargeStage = 0;
+      KEYS.KeyJ = true;
+    `, sandbox);
+    windowObject.dispatch('keyup', { code: 'KeyJ' });
+    return vm.runInContext('STATE.shots[0] && STATE.shots[0].kind', sandbox);
+  };
+
+  assert.equal(releaseAt(1.499), 'bullet');
+  assert.equal(releaseAt(1.5), 'missile');
+});
+
+test('charge cues track half one and one-and-a-half-second progress', () => {
+  const { sandbox } = makeGameUiSandbox();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const cues = [];
+    sfxChargeTick = (stage) => cues.push('tick:' + stage);
+    sfxChargeReady = () => cues.push('ready');
+    STATE.mode = 'PLAYING';
+    STATE.speed = 0;
+    STATE.position = 0;
+    STATE.track = [{ lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD), enemies: null }];
+    STATE.shots = [];
+    KEYS.KeyJ = true;
+    extendTrack = () => {};
+    updateEnemies = () => {};
+    advanceShots = () => {};
+    checkCollisions = () => {};
+    for (const [chargeT, chargeStage] of [
+      [CONFIG.CHARGE_TIME / 3 - 0.01, 0],
+      [CONFIG.CHARGE_TIME * 2 / 3 - 0.01, 1],
+      [CONFIG.CHARGE_TIME - 0.01, 2],
+    ]) {
+      STATE.chargeT = chargeT;
+      STATE.chargeStage = chargeStage;
+      updatePhysics(0.02);
+    }
+    return JSON.stringify({
+      chargeTime: CONFIG.CHARGE_TIME,
+      chargeT: STATE.chargeT,
+      chargeStage: STATE.chargeStage,
+      cues,
+    });
+  })()`, sandbox));
+
+  assert.deepEqual(result, {
+    chargeTime: 1.5,
+    chargeT: 1.5,
+    chargeStage: 3,
+    cues: ['tick:1', 'tick:2', 'ready'],
   });
 });
 

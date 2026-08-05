@@ -15,30 +15,30 @@ function plistString(source, key) {
   return match[1];
 }
 
-test('V1.1 metadata agrees across the static game and macOS bundle', () => {
+test('V1.1.1 metadata agrees across the static game and macOS bundle', () => {
   const version = require('../src/version.js');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const plist = fs.readFileSync(path.join(root, 'app/Info.plist'), 'utf8');
 
-  assert.equal(packageJson.version, '1.1.0');
+  assert.equal(packageJson.version, '1.1.1');
   assert.deepEqual(version, {
-    semver: '1.1.0', display: 'V1.1', accessible: '1.1', tag: 'v1.1.0',
+    semver: '1.1.1', display: 'V1.1', accessible: '1.1', tag: 'v1.1.1',
   });
   assert.equal(Object.isFrozen(version), true);
-  assert.match(html, /<meta name="application-version" content="1\.1\.0">/);
+  assert.match(html, /<meta name="application-version" content="1\.1\.1">/);
   assert.equal(plistString(plist, 'CFBundleShortVersionString'), packageJson.version);
-  assert.equal(plistString(plist, 'CFBundleVersion'), '2');
+  assert.equal(plistString(plist, 'CFBundleVersion'), '3');
 });
 
 test('release tag validation accepts only v plus package semver', () => {
   const script = path.join(root, 'scripts/check-release-tag.js');
   const { expectedReleaseTag, validateReleaseTag } = require(script);
 
-  assert.equal(expectedReleaseTag('1.1.0'), 'v1.1.0');
-  assert.equal(validateReleaseTag('v1.1.0', '1.1.0'), true);
-  assert.equal(validateReleaseTag('V1.1', '1.1.0'), false);
-  assert.equal(validateReleaseTag('v1.1', '1.1.0'), false);
-  assert.equal(spawnSync(process.execPath, [script, 'v1.1.0']).status, 0);
+  assert.equal(expectedReleaseTag('1.1.1'), 'v1.1.1');
+  assert.equal(validateReleaseTag('v1.1.1', '1.1.1'), true);
+  assert.equal(validateReleaseTag('V1.1', '1.1.1'), false);
+  assert.equal(validateReleaseTag('v1.1', '1.1.1'), false);
+  assert.equal(spawnSync(process.execPath, [script, 'v1.1.1']).status, 0);
   assert.notEqual(spawnSync(process.execPath, [script, 'V1.1']).status, 0);
   assert.notEqual(spawnSync(process.execPath, [script, 'v1.1']).status, 0);
 });
@@ -47,7 +47,7 @@ test('the bilingual READMEs publish the same V1.1 identity and keyboard release 
   const english = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
   const chinese = fs.readFileSync(path.join(root, 'README.zh-CN.md'), 'utf8');
   const playableUrl = 'https://stanatny.github.io/skyroads/';
-  const releaseUrl = 'https://github.com/stanatny/skyroads/releases/tag/v1.1.0';
+  const releaseUrl = 'https://github.com/stanatny/skyroads/releases/tag/v1.1.1';
 
   assert.equal(english.split('\n', 1)[0], '[中文](README.zh-CN.md)');
   assert.equal(chinese.split('\n', 1)[0], '[English](README.md)');
@@ -56,8 +56,8 @@ test('the bilingual READMEs publish the same V1.1 identity and keyboard release 
     assert.equal(source.split(releaseUrl).length - 1, 1, 'each README must expose one exact V1.1 release URL');
   }
 
-  assert.match(english, /^Current version: \[v1\.1\.0\]\(https:\/\/github\.com\/stanatny\/skyroads\/releases\/tag\/v1\.1\.0\)$/m);
-  assert.match(chinese, /^当前版本：\[v1\.1\.0\]\(https:\/\/github\.com\/stanatny\/skyroads\/releases\/tag\/v1\.1\.0\)$/m);
+  assert.match(english, /^Current version: \[v1\.1\.1\]\(https:\/\/github\.com\/stanatny\/skyroads\/releases\/tag\/v1\.1\.1\)$/m);
+  assert.match(chinese, /^当前版本：\[v1\.1\.1\]\(https:\/\/github\.com\/stanatny\/skyroads\/releases\/tag\/v1\.1\.1\)$/m);
   assert.match(english, /^\| Pause \/ resume \| `P` \| Keyboard only \|$/m);
   assert.match(chinese, /^\| 暂停 \/ 继续 \| `P` \| 仅键盘 \|$/m);
   assert.match(english, /^\| Start \/ fly again \| `Space` or `Enter` \|/m);
@@ -86,6 +86,26 @@ test('the reusable bilingual V1.1 release notes describe this release without on
   assert.match(release, /不会跨设备同步/);
   assert.doesNotMatch(release, /online leaderboard|cloud sync|云端排行榜|云同步/i);
   assert.doesNotMatch(release, /V1\.1 is now live|archive is now available|V1\.1 现已上线|安装包现已可下载/i);
+});
+
+test('the bilingual V1.1.1 release notes describe the charge HUD patch without availability claims', () => {
+  const releasePath = path.join(root, 'docs/releases/v1.1.1.md');
+  assert.equal(fs.existsSync(releasePath), true, 'the copy-ready V1.1.1 release notes must exist');
+  const release = fs.readFileSync(releasePath, 'utf8');
+
+  assert.equal((release.match(/^# 星云巡航 V1\.1\.1 \/ Nebula Cruise V1\.1\.1$/gm) || []).length, 1);
+  assert.equal((release.match(/^## 中文$/gm) || []).length, 1);
+  assert.equal((release.match(/^## English$/gm) || []).length, 1);
+  assert.ok(release.indexOf('## 中文') < release.indexOf('## English'));
+  assert.match(release, /https:\/\/stanatny\.github\.io\/skyroads\//);
+  assert.match(release, /Nebula-Cruise-macOS-v1\.1\.1\.zip/);
+  assert.match(release, /0\.5 秒/);
+  assert.match(release, /0\.5-second/);
+  assert.match(release, /1\.5 秒/);
+  assert.match(release, /one and a half seconds/);
+  assert.match(release, /BOOST、超级形态和磁铁状态之后/);
+  assert.match(release, /below BOOST, super form, and magnet/);
+  assert.doesNotMatch(release, /V1\.1\.1 is now live|archive is now available|V1\.1\.1 现已上线|安装包现已可下载/i);
 });
 
 test('the hidden WebKit smoke keeps its storage ephemeral without changing normal persistence', () => {

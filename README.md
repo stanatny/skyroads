@@ -6,7 +6,7 @@ Nebula Cruise is a fast, polished sci-fi lane runner for the browser. Pilot a de
 
 Play online: https://stanatny.github.io/skyroads/
 
-Current version: [v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1.0)
+Current version: [v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1.1)
 
 ## Highlights
 
@@ -27,13 +27,13 @@ Current version: [v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1
 | Double jump | Press jump again in the air; costs 3 fuel | Tap again in the air |
 | Glide | Hold a jump key while falling; consumes fuel | Keyboard only |
 | Fire | Tap `J` | Keyboard only |
-| Charged missile | Hold `J` for 3 seconds, then release | Keyboard only |
+| Charged missile | Hold `J` for 1.5 seconds, then release | Keyboard only |
 | Start / fly again | `Space` or `Enter` | Use the on-screen button |
 | Pause / resume | `P` | Keyboard only |
 | Return to command center (mission over) | `Esc` | Use the Command Center button |
 | Toggle all audio | `M` | Use the separate music and SFX buttons |
 
-Low barriers can be jumped; tall towers require a lane change, super-form jump, or weapon. Bullets and charged missiles have different collision rules, and holding jump while falling activates fuel-consuming glide. The HUD shows fuel, jumps, score, distance, time, speed, charge, power-up timers, and audio state.
+Low barriers can be jumped; tall towers require a lane change, super-form jump, or weapon. Bullets and charged missiles have different collision rules, and holding jump while falling activates fuel-consuming glide. The HUD shows fuel, jumps, score, distance, time, speed, power-up timers, and audio state; charge appears only after a deliberate hold so quick tap fire does not flash the status stack.
 
 ## Obstacle route language
 
@@ -85,7 +85,7 @@ On macOS 12 or later with Xcode command-line tools installed, build the universa
 bash app/build.sh
 ```
 
-The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. After merge and release verification, the V1.1 workflow targets the universal release asset `Nebula-Cruise-macOS-v1.1.0.zip`; releases are listed on [GitHub Releases](https://github.com/stanatny/skyroads/releases).
+The exact output is `Nebula Cruise.app` in the repository root. It runs the complete game and bundled assets locally in WebKit. After merge and release verification, the V1.1.1 workflow targets the universal release asset `Nebula-Cruise-macOS-v1.1.1.zip`; releases are listed on [GitHub Releases](https://github.com/stanatny/skyroads/releases).
 
 ## Third-party assets
 

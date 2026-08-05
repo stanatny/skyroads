@@ -320,14 +320,16 @@
   }
 
   function hudVisibilityPlan({
-    charging = false,
-    chargeReady = false,
+    chargeElapsed = 0,
+    chargeRevealDelay = 0.5,
     boostActive = false,
     superActive = false,
     magnetActive = false,
   } = {}) {
+    const elapsed = Math.max(0, Number(chargeElapsed) || 0);
+    const revealDelay = Math.max(0, Number(chargeRevealDelay) || 0);
     return Object.freeze({
-      charge: Boolean(charging || chargeReady),
+      charge: elapsed > 0 && elapsed >= revealDelay,
       boost: Boolean(boostActive),
       super: Boolean(superActive),
       magnet: Boolean(magnetActive),

@@ -434,15 +434,21 @@ test('HUD layout stays inside a bounded five-percent safe area', () => {
   assert.equal(computeHudLayout(3840, 2160).safeInset, 64);
 });
 
-test('HUD visibility keeps transient instruments contextual', () => {
+test('HUD visibility delays charge until the contextual reveal threshold', () => {
   assert.deepEqual(hudVisibilityPlan({}), {
     charge: false,
     boost: false,
     super: false,
     magnet: false,
   });
-  assert.equal(hudVisibilityPlan({ charging: true }).charge, true);
-  assert.equal(hudVisibilityPlan({ chargeReady: true }).charge, true);
+  assert.equal(hudVisibilityPlan({
+    chargeElapsed: 0.49,
+    chargeRevealDelay: 0.5,
+  }).charge, false);
+  assert.equal(hudVisibilityPlan({
+    chargeElapsed: 0.5,
+    chargeRevealDelay: 0.5,
+  }).charge, true);
   assert.deepEqual(hudVisibilityPlan({
     boostActive: true,
     superActive: true,
