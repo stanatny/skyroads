@@ -1173,6 +1173,66 @@ test('held gameplay actions use stable codes and ignore repeated keydown events'
   });
 });
 
+test('charged-shot release switches from bullet to missile at two seconds', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const releaseAt = (seconds) => {
+    vm.runInContext(`
+      STATE.shots = [];
+      STATE.bulletCD = 0;
+      STATE.chargeT = ${seconds};
+      STATE.chargeStage = 0;
+      KEYS.KeyJ = true;
+    `, sandbox);
+    windowObject.dispatch('keyup', { code: 'KeyJ' });
+    return vm.runInContext('STATE.shots[0] && STATE.shots[0].kind', sandbox);
+  };
+
+  assert.equal(releaseAt(1.999), 'bullet');
+  assert.equal(releaseAt(2), 'missile');
+});
+
+test('charge cues track one-third two-thirds and full two-second progress', () => {
+  const { sandbox } = makeGameUiSandbox();
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const cues = [];
+    sfxChargeTick = (stage) => cues.push('tick:' + stage);
+    sfxChargeReady = () => cues.push('ready');
+    STATE.mode = 'PLAYING';
+    STATE.speed = 0;
+    STATE.position = 0;
+    STATE.track = [{ lanes: Array(CONFIG.LANES).fill(LANE_TYPE.ROAD), enemies: null }];
+    STATE.shots = [];
+    KEYS.KeyJ = true;
+    extendTrack = () => {};
+    updateEnemies = () => {};
+    advanceShots = () => {};
+    checkCollisions = () => {};
+    for (const [chargeT, chargeStage] of [
+      [CONFIG.CHARGE_TIME / 3 - 0.01, 0],
+      [CONFIG.CHARGE_TIME * 2 / 3 - 0.01, 1],
+      [CONFIG.CHARGE_TIME - 0.01, 2],
+    ]) {
+      STATE.chargeT = chargeT;
+      STATE.chargeStage = chargeStage;
+      updatePhysics(0.02);
+    }
+    return JSON.stringify({
+      chargeTime: CONFIG.CHARGE_TIME,
+      chargeT: STATE.chargeT,
+      chargeStage: STATE.chargeStage,
+      cues,
+    });
+  })()`, sandbox));
+
+  assert.deepEqual(result, {
+    chargeTime: 2,
+    chargeT: 2,
+    chargeStage: 3,
+    cues: ['tick:1', 'tick:2', 'ready'],
+  });
+});
+
 test('P toggles only PLAYING and PAUSED after editing and dialog guards', () => {
   const { sandbox, windowObject, documentObject, elements } = makeGameUiSandbox();
   const utility = appUiTarget(elements);

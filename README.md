@@ -27,13 +27,13 @@ Current version: [v1.1.0](https://github.com/stanatny/skyroads/releases/tag/v1.1
 | Double jump | Press jump again in the air; costs 3 fuel | Tap again in the air |
 | Glide | Hold a jump key while falling; consumes fuel | Keyboard only |
 | Fire | Tap `J` | Keyboard only |
-| Charged missile | Hold `J` for 3 seconds, then release | Keyboard only |
+| Charged missile | Hold `J` for 2 seconds, then release | Keyboard only |
 | Start / fly again | `Space` or `Enter` | Use the on-screen button |
 | Pause / resume | `P` | Keyboard only |
 | Return to command center (mission over) | `Esc` | Use the Command Center button |
 | Toggle all audio | `M` | Use the separate music and SFX buttons |
 
-Low barriers can be jumped; tall towers require a lane change, super-form jump, or weapon. Bullets and charged missiles have different collision rules, and holding jump while falling activates fuel-consuming glide. The HUD shows fuel, jumps, score, distance, time, speed, charge, power-up timers, and audio state.
+Low barriers can be jumped; tall towers require a lane change, super-form jump, or weapon. Bullets and charged missiles have different collision rules, and holding jump while falling activates fuel-consuming glide. The HUD shows fuel, jumps, score, distance, time, speed, power-up timers, and audio state; charge appears only after a deliberate hold so quick tap fire does not flash the status stack.
 
 ## Obstacle route language
 
