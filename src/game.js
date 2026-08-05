@@ -174,6 +174,7 @@ const CONFIG = {
   // 第六轮：L 键与弹药系统拆除 —— 导弹改为 J 蓄力 CHARGE_TIME(3)s 松手发射，
   //   无弹药概念（蓄力时间就是成本），操作键位收敛到 J/K 两个。
   CHARGE_TIME: 3,              // J 蓄力满所需秒数；未满松手 = 普通子弹
+  CHARGE_HUD_DELAY: 0.5,      // 点射不闪 HUD；持续按住达到 0.5s 后显示蓄力条
   BULLET_COOLDOWN: 0.22,       // 子弹射速上限（秒/发）；子弹无限
   BULLET_SPEED: 40,            // 弹速 = 玩家速度 + 40 段/秒（对地）
                                //   穿段校验：最快 36+40 = 76 段/秒 × 最长帧 0.05s = 3.8 段/帧，
@@ -4623,8 +4624,8 @@ function renderHUD(ctx) {
   const layout = presentation.computeHudLayout(STATE.width, STATE.height);
   const chargeReady = STATE.chargeT >= CONFIG.CHARGE_TIME;
   const visibility = presentation.hudVisibilityPlan({
-    charging: STATE.chargeT > 0,
-    chargeReady,
+    chargeElapsed: STATE.chargeT,
+    chargeRevealDelay: CONFIG.CHARGE_HUD_DELAY,
     boostActive: STATE.boostT > 0,
     superActive: STATE.tripleT > 0,
     magnetActive: STATE.magnetT > 0,
@@ -4634,21 +4635,6 @@ function renderHUD(ctx) {
   drawScoreInstrument(ctx, layout);
 
   let statusY = layout.leftY + 82;
-  if (visibility.charge) {
-    const chargePercent = Math.round(Math.min(1, STATE.chargeT / CONFIG.CHARGE_TIME) * 100);
-    drawContextStatus(
-      ctx,
-      layout.leftX,
-      statusY,
-      layout.leftWidth,
-      chargeReady
-        ? uiText('status.chargeReady')
-        : uiText('status.charging', { percent: uiNumber(chargePercent) }),
-      STATE.chargeT / CONFIG.CHARGE_TIME,
-      chargeReady ? '#ffd76a' : '#ff9a55',
-    );
-    statusY += 36;
-  }
   if (visibility.boost) {
     const warning = STATE.boostT < CONFIG.BOOST_WARN_TIME;
     drawContextStatus(ctx, layout.leftX, statusY, layout.leftWidth, uiText(
@@ -4669,6 +4655,21 @@ function renderHUD(ctx) {
     drawContextStatus(ctx, layout.leftX, statusY, layout.leftWidth, uiText('status.magnet', {
       seconds: uiNumber(STATE.magnetT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
     }), STATE.magnetT / CONFIG.MAGNET_DURATION, '#7fe8ff');
+    statusY += 36;
+  }
+  if (visibility.charge) {
+    const chargePercent = Math.round(Math.min(1, STATE.chargeT / CONFIG.CHARGE_TIME) * 100);
+    drawContextStatus(
+      ctx,
+      layout.leftX,
+      statusY,
+      layout.leftWidth,
+      chargeReady
+        ? uiText('status.chargeReady')
+        : uiText('status.charging', { percent: uiNumber(chargePercent) }),
+      STATE.chargeT / CONFIG.CHARGE_TIME,
+      chargeReady ? '#ffd76a' : '#ff9a55',
+    );
   }
 }
 

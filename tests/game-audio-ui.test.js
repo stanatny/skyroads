@@ -474,6 +474,42 @@ test('active HUD keeps immediate instruments and hides historical or instruction
     assert.ok(activeText.some((text) => text.includes(expected)), expected);
   }
 
+  const quickTap = capture({
+    mode: 'PLAYING',
+    fuel: 80,
+    jumpsUsed: 0,
+    chargeT: 0.49,
+    boostT: 2,
+    tripleT: 3,
+    magnetT: 4,
+    distanceMeters: 321,
+    elapsedMs: 4567,
+    score: 321,
+    speed: 9.4,
+  });
+  const quickTapText = quickTap.filter((event) => event.type === 'text');
+  assert.equal(quickTapText.some((event) => event.text.includes('CHARGING')), false);
+
+  const visibleCharge = capture({
+    mode: 'PLAYING',
+    fuel: 80,
+    jumpsUsed: 0,
+    chargeT: 0.5,
+    boostT: 2,
+    tripleT: 3,
+    magnetT: 4,
+    distanceMeters: 321,
+    elapsedMs: 4567,
+    score: 321,
+    speed: 9.4,
+  });
+  const statusY = (fragment) => visibleCharge.find(
+    (event) => event.type === 'text' && event.text.includes(fragment),
+  ).y;
+  assert.ok(statusY('BOOST') < statusY('SUPER'));
+  assert.ok(statusY('SUPER') < statusY('MAGNET'));
+  assert.ok(statusY('MAGNET') < statusY('CHARGING'));
+
   const fallbackText = JSON.parse(vm.runInContext(`(() => {
     STATE.visualAssets = { assets: { ui: {} } };
     Object.assign(STATE, ${JSON.stringify({
