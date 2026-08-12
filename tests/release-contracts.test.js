@@ -15,32 +15,32 @@ function plistString(source, key) {
   return match[1];
 }
 
-test('V1.1.1 metadata agrees across the static game and macOS bundle', () => {
+test('V1.2.0 metadata agrees across the static game and macOS bundle', () => {
   const version = require('../src/version.js');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const plist = fs.readFileSync(path.join(root, 'app/Info.plist'), 'utf8');
 
-  assert.equal(packageJson.version, '1.1.1');
+  assert.equal(packageJson.version, '1.2.0');
   assert.deepEqual(version, {
-    semver: '1.1.1', display: 'V1.1', accessible: '1.1', tag: 'v1.1.1',
+    semver: '1.2.0', display: 'V1.2', accessible: '1.2', tag: 'v1.2.0',
   });
   assert.equal(Object.isFrozen(version), true);
-  assert.match(html, /<meta name="application-version" content="1\.1\.1">/);
+  assert.match(html, /<meta name="application-version" content="1\.2\.0">/);
   assert.equal(plistString(plist, 'CFBundleShortVersionString'), packageJson.version);
-  assert.equal(plistString(plist, 'CFBundleVersion'), '3');
+  assert.equal(plistString(plist, 'CFBundleVersion'), '4');
 });
 
 test('release tag validation accepts only v plus package semver', () => {
   const script = path.join(root, 'scripts/check-release-tag.js');
   const { expectedReleaseTag, validateReleaseTag } = require(script);
 
-  assert.equal(expectedReleaseTag('1.1.1'), 'v1.1.1');
-  assert.equal(validateReleaseTag('v1.1.1', '1.1.1'), true);
-  assert.equal(validateReleaseTag('V1.1', '1.1.1'), false);
-  assert.equal(validateReleaseTag('v1.1', '1.1.1'), false);
-  assert.equal(spawnSync(process.execPath, [script, 'v1.1.1']).status, 0);
-  assert.notEqual(spawnSync(process.execPath, [script, 'V1.1']).status, 0);
-  assert.notEqual(spawnSync(process.execPath, [script, 'v1.1']).status, 0);
+  assert.equal(expectedReleaseTag('1.2.0'), 'v1.2.0');
+  assert.equal(validateReleaseTag('v1.2.0', '1.2.0'), true);
+  assert.equal(validateReleaseTag('V1.2', '1.2.0'), false);
+  assert.equal(validateReleaseTag('v1.2', '1.2.0'), false);
+  assert.equal(spawnSync(process.execPath, [script, 'v1.2.0']).status, 0);
+  assert.notEqual(spawnSync(process.execPath, [script, 'V1.2']).status, 0);
+  assert.notEqual(spawnSync(process.execPath, [script, 'v1.2']).status, 0);
 });
 
 test('the bilingual READMEs publish the same V1.1 identity and keyboard release controls', () => {

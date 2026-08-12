@@ -462,9 +462,10 @@ test('the selected semantic UI assets are committed as nonempty PNGs', () => {
 test('mission controls use accessible blue gradients without the retired gold frame', () => {
   const css = read('styles/game.css').toString('utf8');
   const notices = read('THIRD_PARTY_NOTICES.md').toString('utf8');
-  assert.match(css, /\.mission-action\s*\{[\s\S]*background:\s*linear-gradient\(110deg, #203e94, #5845b7\)/);
-  assert.ok(contrastRatio('#f5f8ff', '#203e94') >= 4.5);
-  assert.ok(contrastRatio('#f5f8ff', '#5845b7') >= 4.5);
+  assert.match(css, /\.mission-action\s*\{[\s\S]*background:\s*linear-gradient\(115deg, #1d3a8f 0%, #3d4fc4 52%, #6a4fd0 100%\)/);
+  for (const stop of ['#1d3a8f', '#3d4fc4', '#6a4fd0', '#2a4cb4', '#4d5fde', '#6f54d6', '#182e72', '#41338a']) {
+    assert.ok(contrastRatio('#f5f8ff', stop) >= 4.5, `${stop} must keep AA contrast against #f5f8ff`);
+  }
   assert.doesNotMatch(css, /button-frame-gold\.png/);
   assert.doesNotMatch(notices, /button-frame-gold\.png/);
 });

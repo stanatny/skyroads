@@ -279,6 +279,7 @@ function makeGameUiSandbox({
     'gap-regions.js',
   ];
   if (loadAdaptiveAudio) files.push('audio.js');
+  files.push('tutorial.js');
   files.push('game.js');
   for (const file of files) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), sandbox, { filename: file });
@@ -342,7 +343,7 @@ function simulationSnapshot(sandbox) {
   })`, sandbox);
 }
 
-test('game wiring renders the V1.1 badge and localized pause panel without taking focus', () => {
+test('game wiring renders the V1.2 badge and localized pause panel without taking focus', () => {
   const { sandbox, documentObject, elements } = makeGameUiSandbox();
   const preservedFocus = elements.game;
   preservedFocus.focus();
@@ -354,15 +355,17 @@ test('game wiring renders the V1.1 badge and localized pause panel without takin
     versionLabel: STATE.ui.versionBadge.getAttribute('aria-label'),
     pauseTitle: STATE.ui.pauseHeading.textContent,
     pauseHint: STATE.ui.pauseHint.textContent,
-    pauseControl: STATE.ui.controlItems[4].textContent,
+    pauseControl: STATE.ui.controlItems[5].textContent,
+    fuelBurstControl: STATE.ui.controlItems[2].textContent,
     pauseHidden: STATE.ui.pauseScreen.hidden,
   })`, sandbox);
   assert.deepEqual({ ...rendered }, {
-    versionText: 'V1.1',
-    versionLabel: 'Version 1.1',
+    versionText: 'V1.2',
+    versionLabel: 'Version 1.2',
     pauseTitle: 'GAME PAUSED',
     pauseHint: 'Press P to resume',
     pauseControl: 'Pause / resume: P',
+    fuelBurstControl: 'Fuel burst: fuel ≥ 75% + hold W / ↑ for 1s (costs 50% fuel)',
     pauseHidden: false,
   });
   assert.equal(documentObject.activeElement, preservedFocus);
@@ -372,14 +375,16 @@ test('game wiring renders the V1.1 badge and localized pause panel without takin
     versionLabel: STATE.ui.versionBadge.getAttribute('aria-label'),
     pauseTitle: STATE.ui.pauseHeading.textContent,
     pauseHint: STATE.ui.pauseHint.textContent,
-    pauseControl: STATE.ui.controlItems[4].textContent,
+    pauseControl: STATE.ui.controlItems[5].textContent,
+    fuelBurstControl: STATE.ui.controlItems[2].textContent,
     pauseHidden: STATE.ui.pauseScreen.hidden,
   })`, sandbox);
   assert.deepEqual({ ...localized }, {
-    versionLabel: '版本 1.1',
+    versionLabel: '版本 1.2',
     pauseTitle: '游戏已暂停',
     pauseHint: '按 P 继续',
     pauseControl: '暂停 / 继续：P',
+    fuelBurstControl: '燃料爆发：燃料 ≥ 75% 时按住 W / ↑ 1 秒（消耗 50% 燃料）',
     pauseHidden: false,
   });
   assert.equal(documentObject.activeElement, preservedFocus);
@@ -2046,4 +2051,420 @@ test('the game refreshes its cached command-center snapshot from active storage 
 
   assert.equal(vm.runInContext('STATE.leaderboardSnapshot.profile.name', sandbox), 'Lyra');
   assert.equal(vm.runInContext('STATE.ui.profileName.textContent', sandbox), 'Name: Lyra');
+});
+
+// ---- v1.2.0 燃料爆发（Fuel Burst）：W/↑ 在地面且燃料 ≥75% 时主动超级加速 ----
+
+test('holding W for one second triggers fuel burst from the ground at or above 75 percent fuel', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  vm.runInContext('STATE.fuel = 100; STATE.speed = 20; STATE.tutorial.active = false;', sandbox);
+
+  windowObject.dispatch('keydown', { key: 'w', code: 'KeyW' });
+
+  const charging = vm.runInContext(`({
+    chargeT: STATE.fuelBurstChargeT, fuel: STATE.fuel, burstT: STATE.fuelBurstT, jumpsUsed: STATE.jumpsUsed,
+  })`, sandbox);
+  assert.ok(charging.chargeT > 0, 'keydown must start the one-second charge');
+  assert.equal(charging.burstT, 0, 'burst must not fire on keydown');
+  assert.equal(charging.jumpsUsed, 0, 'keydown must not jump while charging');
+  assert.equal(charging.fuel, 100, 'no fuel cost before the burst fires');
+
+  const fired = JSON.parse(vm.runInContext(`(() => {
+    extendTrack = () => {};
+    collectPickup = () => {};         // 排除热身区燃料晶体的随机干扰
+    pickupFuel = () => {};
+    KEYS.KeyW = true;                 // 模拟仍然按住
+    updatePhysics(0.99);              // 蓄力 0.99s：尚未触发
+    const beforeFire = STATE.fuelBurstT;
+    updatePhysics(0.05);              // 累计超过 1s：本帧触发
+    return JSON.stringify({
+      beforeFire,
+      fuel: STATE.fuel,
+      burstT: STATE.fuelBurstT,
+      prevSpeed: STATE.fuelBurstPrevSpeed,
+      chargeT: STATE.fuelBurstChargeT,
+      jumpsUsed: STATE.jumpsUsed,
+      elapsed: 0.99 + 0.05,
+    });
+  })()`, sandbox));
+  assert.equal(fired.beforeFire, 0, 'burst must not fire before one full second');
+  assert.equal(fired.chargeT, 0, 'charge state must reset after firing');
+  assert.equal(fired.jumpsUsed, 0, 'burst must not consume a jump');
+  assert.ok(Math.abs(fired.prevSpeed - (20 + 0.4 * 0.99)) < 1e-6,
+    `burst must remember the speed reached while charging, got ${fired.prevSpeed}`);
+  assert.ok(Math.abs(fired.fuel - (50 - 4.5 * fired.elapsed)) < 1e-6, `fuel ≈ 50 minus drain, got ${fired.fuel}`);
+  assert.ok(fired.burstT > 2.9 && fired.burstT <= 3, `burstT should start near 3s, got ${fired.burstT}`);
+});
+
+test('releasing W within one second cancels the burst charge without jumping', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  vm.runInContext('STATE.fuel = 100; STATE.tutorial.active = false;', sandbox);
+
+  windowObject.dispatch('keydown', { key: 'w', code: 'KeyW' });
+  vm.runInContext('collectPickup = () => {}; pickupFuel = () => {}; updatePhysics(0.4)', sandbox);   // 按住 0.4 秒（未满 1 秒）
+  windowObject.dispatch('keyup', { key: 'w', code: 'KeyW' });
+
+  const snap = vm.runInContext(`({
+    chargeT: STATE.fuelBurstChargeT, burstT: STATE.fuelBurstT,
+    jumpsUsed: STATE.jumpsUsed, playerY: STATE.playerY, fuel: STATE.fuel,
+  })`, sandbox);
+  assert.equal(snap.chargeT, 0, 'charge state must reset on release');
+  assert.equal(snap.burstT, 0, 'burst must not fire on an early release');
+  assert.equal(snap.jumpsUsed, 0, 'W is no longer a jump key — early release must not jump');
+  assert.equal(snap.playerY, 0);
+  assert.ok(Math.abs(snap.fuel - (100 - 4.5 * 0.4)) < 1e-6, `only ambient fuel drain, got ${snap.fuel}`);
+});
+
+test('a burst charge is cancelled silently when the conditions break mid-charge', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  vm.runInContext('STATE.fuel = 100;', sandbox);
+
+  windowObject.dispatch('keydown', { key: 'w', code: 'KeyW' });
+  vm.runInContext('collectPickup = () => {}; pickupFuel = () => {}; STATE.boostT = 2; updatePhysics(0.4)', sandbox);   // 蓄力中吃到 BOOST
+
+  const snap = vm.runInContext(`({
+    chargeT: STATE.fuelBurstChargeT, burstT: STATE.fuelBurstT, fuel: STATE.fuel,
+  })`, sandbox);
+  assert.equal(snap.chargeT, 0, 'charge must cancel when BOOST takes over');
+  assert.equal(snap.burstT, 0);
+  assert.ok(snap.fuel > 90, `no 50-percent burst fuel cost, got ${snap.fuel}`);
+
+  windowObject.dispatch('keyup', { key: 'w', code: 'KeyW' });   // 松手不再补跳（蓄力已取消）
+  assert.equal(vm.runInContext('STATE.jumpsUsed', sandbox), 0);
+});
+
+test('Space and K always jump even when fuel burst is ready', () => {
+  for (const code of ['Space', 'KeyK']) {
+    const { sandbox, windowObject } = makeGameUiSandbox();
+    vm.runInContext('startGame()', sandbox);
+    vm.runInContext('STATE.fuel = 100;', sandbox);
+
+    windowObject.dispatch('keydown', { key: code === 'Space' ? ' ' : 'k', code });
+
+    const snap = vm.runInContext(`({
+      fuel: STATE.fuel, burstT: STATE.fuelBurstT, jumpsUsed: STATE.jumpsUsed, playerY: STATE.playerY,
+    })`, sandbox);
+    assert.equal(snap.jumpsUsed, 1, `${code} must perform the first jump`);
+    assert.equal(snap.burstT, 0, `${code} must not trigger fuel burst`);
+    assert.equal(snap.fuel, 100, `${code} jump must keep the free first-jump fuel`);
+    assert.ok(snap.playerY > 0, `${code} must lift the ship`);
+  }
+});
+
+test('W stays inert below the fuel burst threshold or while airborne', () => {
+  for (const setup of ['STATE.fuel = 74;', 'STATE.fuel = 100; STATE.playerY = 500; STATE.jumpsUsed = 1;']) {
+    const { sandbox, windowObject } = makeGameUiSandbox();
+    vm.runInContext('startGame()', sandbox);
+    vm.runInContext(setup, sandbox);
+    const jumpsBefore = vm.runInContext('STATE.jumpsUsed', sandbox);
+
+    windowObject.dispatch('keydown', { key: 'w', code: 'KeyW' });
+
+    const snap = vm.runInContext(`({ fuel: STATE.fuel, burstT: STATE.fuelBurstT, jumpsUsed: STATE.jumpsUsed, playerY: STATE.playerY })`, sandbox);
+    assert.equal(snap.burstT, 0, `fuel burst must stay locked under setup: ${setup}`);
+    assert.ok(snap.fuel >= 74 - CONFIG_TOLERANCE, `no burst fuel cost under setup: ${setup}`);
+    assert.equal(snap.jumpsUsed, jumpsBefore, `W must not jump under setup: ${setup}`);
+    assert.equal(snap.playerY, setup.includes('playerY = 500') ? 500 : 0, `W must not lift the ship under setup: ${setup}`);
+  }
+});
+
+const CONFIG_TOLERANCE = 1e-9;
+
+test('fuel burst stays locked out during BOOST and W stays inert', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  vm.runInContext('STATE.fuel = 100; STATE.boostT = 2;', sandbox);
+
+  windowObject.dispatch('keydown', { key: 'w', code: 'KeyW' });
+
+  const snap = vm.runInContext(`({
+    fuel: STATE.fuel, burstT: STATE.fuelBurstT, jumpsUsed: STATE.jumpsUsed,
+  })`, sandbox);
+  assert.deepEqual({ ...snap }, { fuel: 100, burstT: 0, jumpsUsed: 0 });
+});
+
+test('fuel burst locks speed for three seconds and restores the previous speed on expiry', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const result = JSON.parse(vm.runInContext(`(() => {
+    STATE.fuel = 100;
+    STATE.speed = 20;
+    STATE.tutorial.active = false;   // 关闭练习场沙盒，测真实规则
+    extendTrack = () => {};
+    tryFuelBurst();
+    updatePhysics(0.1);
+    const during = STATE.speed;
+    STATE.fuelBurstT = 0;            // 强制到期：下一帧走恢复分支
+    updatePhysics(0.1);
+    return JSON.stringify({
+      during,
+      after: STATE.speed,
+      prevCleared: STATE.fuelBurstPrevSpeed,
+      invincible: STATE.boostT > 0 || STATE.fuelBurstT > 0,
+    });
+  })()`, sandbox));
+  assert.equal(result.during, 36);
+  assert.ok(Math.abs(result.after - (20 + 0.4 * 0.1)) < 1e-9, `speed must restore then resume acceleration, got ${result.after}`);
+  assert.equal(result.prevCleared, 0);
+});
+
+test('fuel burst natural expiry fires end FX and a grace of invincibility, then collisions resume', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const result = JSON.parse(vm.runInContext(`(() => {
+    STATE.fuel = 100;
+    STATE.speed = 20;
+    STATE.tutorial.active = false;   // 关闭练习场沙盒，测真实规则
+    extendTrack = () => {};
+    collectPickup = () => {};
+    pickupFuel = () => {};
+    for (const seg of STATE.track) seg.lanes = Array(CONFIG.LANES).fill(LANE_TYPE.WALL_LOW);  // 全程墙壁
+    tryFuelBurst();
+    STATE.fuelBurstT = 0.05;         // 即将自然到期（非强制清零，走跨零分支）
+    updatePhysics(0.1);              // 跨零：结束特效 + 保护期开启
+    const atExpiry = {
+      burstT: STATE.fuelBurstT,
+      graceT: STATE.fuelBurstGraceT,
+      shockwave: Boolean(STATE.shockwave),
+      flash: STATE.flash > 0,
+      mode: STATE.mode,
+      speedDuringExpiryFrame: STATE.speed,   // 跨零帧仍锁定 36（下一帧才恢复）
+    };
+    updatePhysics(0.5);              // 保护期内（剩约 0.5s）：穿墙不死；速度已恢复
+    const midGrace = {
+      mode: STATE.mode,
+      graceT: STATE.fuelBurstGraceT,
+      speedRestored: Math.abs(STATE.speed - (20 + CONFIG.ACCEL * 0.6)) < 0.5,
+    };
+    updatePhysics(1.0);              // 保护期耗尽 → 撞墙死亡
+    const afterGrace = { mode: STATE.mode, graceT: STATE.fuelBurstGraceT };
+    return JSON.stringify({ atExpiry, midGrace, afterGrace });
+  })()`, sandbox));
+
+  assert.equal(result.atExpiry.burstT, 0);
+  assert.ok(result.atExpiry.graceT > 0.8, `grace should start near FUEL_BURST_GRACE(1), got ${result.atExpiry.graceT}`);
+  assert.equal(result.atExpiry.shockwave, true, 'expiry must emit the gold shockwave ring');
+  assert.equal(result.atExpiry.flash, true, 'expiry must flash the screen');
+  assert.equal(result.atExpiry.mode, 'PLAYING', 'walls must not kill during the expiry frame');
+  assert.equal(result.atExpiry.speedDuringExpiryFrame, 36, 'speed stays locked during the crossing frame');
+  assert.equal(result.midGrace.mode, 'PLAYING', 'grace must keep the ship alive through walls');
+  assert.equal(result.midGrace.speedRestored, true, 'speed must restore to the pre-burst value on the next frame');
+  assert.ok(result.midGrace.graceT > 0 && result.midGrace.graceT < 0.6, `grace should tick down, got ${result.midGrace.graceT}`);
+  assert.equal(result.afterGrace.mode, 'GAMEOVER', 'collisions must resume after the grace ends');
+  assert.equal(result.afterGrace.graceT, 0);
+});
+
+// ---- v1.2.0 新手引导（Tutorial）----
+
+test('the first mission walks through all five tutorial phases and marks them seen', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.active', sandbox), true);
+
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const t = STATE.tutorial;
+    const step = (s) => Skyroads.tutorial.updateTutorial(t, s, {
+      position: 0,
+      playerY: 0,
+      playerVY: 0,
+      fuel: 100,
+      fuelBurstMin: CONFIG.FUEL_BURST_MIN,
+      storage: STATE.storage,
+    });
+    const seen = [Skyroads.tutorial.currentPhase(t).id];
+    for (const flag of ['laneChanged', 'jumped', 'glided', 'shot', 'fuelBursted']) {
+      t[flag] = true;
+      step(3);       // 超过 minDisplayTime，开始渐隐
+      step(0.5);     // 完成渐隐，进入下一阶段
+      const phase = Skyroads.tutorial.currentPhase(t);
+      seen.push(phase ? phase.id : 'done');
+    }
+    return JSON.stringify({
+      seen,
+      active: t.active,
+      stored: STATE.storage.getItem('skyroads_tutorial_seen'),
+    });
+  })()`, sandbox));
+
+  assert.deepEqual(result.seen, ['move', 'jump', 'glide', 'shoot', 'fuelBurst', 'done']);
+  assert.equal(result.active, false);
+  assert.equal(result.stored, 'true');
+});
+
+test('a pilot who has seen the tutorial skips it on later missions', () => {
+  const stored = new Map([['skyroads_tutorial_seen', 'true']]);
+  const storage = {
+    getItem(key) { return stored.has(key) ? stored.get(key) : null; },
+    setItem(key, value) { stored.set(key, String(value)); },
+    removeItem(key) { stored.delete(key); },
+  };
+  const { sandbox } = makeGameUiSandbox({ storage });
+  vm.runInContext('startGame()', sandbox);
+
+  assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.active', sandbox), false);
+});
+
+test('the tutorial times out without marking it seen, so later missions still offer it', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const step = (s) => Skyroads.tutorial.updateTutorial(STATE.tutorial, s, {
+      position: 0,
+      playerY: 0,
+      playerVY: 0,
+      fuel: 100,
+      fuelBurstMin: CONFIG.FUEL_BURST_MIN,
+      storage: STATE.storage,
+    });
+    step(Skyroads.tutorial.TUTORIAL_TIME_CAP - 1);
+    const beforeCap = STATE.tutorial.active;
+    step(2);   // 累计超过 TUTORIAL_TIME_CAP
+    return JSON.stringify({
+      beforeCap,
+      active: STATE.tutorial.active,
+      stored: STATE.storage.getItem('skyroads_tutorial_seen'),
+    });
+  })()`, sandbox));
+
+  assert.equal(result.beforeCap, true, 'tutorial must survive long past the 24-segment warmup zone');
+  assert.equal(result.active, false, 'tutorial ends after the time cap');
+  assert.equal(result.stored, null, 'timeout must NOT mark the tutorial seen — an unfinished pilot keeps getting the guide');
+});
+
+test('the tutorial no longer ends when the player leaves the warmup zone early', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const result = JSON.parse(vm.runInContext(`(() => {
+    // 回归：曾按 position >= WARMUP_SEGMENTS(24) 截断教学，
+    // 起步约 3 秒就跑完 24 段，五个阶段只能看到第 1 个
+    Skyroads.tutorial.updateTutorial(STATE.tutorial, 0.1, {
+      position: CONFIG.WARMUP_SEGMENTS * 10,
+      playerY: 0,
+      playerVY: 0,
+      fuel: 100,
+      fuelBurstMin: CONFIG.FUEL_BURST_MIN,
+      storage: STATE.storage,
+    });
+    return JSON.stringify({
+      active: STATE.tutorial.active,
+      phase: Skyroads.tutorial.currentPhase(STATE.tutorial).id,
+    });
+  })()`, sandbox));
+
+  assert.equal(result.active, true, 'tutorial must continue beyond the warmup zone');
+  assert.equal(result.phase, 'move');
+});
+
+test('the Training button forces the full tutorial even for a pilot who has seen it', () => {
+  const stored = new Map([['skyroads_tutorial_seen', 'true']]);
+  const storage = {
+    getItem(key) { return stored.has(key) ? stored.get(key) : null; },
+    setItem(key, value) { stored.set(key, String(value)); },
+    removeItem(key) { stored.delete(key); },
+  };
+  const { sandbox } = makeGameUiSandbox({ storage });
+
+  vm.runInContext('STATE.ui.tutorialButton.dispatch(\'click\')', sandbox);
+
+  const snap = vm.runInContext(`({
+    mode: STATE.mode,
+    active: STATE.tutorial && STATE.tutorial.active,
+    phase: STATE.tutorial && Skyroads.tutorial.currentPhase(STATE.tutorial).id,
+  })`, sandbox);
+  assert.deepEqual({ ...snap }, { mode: 'PLAYING', active: true, phase: 'move' });
+
+  // 普通"开始任务"仍然尊重"已看过"标记
+  vm.runInContext('gotoMenu()', sandbox);
+  vm.runInContext('STATE.ui.startButton.dispatch(\'click\')', sandbox);
+  assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.active', sandbox), false);
+});
+
+test('tutorial practice sandbox: invincible, fuel pinned, speed capped while the guide is active', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);   // 首局自动教学处于 active
+  const result = JSON.parse(vm.runInContext(`(() => {
+    extendTrack = () => {};
+    collectPickup = () => {};
+    pickupFuel = () => {};
+    for (const seg of STATE.track) seg.lanes = Array(CONFIG.LANES).fill(LANE_TYPE.WALL_LOW);  // 全程墙壁
+    STATE.speed = 30;                        // 远超教学限速
+    STATE.fuel = 40;                         // 低于燃料爆发阈值
+    updatePhysics(1.0);
+    const during = {
+      mode: STATE.mode,
+      fuel: STATE.fuel,
+      speedCapped: STATE.speed <= CONFIG.TUTORIAL_SPEED_CAP + 1e-9,
+      tutorialActive: STATE.tutorial.active,
+    };
+    Skyroads.tutorial.endTutorial(STATE.tutorial, STATE.storage);   // 教学结束 → 恢复真实规则
+    updatePhysics(1.0);
+    return JSON.stringify({ during, afterEnd: { mode: STATE.mode } });
+  })()`, sandbox));
+
+  assert.equal(result.during.tutorialActive, true);
+  assert.equal(result.during.mode, 'PLAYING', 'walls must not kill during the tutorial sandbox');
+  assert.equal(result.during.fuel, 100, 'fuel must be pinned to full so the Fuel Burst phase is always reachable');
+  assert.equal(result.during.speedCapped, true, 'speed must be capped for newcomers');
+  assert.equal(result.afterEnd.mode, 'GAMEOVER', 'real rules must resume once the tutorial ends');
+});
+
+test('the tutorial mission stays reachable after dying — no page refresh needed', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  // 教学超时结束后（不标记"已看过"）死亡：模拟用户问题"死了就再也进不去教学"
+  vm.runInContext('STATE.tutorial.active = false; STATE.fuel = 0.001; updatePhysics(0.5)', sandbox);
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'GAMEOVER');
+
+  // 途径一：指挥中心"新手教学"按钮随时可强制进入
+  vm.runInContext('startTutorialMission()', sandbox);
+  const snap = vm.runInContext(`({
+    mode: STATE.mode,
+    active: STATE.tutorial && STATE.tutorial.active,
+    phase: STATE.tutorial && Skyroads.tutorial.currentPhase(STATE.tutorial).id,
+  })`, sandbox);
+  assert.deepEqual({ ...snap }, { mode: 'PLAYING', active: true, phase: 'move' });
+
+  // 途径二：教学未完成（未标"已看过"）时死亡，普通"开始任务"也会继续自动引导
+  vm.runInContext('STATE.tutorial.active = false; STATE.fuel = 0.001; updatePhysics(0.5)', sandbox);
+  assert.equal(vm.runInContext('STATE.mode', sandbox), 'GAMEOVER');
+  vm.runInContext('startGame()', sandbox);
+  assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.active', sandbox), true,
+    'an unfinished tutorial must be offered again on the next mission');
+});
+
+test('keyboard lane changes count toward the tutorial move phase', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.laneChanged', sandbox), false);
+
+  windowObject.dispatch('keydown', { key: 'ArrowRight', code: 'ArrowRight' });
+
+  assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.laneChanged', sandbox), true,
+    'a keyboard lane change must credit the tutorial move phase');
+
+  // 走完显示时长后，引导应推进到跳跃阶段
+  const phase = vm.runInContext(`(() => {
+    const t = STATE.tutorial;
+    Skyroads.tutorial.updateTutorial(t, 3, {
+      position: 0, playerY: 0, playerVY: 0, fuel: 100,
+      fuelBurstMin: CONFIG.FUEL_BURST_MIN, storage: STATE.storage,
+    });
+    Skyroads.tutorial.updateTutorial(t, 0.5, {
+      position: 0, playerY: 0, playerVY: 0, fuel: 100,
+      fuelBurstMin: CONFIG.FUEL_BURST_MIN, storage: STATE.storage,
+    });
+    const current = Skyroads.tutorial.currentPhase(t);
+    return current ? current.id : 'done';
+  })()`, sandbox);
+  assert.equal(phase, 'jump');
+});
+
+test('firing a charged missile also counts toward the tutorial shoot phase', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  vm.runInContext('STATE.shots = []; fireMissile()', sandbox);
+  assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.shot', sandbox), true);
 });

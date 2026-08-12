@@ -323,6 +323,7 @@
     chargeElapsed = 0,
     chargeRevealDelay = 0.5,
     boostActive = false,
+    fuelBurstActive = false,
     superActive = false,
     magnetActive = false,
   } = {}) {
@@ -331,6 +332,7 @@
     return Object.freeze({
       charge: elapsed > 0 && elapsed >= revealDelay,
       boost: Boolean(boostActive),
+      fuelBurst: Boolean(fuelBurstActive),
       super: Boolean(superActive),
       magnet: Boolean(magnetActive),
     });
@@ -558,6 +560,7 @@
     listen(documentObject, 'keydown', onKeyDown);
     listen(elements.startButton, 'click', () => { if (actions.start) actions.start(); });
     listen(elements.restartButton, 'click', () => { if (actions.start) actions.start(); });
+    listen(elements.tutorialButton, 'click', () => { if (actions.tutorial) actions.tutorial(); });
     listen(elements.menuButton, 'click', () => { if (actions.menu) actions.menu(); });
     function runUtilityAction(action) {
       if (action) action();
@@ -744,11 +747,12 @@
     legacyBest.hidden = true;
     const startButton = makeButton(documentObject, 'start-mission', 'primary-action mission-action');
     startButton.setAttribute('aria-keyshortcuts', 'Enter Space');
+    const tutorialButton = makeButton(documentObject, 'start-tutorial', 'secondary-action');
     const titleLeaderboardButton = makeButton(documentObject, 'open-leaderboard', 'secondary-action');
-    const titleActions = makeElement(documentObject, 'div', { className: 'panel-actions' });
-    titleActions.append(startButton, titleLeaderboardButton);
+    const titleActions = makeElement(documentObject, 'div', { className: 'panel-actions wrap-actions' });
+    titleActions.append(startButton, tutorialButton, titleLeaderboardButton);
     const controlList = makeElement(documentObject, 'ul', { className: 'control-list' });
-    const controlItems = Array.from({ length: 5 }, () => makeElement(documentObject, 'li'));
+    const controlItems = Array.from({ length: 6 }, () => makeElement(documentObject, 'li'));
     controlList.append(...controlItems);
     const routeGuide = makeElement(documentObject, 'p', { className: 'route-guide' });
     elements.titleScreen.replaceChildren(
@@ -837,7 +841,7 @@
       ...elements,
       languageButton, musicButton, sfxButton,
       titleMeta, titleKicker, versionBadge, titleHeading, profileName, legacyBest,
-      startButton, titleLeaderboardButton, controlItems, routeGuide, pauseHeading, pauseHint,
+      startButton, titleLeaderboardButton, tutorialButton, controlItems, routeGuide, pauseHeading, pauseHint,
       gameOverHeading, deathReason, resultScore, resultDistance, resultElapsed, resultRank, resultNewBest,
       restartButton, menuButton, gameOverLeaderboardButton, gameOverRenameButton,
       leaderboardPanel, leaderboardHeading, leaderboardCutoff, leaderboardEmpty, leaderboardTableWrap, leaderboardTable,
@@ -910,8 +914,9 @@
     ui.titleHeading.textContent = translator.t('menu.title');
     ui.profileName.textContent = `${translator.t('rename.label')}: ${snapshot.profile.name}`;
     makeActionContent(documentObject, ui.startButton, translator.t('menu.start'), translator.t('shortcut.startRestart'));
+    ui.tutorialButton.textContent = translator.t('menu.tutorial');
     ui.titleLeaderboardButton.textContent = translator.t('menu.leaderboard');
-    const controlIds = ['controls.move', 'controls.jump', 'controls.shoot', 'controls.touch', 'controls.pause'];
+    const controlIds = ['controls.move', 'controls.jump', 'controls.fuelBurst', 'controls.shoot', 'controls.touch', 'controls.pause'];
     ui.controlItems.forEach((item, index) => { item.textContent = translator.t(controlIds[index]); });
     ui.routeGuide.textContent = translator.t('guide.routes');
     ui.pauseHeading.textContent = translator.t('pause.title');

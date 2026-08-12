@@ -106,6 +106,7 @@ const CONFIG = {
 
   // ---- 赛道生成（可解性参数，详见第 4 节注释）----
   WARMUP_SEGMENTS: 24,         // 起跑热身区：全 ROAD（偶有燃料），放缓后略加长
+  TUTORIAL_SPEED_CAP: 16,      // 教学模式限速（段/秒）：练习场环境，给新手反应时间
   REACTION_SEGS: 8,            // 障碍簇/窄桥之间的全路面缓冲段数
                                //   推导：满速 24 段/秒 × 变道 0.18 秒 = 4.32 段/次变道，
                                //   8 段 ≈ 1.85 倍单次变道行程；核心保障仍是
@@ -165,6 +166,16 @@ const CONFIG = {
   MAGNET_DURATION: 8,          // 磁铁持续秒数
   MAGNET_RANGE: 3,             // 吸附车道半径：±3 车道内的燃料自动飞来（无视高度；7 车道几乎全幅）
   MAGNET_SEG_AHEAD: 2,         // 吸附纵深：当前段 + 前方 2 段
+
+  // ---- 燃料爆发（v1.2.0 新能力：满燃料主动超级加速）----
+  FUEL_BURST_MIN: 75,          // 触发燃料爆发所需最低燃料百分比
+  FUEL_BURST_COST: 50,         // 燃料爆发消耗燃料百分比
+  FUEL_BURST_DURATION: 3,      // 燃料爆发持续秒数
+  FUEL_BURST_SPEED: 36,        // 燃料爆发速度（复用 BOOST_SPEED）
+  FUEL_BURST_WARN_TIME: 1,     // 燃料爆发到期预警窗口（秒）
+  FUEL_BURST_CHARGE_TIME: 1,   // 按住 W/↑ 蓄力触发燃料爆发所需秒数（松手取消）
+  FUEL_BURST_GRACE: 1,         // 燃料爆发结束后的无敌保护秒数（金色护盾环提示），
+                               //   防止速度骤降瞬间撞障 —— 视听上"爆发结束"，操作上给一拍缓冲
 
   // ---- 战斗系统（K 跳/按住滑翔 · J 点按子弹 / 按住 1.5 秒蓄力导弹）----
   // 敌人是挂在 segment 上的独立实体（seg.enemies），不是 LANE_TYPE ——
@@ -235,6 +246,15 @@ const STATE = {
   shots: [],                   // 飞行中的子弹/导弹 { kind, seg, lanePosition }（发射瞬间连续位置）
   bulletCD: 0,                 // 子弹冷却剩余秒数
   boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
+  // 燃料爆发（v1.2.0）
+  fuelBurstT: 0,               // 燃料爆发剩余时间（秒，>0 期间无敌穿透 + 速度锁定 FUEL_BURST_SPEED）
+  fuelBurstPrevSpeed: 0,       // 燃料爆发前的速度（>0 表示待恢复，爆发后恢复到此速度）
+  fuelBurstWarnStage: 0,       // 燃料爆发预警已响到第几声（0..3，防重发）
+  fuelBurstChargeT: 0,         // W/↑ 按住蓄力进度（秒，>0 表示蓄力中；满 FUEL_BURST_CHARGE_TIME 自动触发）
+  fuelBurstChargeStage: 0,     // 燃料爆发蓄力提示音已响到第几声（防重发）
+  fuelBurstGraceT: 0,          // 燃料爆发结束后的无敌保护剩余时间（秒，FUEL_BURST_GRACE 倒计时）
+  // 燃料/计分
+  boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
   // 燃料/计分
   fuel: CONFIG.FUEL_MAX,
   distanceMeters: 0,
@@ -266,6 +286,10 @@ const STATE = {
   // 时间
   lastTime: 0,
   time: 0,                     // 全局时钟（任何模式下都累加），驱动物体动画
+  // v1.2.0 新手引导
+  tutorial: globalThis.Skyroads && globalThis.Skyroads.tutorial
+    ? globalThis.Skyroads.tutorial.createTutorialState()
+    : null,
 };
 
 function currentCanvasMotionPolicy() {
@@ -376,6 +400,8 @@ function clearAllInputState() {
   for (const code of Object.keys(KEYS)) delete KEYS[code];
   STATE.chargeT = 0;
   STATE.chargeStage = 0;
+  STATE.fuelBurstChargeT = 0;
+  STATE.fuelBurstChargeStage = 0;
   STATE.gliding = false;
   touchStart = null;
   syncPropulsionAudio();
@@ -452,15 +478,28 @@ window.addEventListener('keydown', (e) => {
   const direction = directionForCode(code);
   if (direction !== 0 && STATE.mode === 'PLAYING') {
     const result = pressDirection(STATE.movement, direction);
-    if (result.started || result.reversed) sfxLane();
+    if (result.started || result.reversed) {
+      sfxLane();
+      if (STATE.tutorial) STATE.tutorial.laneChanged = true;   // 键盘变道同样计入引导
+    }
     return;
   }
 
   if (!shouldHandleGameInput(gameInputDescriptor(e))) return;
   switch (code) {
-    case 'Space':
     case 'ArrowUp':
     case 'KeyW':
+      // v1.2.0：W/↑ 专用于燃料爆发蓄力（地面 + 燃料≥75% 时按住 1 秒触发），
+      // 不再承担跳跃 —— 条件不满足时静默忽略，避免"想爆发却变成跳"的误导。
+      // 跳跃只有 Space / K（触屏点按）。
+      if (canFuelBurst()) {
+        if (STATE.fuelBurstChargeT <= 0) {
+          STATE.fuelBurstChargeT = 0.001;   // 蓄力开始标记（updatePhysics 累积，keyup 取消）
+          STATE.fuelBurstChargeStage = 0;
+        }
+      }
+      break;
+    case 'Space':
     case 'KeyK':
       tryJump(); break;
     case 'KeyJ':
@@ -482,6 +521,13 @@ window.addEventListener('keyup', (e) => {
     const result = releaseDirection(STATE.movement, direction);
     if (STATE.mode === 'PLAYING' && result.reversed) sfxLane();
     return;
+  }
+  // W/↑ 松手：蓄力未满 FUEL_BURST_CHARGE_TIME(1)s → 静默取消蓄力（不再退化跳跃，
+  // W/↑ 已不承担跳跃功能）；蓄满由 updatePhysics 自动触发燃料爆发（蓄力状态已清零，此处不会再进）
+  if ((code === 'KeyW' || code === 'ArrowUp') && STATE.fuelBurstChargeT > 0
+      && !KEYS.KeyW && !KEYS.ArrowUp) {
+    STATE.fuelBurstChargeT = 0;
+    STATE.fuelBurstChargeStage = 0;
   }
   // J 松手发射：蓄满 CHARGE_TIME(1.5)s → 蓄力导弹；未满 → 普通子弹
   if (code === 'KeyJ' && STATE.mode === 'PLAYING' && STATE.chargeT > 0) {
@@ -556,7 +602,10 @@ window.addEventListener('touchcancel', () => { touchStart = null; }, { passive: 
 
 function trySwitchLane(dir) {
   const result = requestDiscreteLaneChange(STATE.movement, dir);
-  if (result.started) sfxLane();           // 轻 whoosh
+  if (result.started) {
+    sfxLane();           // 轻 whoosh
+    if (STATE.tutorial) STATE.tutorial.laneChanged = true;
+  }
 }
 
 function tryJump() {
@@ -567,6 +616,7 @@ function tryJump() {
     STATE.playerY = 0.01;
     STATE.jumpsUsed = 1;
     sfxJump();
+    if (STATE.tutorial) STATE.tutorial.jumped = true;
   } else if (STATE.jumpsUsed > 0 && STATE.jumpsUsed < (STATE.tripleT > 0 ? 3 : CONFIG.MAX_JUMPS)) {
     // 第二/第三段：空中跃升推进器点火，垂直速度重置为起跳初速。
     // 三段跳为青白星限时奖励（TRIPLE_DURATION 秒）；第三段顶点 3×879=2637 >
@@ -598,9 +648,34 @@ function tryJump() {
   }
 }
 
+// v1.2.0 燃料爆发是否可触发：地面上 + 燃料≥75% + 不在 BOOST / 爆发无敌状态。
+// W/↑ 在此状态下触发燃料爆发而非跳跃；Space/K 永远是跳跃。
+function canFuelBurst() {
+  return STATE.mode === 'PLAYING'
+    && STATE.playerY <= 0 && STATE.playerVY <= 0 && STATE.jumpsUsed === 0
+    && STATE.fuel >= CONFIG.FUEL_BURST_MIN
+    && STATE.boostT <= 0 && STATE.fuelBurstT <= 0;
+}
+
+// v1.2.0 燃料爆发：消耗 FUEL_BURST_COST(50%) 燃料，锁定 FUEL_BURST_SPEED(36 m/s)
+// 持续 FUEL_BURST_DURATION(3)s，期间无敌穿透，结束前 FUEL_BURST_WARN_TIME(1)s 预警。
+function tryFuelBurst() {
+  if (!canFuelBurst()) return;
+  STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_BURST_COST);
+  STATE.fuelFlash = 0.6;       // HUD 燃料条短暂变橙：提示"正在大量耗油"
+  STATE.fuelBurstPrevSpeed = STATE.speed;
+  STATE.fuelBurstT = CONFIG.FUEL_BURST_DURATION;
+  STATE.fuelBurstWarnStage = 0;
+  STATE.fuelBurstGraceT = 0;      // 新爆发覆盖上一轮的到期保护期
+  sfxFuelBurst();
+  syncPropulsionAudio();
+  if (STATE.tutorial) STATE.tutorial.fuelBursted = true;
+}
+
 // 跳跃键是否按住（滑翔判定用；KEYS 表 keydown/keyup 维护按住状态，重复按键已抑制）
 function jumpHeld() {
-  return !!(KEYS.Space || KEYS.ArrowUp || KEYS.KeyW || KEYS.KeyK);
+  // v1.2.0：W/↑ 已专用于燃料爆发蓄力，不再是跳跃键 —— 滑翔只认 Space/K
+  return !!(KEYS.Space || KEYS.KeyK);
 }
 
 // ---- 开火：J 点按子弹（无限，冷却 0.22s）/ 按住 1.5 秒蓄力导弹（松手发射）----
@@ -620,6 +695,7 @@ function fireBullet() {
     y: STATE.playerY,
   });
   sfxShoot();
+  if (STATE.tutorial) STATE.tutorial.shot = true;
 }
 
 // 蓄力导弹（J 按住蓄满 CHARGE_TIME(1.5)s 松手发射）：无弹药概念，蓄力时间就是成本
@@ -635,6 +711,7 @@ function fireMissile() {
     y: STATE.playerY,
   });
   sfxMissile();
+  if (STATE.tutorial) STATE.tutorial.shot = true;
 }
 
 // ============================================================
@@ -2987,7 +3064,7 @@ function renderPlayer(ctx) {
       size: 1 + Math.random() * 2.5,
       streak: false,
     });
-    if (STATE.boostT > 0) {
+    if (STATE.boostT > 0 || STATE.fuelBurstT > 0) {
       for (let k = 0; k < 3; k++) {
         STATE.trail.push({
           x: cx + (Math.random() - 0.5) * 1.4 * W2,
@@ -3081,24 +3158,65 @@ function renderPlayer(ctx) {
   ctx.transform(1, 0, laneOff * 0.030, 1, 0, 0);          // 剪切：x 随 y 偏移
 
   const presentation = globalThis.Skyroads.presentation;
-  const energized = STATE.boostT > 0 || STATE.tripleT > 0 || STATE.playerY > 0 || STATE.jumpBurst > 0;
+  const energized = STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.tripleT > 0 || STATE.playerY > 0 || STATE.jumpBurst > 0;
   const visualPlan = presentation.playerVisualLayerPlan(STATE.visualAssets, {
     energized,
     chargeActive: STATE.chargeT > 0 && STATE.mode === 'PLAYING',
-    boostActive: STATE.boostT > 0,
+    boostActive: STATE.boostT > 0 || STATE.fuelBurstT > 0,
     superActive: STATE.tripleT > 0,
   });
   const thrusterFeedback = presentation.thrusterFeedbackState({
     gliding: STATE.gliding && STATE.fuel > 0 && STATE.mode === 'PLAYING',
     jumpBurst: STATE.jumpBurst,
     jumpBurstTier: STATE.jumpBurstTier,
-    boostActive: STATE.boostT > 0,
+    boostActive: STATE.boostT > 0 || STATE.fuelBurstT > 0,
     superActive: STATE.tripleT > 0,
     reducedMotion: STATE.reducedMotion,
   });
   const shipFrame = visualPlan.shipFrame;
   const spanK = STATE.gliding ? 1.15 : 1;
   drawSustainedThrusterJets(ctx, { halfWidth: W2, height: H }, thrusterFeedback);
+
+  // v1.2.0 燃料爆发蓄气特效（船体下层）：金色能量环随进度收缩增强 + 环绕火花向船体汇聚
+  if (STATE.fuelBurstChargeT > 0) {
+    const chargeRatio = Math.max(0, Math.min(1, STATE.fuelBurstChargeT / CONFIG.FUEL_BURST_CHARGE_TIME));
+    const chargeTime = visualAnimationTime();
+    const auraPulse = 0.55 + 0.45 * chargeRatio;
+    const auraR = H * (1.5 - 0.55 * chargeRatio);          // 光环随蓄力收拢
+    const aura = ctx.createRadialGradient(0, -0.3 * H, auraR * 0.15, 0, -0.3 * H, auraR);
+    aura.addColorStop(0, `rgba(255,214,110,${(0.34 * auraPulse).toFixed(3)})`);
+    aura.addColorStop(0.65, `rgba(255,190,80,${(0.16 * auraPulse).toFixed(3)})`);
+    aura.addColorStop(1, 'rgba(255,190,80,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(0, -0.3 * H, auraR, 0, Math.PI * 2);
+    ctx.fill();
+    // 环绕火花：沿椭圆轨道旋转并向船体收拢（reduced-motion 下静止、数量减半）
+    const sparkCount = STATE.reducedMotion ? 4 : 8;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = chargeTime * 4.2 + (i / sparkCount) * Math.PI * 2;
+      const orbit = H * (1.6 - 0.9 * chargeRatio) * (1 + 0.06 * Math.sin(chargeTime * 9 + i));
+      const sparkAlpha = 0.35 + 0.55 * chargeRatio;
+      ctx.fillStyle = `rgba(255,224,140,${sparkAlpha.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(Math.cos(angle) * orbit, -0.3 * H + Math.sin(angle) * orbit * 0.55, 1.2 + 1.4 * chargeRatio, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // v1.2.0 燃料爆发到期保护期：金色脉冲护盾环，明确提示"短暂无敌、即将恢复正常速度"
+  if (STATE.fuelBurstGraceT > 0) {
+    const gracePulse = canvasPulse(0.5, 0.5, 12);
+    const graceFade = Math.min(1, STATE.fuelBurstGraceT / (CONFIG.FUEL_BURST_GRACE * 0.4));  // 末尾 40% 渐隐
+    ctx.globalAlpha = (0.3 + 0.5 * gracePulse) * graceFade;
+    ctx.strokeStyle = '#ffd76a';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(0, -0.3 * H, H * (1.05 + 0.18 * gracePulse), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   if (shipFrame) {
     const frameRect = presentation.computeShipDrawRect(STATE.width, STATE.height, 4 / 3);
     ctx.drawImage(
@@ -3689,17 +3807,50 @@ function updatePhysics(dt) {
       }
     }
   }
+  // W/↑ 燃料爆发蓄力：按住累积至 FUEL_BURST_CHARGE_TIME(1)s 自动触发；
+  // 中途条件破坏（起跳、燃料跌破 75%、吃到 BOOST 等）则静默取消
+  if (STATE.fuelBurstChargeT > 0) {
+    if (!canFuelBurst()) {
+      STATE.fuelBurstChargeT = 0;
+      STATE.fuelBurstChargeStage = 0;
+    } else {
+      STATE.fuelBurstChargeT += dt;
+      const fbChargeStage = STATE.fuelBurstChargeT >= CONFIG.FUEL_BURST_CHARGE_TIME * 2 / 3
+        ? 2
+        : (STATE.fuelBurstChargeT >= CONFIG.FUEL_BURST_CHARGE_TIME / 3 ? 1 : 0);
+      if (fbChargeStage > STATE.fuelBurstChargeStage) {
+        STATE.fuelBurstChargeStage = fbChargeStage;
+        sfxChargeTick(fbChargeStage);      // 三段渐高蓄力提示音（1/3、2/3 进度）
+      }
+      if (STATE.fuelBurstChargeT >= CONFIG.FUEL_BURST_CHARGE_TIME) {
+        STATE.fuelBurstChargeT = 0;
+        STATE.fuelBurstChargeStage = 0;
+        tryFuelBurst();
+      }
+    }
+  }
   // 平滑加速：初速 8 = 满速 33%，ACCEL 0.4 → (24-8)/0.4 = 40 秒到满速。
   // BOOST 超级加速期间：速度锁定 BOOST_SPEED(36)；
   // 到期后恢复到吃闪电前的速度（boostPrevSpeed），再继续按 ACCEL 正常爬升。
+  // v1.2.0 燃料爆发：同理锁定速度，到期后恢复。
   if (STATE.boostT > 0) {
     STATE.speed = CONFIG.BOOST_SPEED;
+  } else if (STATE.fuelBurstT > 0) {
+    STATE.speed = CONFIG.FUEL_BURST_SPEED;
   } else {
     if (STATE.boostPrevSpeed > 0) {          // BOOST 刚结束：恢复加速前速度
       STATE.speed = STATE.boostPrevSpeed;
       STATE.boostPrevSpeed = 0;
     }
+    if (STATE.fuelBurstPrevSpeed > 0) {      // 燃料爆发刚结束：恢复加速前速度
+      STATE.speed = STATE.fuelBurstPrevSpeed;
+      STATE.fuelBurstPrevSpeed = 0;
+    }
     STATE.speed = Math.min(CONFIG.MAX_SPEED, STATE.speed + CONFIG.ACCEL * dt);
+    // 教学模式（练习场）：限速 TUTORIAL_SPEED_CAP，给新手充裕反应时间
+    if (STATE.tutorial && STATE.tutorial.active) {
+      STATE.speed = Math.min(STATE.speed, CONFIG.TUTORIAL_SPEED_CAP);
+    }
   }
 
   // 扫掠：一帧移动距离按 ≤ 0.5 segment 切分子步，
@@ -3720,6 +3871,7 @@ function updatePhysics(dt) {
     // 跳跃物理（含滑翔：空中 + 按住跳跃键 + 下落中 + 有燃料）
     if (STATE.playerY > 0 || STATE.playerVY > 0) {
       STATE.gliding = STATE.playerY > 0 && STATE.playerVY < 0 && jumpHeld() && STATE.fuel > 0;
+      if (STATE.gliding && STATE.tutorial) STATE.tutorial.glided = true;
       // 三段跳奖励期滑翔重力系数更小（TRIPLE_GLIDE_FACTOR 0.045 vs 基准 0.08），滞空更久
       const g = STATE.gliding
         ? CONFIG.GRAVITY * (STATE.tripleT > 0 ? CONFIG.TRIPLE_GLIDE_FACTOR : CONFIG.GLIDE_GRAVITY_FACTOR)
@@ -3737,8 +3889,14 @@ function updatePhysics(dt) {
 
     // 燃料消耗与计时；道具效果倒计时
     STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_DRAIN_RATE * sdt);
+    if (STATE.tutorial && STATE.tutorial.active) STATE.fuel = CONFIG.FUEL_MAX;   // 练习场：燃料锁定满格，随时可练燃料爆发
     STATE.elapsedMs += sdt * 1000;
     if (STATE.boostT > 0) STATE.boostT = Math.max(0, STATE.boostT - sdt);
+    if (STATE.fuelBurstT > 0) {
+      STATE.fuelBurstT = Math.max(0, STATE.fuelBurstT - sdt);
+      if (STATE.fuelBurstT === 0) fuelBurstEndFx();   // 自然到期：熄火特效 + 下行音 + 短暂无敌保护
+    }
+    if (STATE.fuelBurstGraceT > 0) STATE.fuelBurstGraceT = Math.max(0, STATE.fuelBurstGraceT - sdt);
     if (STATE.tripleT > 0) {
       STATE.tripleT = Math.max(0, STATE.tripleT - sdt);
       if (STATE.tripleT === 0) superPowerDownFx();   // 自然到期：熄火特效 + 下行音
@@ -3752,6 +3910,14 @@ function updatePhysics(dt) {
         sfxBoostWarn(stage);
       }
     }
+    // v1.2.0 燃料爆发到期预警：最后 FUEL_BURST_WARN_TIME(1)s 内 3 声渐高 beep
+    if (STATE.fuelBurstT > 0 && STATE.fuelBurstT <= CONFIG.FUEL_BURST_WARN_TIME) {
+      const fbStage = STATE.fuelBurstT > 0.66 ? 1 : (STATE.fuelBurstT > 0.33 ? 2 : 3);
+      if (fbStage > STATE.fuelBurstWarnStage) {
+        STATE.fuelBurstWarnStage = fbStage;
+        sfxFuelBurstWarn(fbStage);
+      }
+    }
     // 超级形态到期预警：最后 TRIPLE_WARN_TIME(3)s 内 3 声渐高 beep
     // （3 / 2 / 1s 三档阈值，tripleWarnStage 防重发；吃星/开局时重置）
     if (STATE.tripleT > 0 && STATE.tripleT <= CONFIG.TRIPLE_WARN_TIME) {
@@ -3762,6 +3928,18 @@ function updatePhysics(dt) {
       }
     }
     if (STATE.bulletCD > 0) STATE.bulletCD = Math.max(0, STATE.bulletCD - sdt);
+
+    // v1.2.0 更新新手引导
+    if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+      globalThis.Skyroads.tutorial.updateTutorial(STATE.tutorial, sdt, {
+        position: STATE.position,
+        playerY: STATE.playerY,
+        playerVY: STATE.playerVY,
+        fuel: STATE.fuel,
+        fuelBurstMin: CONFIG.FUEL_BURST_MIN,
+        storage: STATE.storage,
+      });
+    }
 
     updateEnemies(sdt);         // 无人机换道状态机（预警/平滑移动）
     advanceShots(sdt);          // 弹道推进 + 命中判定（同子步扫掠）
@@ -4019,6 +4197,29 @@ function superPowerDownFx() {
   sfxPowerDown();
 }
 
+// 燃料爆发自然到期：金白爆闪 + 金色冲击波环自船体扩散 + 12 颗金白余烬 + 下行熄火音，
+// 并进入 FUEL_BURST_GRACE(1)s 无敌保护期（金色护盾环提示）——
+// 解决"速度骤降瞬间撞上障碍物"的挫败感：视听上明确"爆发结束"，操作上给一拍缓冲
+function fuelBurstEndFx() {
+  STATE.fuelBurstGraceT = CONFIG.FUEL_BURST_GRACE;
+  const p = project(playerWorldX(), STATE.playerY, CONFIG.CAMERA_BACK);
+  if (p.visible) {
+    STATE.shockwave = { x: p.x, y: p.y, r: 8, alpha: 0.85, gold: true };
+    for (let i = 0; i < (STATE.reducedMotion ? 5 : 12); i++) {
+      const a = Math.random() * Math.PI * 2;
+      STATE.particles.push({
+        x: p.x + (Math.random() - 0.5) * 26, y: p.y + (Math.random() - 0.5) * 16,
+        vx: Math.cos(a) * 55, vy: -100 - Math.random() * 130,   // 向上升腾
+        life: 0.4 + Math.random() * 0.3, maxLife: 0.7,
+        color: Math.random() < 0.5 ? '#ffd76a' : '#fff3d0',
+        size: 1.5 + Math.random() * 2.5,
+      });
+    }
+  }
+  STATE.flash = Math.max(STATE.flash, 0.3 * currentCanvasMotionPolicy().deathFlashScale);
+  sfxFuelBurstEnd();
+}
+
 function pickupFuel(seg, laneIdx) {
   seg.lanes[laneIdx] = LANE_TYPE.ROAD;
   STATE.fuel = Math.min(CONFIG.FUEL_MAX, STATE.fuel + CONFIG.FUEL_PICKUP);
@@ -4078,7 +4279,9 @@ function checkCollisions(previousLanePosition, currentLanePosition) {
   if (STATE.fuel <= 0) { die('fuel'); return; }
   const seg = STATE.track[Math.floor(STATE.position)];
   if (!seg) return;
-  const invincible = STATE.boostT > 0;
+  // 教学模式（练习场）：撞墙/掉坑/撞敌机均不致死，零压力熟悉操作
+  const invincible = STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
+    || Boolean(STATE.tutorial && STATE.tutorial.active);
 
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     const type = seg.lanes[lane];
@@ -4214,6 +4417,12 @@ function resetGame() {
   STATE.recoil = 0;
   STATE.boostT = 0;
   STATE.boostPrevSpeed = 0;
+  STATE.fuelBurstT = 0;
+  STATE.fuelBurstPrevSpeed = 0;
+  STATE.fuelBurstWarnStage = 0;
+  STATE.fuelBurstChargeT = 0;
+  STATE.fuelBurstChargeStage = 0;
+  STATE.fuelBurstGraceT = 0;
   STATE.tripleT = 0;
   STATE.tripleWarnStage = 0;
   STATE.superFx = 0;
@@ -4234,6 +4443,10 @@ function resetGame() {
   STATE.shake = 0;
   STATE.shockwave = null;
   STATE.track = buildTrack();
+  // v1.2.0 重置引导状态（不清除已看过的标记，只重置运行期状态）
+  if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+    STATE.tutorial = globalThis.Skyroads.tutorial.createTutorialState();
+  }
 }
 
 function togglePause() {
@@ -4250,7 +4463,7 @@ function togglePause() {
   return true;
 }
 
-function startGame() {
+function startGame({ forceTutorial = false } = {}) {
   audioInit();                 // 首次有效手势：创建/resume 音效 AudioContext
   if (STATE.audioController) {
     STATE.audioController.unlock().then(refreshPresentation).catch(function () { refreshPresentation(); });
@@ -4260,10 +4473,19 @@ function startGame() {
   propulsionUiOwnsFocus = false;
   resetGame();
   STATE.mode = 'PLAYING';
+  // v1.2.0 启动新手引导（教学模式强制显示，无论是否看过）
+  if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+    globalThis.Skyroads.tutorial.startTutorial(STATE.tutorial, STATE.storage, { force: forceTutorial });
+  }
   syncPropulsionAudio();
   syncAdaptiveAudio(true);
   refreshPresentation();
   focusPrimarySurface();
+}
+
+// v1.2.0 教学模式入口：指挥中心"新手教学"按钮，强制本次任务显示完整引导
+function startTutorialMission() {
+  startGame({ forceTutorial: true });
 }
 
 function gotoMenu() {
@@ -4431,6 +4653,29 @@ function renderEffects(ctx) {
     g.addColorStop(0, cA); g.addColorStop(1, c0);
     ctx.fillStyle = g; ctx.fillRect(W - wE, 0, wE, Hh);
   }
+  // ---- 燃料爆发到期预警：屏幕边缘金色脉冲光晕（v1.2.0；比 BOOST 预警更亮更宽更急促）----
+  if (STATE.mode === 'PLAYING' && STATE.fuelBurstT > 0 && STATE.fuelBurstT < CONFIG.FUEL_BURST_WARN_TIME) {
+    const f = STATE.fuelBurstT / CONFIG.FUEL_BURST_WARN_TIME;   // 1 → 0
+    const pulse = canvasPulse(0.5, 0.5, 10);
+    const a = (0.16 + 0.42 * (1 - f)) * pulse;
+    const wE = (0.045 + 0.11 * f) * STATE.width;
+    const hE = (0.045 + 0.11 * f) * STATE.height;
+    const W = STATE.width, Hh = STATE.height;
+    const cA = 'rgba(255,200,80,' + a.toFixed(3) + ')';
+    const c0 = 'rgba(255,200,80,0)';
+    let g = ctx.createLinearGradient(0, 0, 0, hE);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, hE);
+    g = ctx.createLinearGradient(0, Hh, 0, Hh - hE);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(0, Hh - hE, W, hE);
+    g = ctx.createLinearGradient(0, 0, wE, 0);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, wE, Hh);
+    g = ctx.createLinearGradient(W, 0, W - wE, 0);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(W - wE, 0, wE, Hh);
+  }
   // ---- 超级形态到期预警：屏幕边缘金红脉冲光晕，随剩余时间收缩
   //      （time×10 比 BOOST 的 ×8 更急促，色调金红以示区别）----
   if (STATE.mode === 'PLAYING' && STATE.tripleT > 0 && STATE.tripleT < CONFIG.TRIPLE_WARN_TIME) {
@@ -4549,6 +4794,7 @@ function drawFuelInstrument(ctx, layout) {
 
   const ratio = Math.max(0, Math.min(1, STATE.fuel / CONFIG.FUEL_MAX));
   const burning = STATE.gliding || STATE.fuelFlash > 0;
+  const fuelBurstReady = STATE.fuel >= CONFIG.FUEL_BURST_MIN && STATE.playerY <= 0 && STATE.playerVY <= 0 && STATE.boostT <= 0 && STATE.fuelBurstT <= 0;
   const barX = x + 12;
   const barY = y + 27;
   const barWidth = width - 24;
@@ -4558,6 +4804,21 @@ function drawFuelInstrument(ctx, layout) {
     ? `rgba(255,153,51,${canvasPulse(0.75, 0.25, 12).toFixed(3)})`
     : (ratio > 0.3 ? '#48d98b' : (ratio > 0.15 ? '#ffc857' : '#ff4f72'));
   ctx.fillRect(barX, barY, barWidth * ratio, 10);
+  // v1.2.0 燃料就绪高亮：≥75% 且地面时，燃料条边框金色脉冲
+  if (fuelBurstReady) {
+    const pulse = canvasPulse(0.9, 0.1, 8);
+    ctx.strokeStyle = `rgba(255,200,80,${pulse.toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(barX - 1, barY - 1, barWidth + 2, 12);
+  }
+  // v1.2.0 燃料爆发蓄力进度：按住 W/↑ 期间燃料条下方显示金色进度条
+  if (STATE.fuelBurstChargeT > 0) {
+    const chargeRatio = Math.max(0, Math.min(1, STATE.fuelBurstChargeT / CONFIG.FUEL_BURST_CHARGE_TIME));
+    ctx.fillStyle = 'rgba(2,8,18,0.88)';
+    ctx.fillRect(barX, barY + 14, barWidth, 4);
+    ctx.fillStyle = '#ffc857';
+    ctx.fillRect(barX, barY + 14, barWidth * chargeRatio, 4);
+  }
   drawHudMeterOverlay(ctx, barX, barY - 1, barWidth, 12);
   ctx.strokeStyle = 'rgba(143,243,255,0.62)';
   ctx.strokeRect(barX, barY, barWidth, 10);
@@ -4631,6 +4892,7 @@ function renderHUD(ctx) {
     chargeElapsed: STATE.chargeT,
     chargeRevealDelay: CONFIG.CHARGE_HUD_DELAY,
     boostActive: STATE.boostT > 0,
+    fuelBurstActive: STATE.fuelBurstT > 0,
     superActive: STATE.tripleT > 0,
     magnetActive: STATE.magnetT > 0,
   });
@@ -4645,6 +4907,14 @@ function renderHUD(ctx) {
       warning ? 'status.boostWarning' : 'status.boost',
       { seconds: uiNumber(STATE.boostT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) },
     ), STATE.boostT / CONFIG.BOOST_DURATION, '#7fe8ff', warning);
+    statusY += 36;
+  }
+  if (visibility.fuelBurst) {
+    const warning = STATE.fuelBurstT < CONFIG.FUEL_BURST_WARN_TIME;
+    drawContextStatus(ctx, layout.leftX, statusY, layout.leftWidth, uiText(
+      warning ? 'status.fuelBurstWarning' : 'status.fuelBurst',
+      { seconds: uiNumber(STATE.fuelBurstT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) },
+    ), STATE.fuelBurstT / CONFIG.FUEL_BURST_DURATION, '#ffc857', warning);
     statusY += 36;
   }
   if (visibility.super) {
@@ -4946,6 +5216,9 @@ function sfxFuel()       { sfxSweep(880, 880, 0.08, 'sine', 0.16);              
 function sfxBoost()      { sfxNoise(0.09, 0.15, 5200);                                       // 闪电加速：电流 zapp
                            sfxSweep(1200, 1800, 0.10, 'square', 0.08, 0.02);
                            sfxSweep(180, 820, 0.40, 'sawtooth', 0.16, 0.05); }                 //   + 上扬轰鸣
+function sfxFuelBurst()  { sfxNoise(0.12, 0.18, 4800);                                      // 燃料爆发：重电流 zapp
+                           sfxSweep(1000, 1600, 0.12, 'square', 0.10, 0.02);
+                           sfxSweep(220, 960, 0.35, 'sawtooth', 0.18, 0.04); }                 //   + 更猛的上扬轰鸣
 function sfxSlow()       { sfxSweep(560, 190, 0.32, 'sawtooth', 0.11); }                     // 减速：下坠滑音
 function sfxTriple()     { sfxSweep(220, 1400, 0.45, 'sawtooth', 0.14);                        // 超级形态变身：上扬充能
                            sfxNoise(0.20, 0.10, 4200);                                         //   + 能量迸发噪声
@@ -4954,6 +5227,7 @@ function sfxTriple()     { sfxSweep(220, 1400, 0.45, 'sawtooth', 0.14);         
                            sfxSweep(1320, 1320, 0.16, 'square', 0.13, 0.44); }
 function sfxPowerDown()  { sfxSweep(880, 160, 0.45, 'sawtooth', 0.14);                         // 超级形态结束：下行熄火
                            sfxSweep(440, 110, 0.40, 'triangle', 0.10, 0.06); }
+function sfxFuelBurstEnd() { sfxSweep(720, 140, 0.4, 'sawtooth', 0.12); }                      // 燃料爆发结束：下行熄火（比超级形态略低沉短促）
 function sfxDeath()      { sfxNoise(0.5, 0.35, 900);                                         // 死亡：噪声爆 + 低频轰
                            sfxSweep(160, 38, 0.5, 'sine', 0.30); }
 // ---- 战斗与预警音效 ----
@@ -4975,14 +5249,17 @@ function sfxBigBlast()   { sfxNoise(0.55, 0.30, 800);                           
                            sfxSweep(520, 90, 0.40, 'sawtooth', 0.12, 0.08); }
 function sfxBoostWarn(st){ const f = [990, 990, 1180, 1480][st] || 990;                      // BOOST 预警：3 声渐高 beep
                            sfxSweep(f, f, 0.09, 'square', 0.14); }
+function sfxFuelBurstWarn(st){ const f = [880, 880, 1040, 1280][st] || 880;                    // 燃料爆发预警：3 声渐高 beep（音色更厚实）
+                           sfxSweep(f, f, 0.09, 'sawtooth', 0.13); }
 function sfxTripleWarn(st){ const f = [780, 780, 940, 1180][st] || 780;                      // 超级形态预警：3 声渐高 beep（音色区别于 BOOST）
-                           sfxSweep(f, f, 0.10, 'triangle', 0.15); }
+                           sfxSweep(f, f, 0.09, 'square', 0.14); }
 
 function propulsionAudioMode() {
   if (STATE.mode !== 'PLAYING'
     || !propulsionAudioHasOwnership()
     || audioIsSfxMuted()) return 'off';
   if (STATE.boostT > 0) return 'boost';
+  if (STATE.fuelBurstT > 0) return 'boost';  // v1.2.0 燃料爆发复用 BOOST 音频参数
   if (STATE.gliding) return STATE.tripleT > 0 ? 'super' : 'ordinary';
   return 'off';
 }
@@ -5146,6 +5423,10 @@ function render() {
   renderEffects(ctx);
   ctx.restore();
   if (STATE.mode === 'PLAYING') renderHUD(ctx);
+  // v1.2.0 绘制新手引导提示
+  if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+    globalThis.Skyroads.tutorial.renderTutorial(ctx, STATE.tutorial, STATE);
+  }
   if (STATE.mode === 'MENU') renderMenu(ctx);
   if (STATE.mode === 'GAMEOVER') renderGameOver(ctx);
 }
@@ -5321,6 +5602,7 @@ function init() {
       actions: {
         getMode: () => STATE.mode,
         start: startGame,
+        tutorial: startTutorialMission,
         menu: gotoMenu,
         getPlayerName: () => currentLeaderboardSnapshot().profile.name,
         beforeLeaderboard() {
