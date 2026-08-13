@@ -47,6 +47,7 @@ test('visual manifest points player frames at the semantic derivatives', () => {
   assert.deepEqual(VISUAL_ASSET_MANIFEST.ship, {
     neutral: './assets/ship/semantic/player-neutral.png',
     thrust: './assets/ship/semantic/player-thrust.png',
+    super: './assets/ship/semantic/player-super.png',
   });
 });
 

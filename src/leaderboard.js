@@ -378,9 +378,10 @@
       for (const entry of document.entries) entriesById.set(entry.id, entry);
     }
     const profile = { ...authority.profile };
+    // 每条记录保留落盘时的历史名字（改名只影响之后的成绩，不回溯改写历史记录）
     const entries = sortEntries([...entriesById.values()])
       .slice(0, MAX_ENTRIES)
-      .map((entry) => entry.playerId === profile.playerId ? { ...entry, name: profile.name } : { ...entry });
+      .map((entry) => ({ ...entry }));
     const reconciled = { version: 1, profile, entries };
     // Absence is a tombstone: only the latest authoritative document may retain legacyBest.
     if (Object.prototype.hasOwnProperty.call(authority, 'legacyBest')) {
@@ -394,10 +395,10 @@
     if (!valid) return null;
     const name = normalizeName(rawName, valid.profile.name);
     const playerId = valid.profile.playerId;
+    // 改名只更新当前档案：历史成绩保留创造纪录时使用的名字（每条记录是当时的"签名"）
     return {
       ...valid,
       profile: { playerId, name },
-      entries: valid.entries.map((entry) => entry.playerId === playerId ? { ...entry, name } : entry),
     };
   }
 

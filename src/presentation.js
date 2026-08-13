@@ -58,12 +58,24 @@
     ship: Object.freeze({
       neutral: './assets/ship/semantic/player-neutral.png',
       thrust: './assets/ship/semantic/player-thrust.png',
+      super: './assets/ship/semantic/player-super.png',
     }),
     ui: Object.freeze({
       panel: './assets/ui/panel-frame-cyan.png',
       meter: './assets/ui/meter-frame-cyan.png',
       hologramPanel: './assets/ui/hologram-panel.png',
       industrialMeter: './assets/ui/industrial-meter-overlay.png',
+      pickupBoost: './assets/pickups/boost.png',
+      pickupSlow: './assets/pickups/slow.png',
+      pickupTriple: './assets/pickups/triple.png',
+      pickupMagnet: './assets/pickups/magnet.png',
+      menuBackdrop: './assets/ui/menu-backdrop.jpg',
+      bgGalaxy: './assets/bg/galaxy.jpg',
+      bgPlanet: './assets/bg/planet.png',
+      bgMoon: './assets/bg/moon.png',
+      roadSurface: './assets/bg/road-surface.jpg',
+    roadSurfaceMip1: './assets/bg/road-surface-mip1.jpg',
+    roadSurfaceMip2: './assets/bg/road-surface-mip2.jpg',
     }),
     icons: Object.freeze({
       translate: './assets/icons/translate.svg',
@@ -235,10 +247,12 @@
     });
   }
 
-  function resolvePlayerShipFrame(visualAssets, energized = false) {
+  function resolvePlayerShipFrame(visualAssets, energized = false, superActive = false) {
     if (!visualAssets || !visualAssets.shipFramesReady || !visualAssets.assets || !visualAssets.assets.ship) return null;
     const frames = visualAssets.assets.ship;
     if (!frames.neutral || !frames.thrust || !frames.neutral.loaded || !frames.thrust.loaded) return null;
+    // v1.3.3 超级形态专用船体模组（金色凤凰战舰）：加载成功时整船换模，而不是叠加光效
+    if (superActive && frames.super && frames.super.loaded) return frames.super.element || null;
     const frame = energized ? frames.thrust : frames.neutral;
     return frame.element || null;
   }
@@ -261,7 +275,7 @@
     boostActive = false,
     superActive = false,
   } = {}) {
-    const shipFrame = resolvePlayerShipFrame(visualAssets, energized);
+    const shipFrame = resolvePlayerShipFrame(visualAssets, energized, superActive);
     const layers = [shipFrame ? 'ship-image' : 'procedural-ship'];
     if (superActive) layers.push('super-surface');
     if (chargeActive) layers.push('charge');

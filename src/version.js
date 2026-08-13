@@ -1,7 +1,7 @@
 'use strict';
 
 (function attachVersion(root) {
-  const semver = '1.2.0';
+  const semver = '1.3.0';
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(semver);
   if (!match) throw new TypeError(`Invalid product version: ${semver}`);
   const api = Object.freeze({

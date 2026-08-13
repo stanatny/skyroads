@@ -57,8 +57,8 @@ test('jump, fuel-burst and obstacle-route guidance uses the approved bilingual c
   const zh = MESSAGES['zh-CN'];
   assert.equal(en['controls.jump'], 'Jump / glide: K / Space · hold while descending to glide');
   assert.equal(zh['controls.jump'], '跳跃 / 滑翔：K / Space · 下落时按住即可滑翔');
-  assert.equal(en['controls.fuelBurst'], 'Fuel burst: fuel ≥ 75% + hold W / ↑ for 1s (costs 50% fuel)');
-  assert.equal(zh['controls.fuelBurst'], '燃料爆发：燃料 ≥ 75% 时按住 W / ↑ 1 秒（消耗 50% 燃料）');
+  assert.equal(en['controls.fuelBurst'], 'Fuel burst: fuel ≥ 70% + hold W / ↑ for 1s (costs 40% fuel)');
+  assert.equal(zh['controls.fuelBurst'], '燃料爆发：燃料 ≥ 70% 时按住 W / ↑ 1 秒（消耗 40% 燃料）');
   assert.equal(
     en['guide.routes'],
     '1 cyan band: one jump · 2 bands: two jumps · gold beacon: super-form third jump · lit corridor: jump, then hold while descending · every advanced route has an ordinary bypass lane',

@@ -22,3 +22,9 @@ app/AppIcon.iconset/
 !.agent/skills/
 !.agent/skills/ship-browser-games/
 !.agent/skills/ship-browser-games/**
+
+# Python cache
+__pycache__/
+
+# Local art exploration (not shipped)
+art-options/

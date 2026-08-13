@@ -15,7 +15,9 @@
 globalThis.Skyroads = globalThis.Skyroads || {};
 
 (function attachTutorial(root) {
-  const TUTORIAL_STORAGE_KEY = 'skyroads_tutorial_seen';
+  // v1.3.1：引导内容升级（燃料爆发 70%/40% 等新操作），存储键版本化为 _v2 ——
+  // 老玩家下一次任务也会自动收到一次完整新手引导，完成后才不再显示
+  const TUTORIAL_STORAGE_KEY = 'skyroads_tutorial_seen_v2';
   const TUTORIAL_TIME_CAP = 90; // 教学保底时长（秒）：超时自动结束并标记已看过
   const TUTORIAL_PHASES = Object.freeze([
     { id: 'move',    hintKey: 'tutorial.move',    trigger: 'laneChange' },
@@ -127,7 +129,7 @@ globalThis.Skyroads = globalThis.Skyroads || {};
         complete = tutorial.shot;
         break;
       case 'fuelBurst':
-        // 燃料爆发教程：只要燃料≥75%且在地面上即可视为“已了解”，不需要真的触发
+        // 燃料爆发教程：只要燃料≥70%且在地面上即可视为“已了解”，不需要真的触发
         complete = tutorial.fuelBursted || (fuel >= fuelBurstMin && playerY <= 0 && playerVY <= 0);
         break;
     }

@@ -386,7 +386,7 @@ function sourceTuple(metadata, frameIndex) {
   return [sx, sy, sw, sh];
 }
 
-test('road deck uses neutral steel layers and grounded structures draw semantic contact footprints', () => {
+test('road deck uses vector rust gradient layers and grounded structures draw semantic contact footprints', () => {
   const harness = createHarness();
   vm.runInContext(`
     STATE.position = 0;
@@ -396,11 +396,16 @@ test('road deck uses neutral steel layers and grounded structures draw semantic 
     }));
     renderTrack(__ctx);
   `, harness.sandbox);
+  const deckGradStops = harness.context.events
+    .filter((event) => event.type === 'fill' && event.style && typeof event.style === 'object')
+    .flatMap((event) => event.style.stops.map((stop) => stop[1]));
+  assert.ok(deckGradStops.includes('#4d2f22'));
+  assert.ok(deckGradStops.includes('#5a3929'));
   const deckFills = harness.context.events
     .filter((event) => event.type === 'fill')
     .map((event) => event.style);
-  assert.ok(deckFills.includes('#222a34'));
-  assert.ok(deckFills.includes('#28323d'));
+  assert.equal(deckFills.includes('#222a34'), false);
+  assert.equal(deckFills.includes('#28323d'), false);
   assert.equal(deckFills.includes('#3a3a55'), false);
   assert.equal(deckFills.includes('#34344e'), false);
   const seamAlphas = harness.context.events

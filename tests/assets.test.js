@@ -54,19 +54,19 @@ const MANIFEST_RECIPE_IDS = [
 const FINAL_WORLD_ATLAS_PATHS = [...UPRIGHT_ATLAS_PATHS, 'assets/world/gap-edge.png'];
 const FINAL_RENDERER_SHA256 = 'b6c2a2cffa83831672d7bd2985fd25f449f725311b354b9e0dec3a42bab3ba6b';
 const WORLD_OUTPUT_HASHES = {
-  'assets/world/drone-scout.png': 'c700f47ecdccfe5f3400f5947cf5494331442c80a347205efa1caaca71d5ba82',
-  'assets/world/drone-striker.png': '774ec0bae0db51b05d2dd5ce48e4449b576c246414a6578cefb07b301b47f376',
-  'assets/world/turret-sentry.png': 'b7688afbe1767a772abf9f397fd524e5e241a6d1ffc29ff849ce948583615fb9',
-  'assets/world/turret-heavy.png': 'bc915327eb3b8354e94d8f78a9a1e6a2f38208f30a15b55736a3126e414cb4a3',
-  'assets/world/barrier-rail.png': '28a2f5ee63b70708e593c1f1e82ac6c5094fcc9c3464023004581c310f6f879a',
-  'assets/world/barrier-crate.png': 'c0b327ffbccdc0ba3880200ac9832fd42872f1c707951188a9c1df58000394f1',
-  'assets/world/structure-pylon.png': '340d52a6371b6ed19107b977f6f12c4757156599dbc383d8cdcef39e9d088da5',
-  'assets/world/structure-bastion.png': '5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9',
-  'assets/world/structure-reactor.png': 'b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa',
-  'assets/world/structure-tower.png': 'ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436',
-  'assets/world/corridor-low.png': '28b7ffa57ccf7feadce8910cbc6f18cc603d2532a6163e3367b0081c607df661',
-  'assets/world/corridor-medium.png': '877199033c76c2fd5da5498e21c07d3e44d966408907ad423662fc2cc5166503',
-  'assets/world/gap-edge.png': 'c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49',
+  'assets/world/drone-scout.png': '4d54dd4fcb65b73251ca5650b8dea9a5b15b6f0fbbb6e7509b7456ebd17b0a45',
+  'assets/world/drone-striker.png': 'f8d2c9e75885945a5f1c565b7588174e84f79eef6715e14bc9e011c3edc45b65',
+  'assets/world/turret-sentry.png': '60d56394fa03d647e931acd011dcf981cc1135a0e68338489efd488ccaa08c9c',
+  'assets/world/turret-heavy.png': '20347c49fb5600a055d18130e111f4f9d4d1edd0a9f80442e3642b10df2e31ca',
+  'assets/world/barrier-rail.png': '154fcf7635e3cf3ae2f0d1c2911fd36580ccc473f2e0339791462b9ba3404817',
+  'assets/world/barrier-crate.png': '3bba94628454ec4b5d3376e9baaca7a9ea18f91b7731e49d3d9842da053c2fcb',
+  'assets/world/structure-pylon.png': '9613aab9ac2ce8dc42feb32b46ffd710d2eee4bc20b2c2e150668bca59f2af8a',
+  'assets/world/structure-bastion.png': 'dc62d0cc12e4a56d0400c221c516dca49126fff2953a3a79cca724e0aac99d78',
+  'assets/world/structure-reactor.png': '5feb3ae96dbcd5e5b5c7c8a2ffd03a9ea166b8f83cea0a59983b2dd2291d46a2',
+  'assets/world/structure-tower.png': 'fafc6f4b9ac8024b306ee9b68985a4a2caf6a7616038f5e899e34a2d54aed029',
+  'assets/world/corridor-low.png': '9b1ad5e21583f904071fa5f4a337be23c754404d82ab5d1685b7e3d7d9887d09',
+  'assets/world/corridor-medium.png': '271713afc18a2f2fbaaf7bace82adb171736316da9d04e41962247ea7f5b218c',
+  'assets/world/gap-edge.png': 'e2b9f8f23fb74ca88789e792d16c4a941d697f005e79bab89e58f0b2b4988b9d',
 };
 const WORLD_DIMENSIONS_BY_PATH = new Map(Object.values(WORLD_ATLAS_MANIFEST).map((metadata) => [
   metadata.path,
@@ -262,79 +262,6 @@ function measureCenterArmorWidth(decoded, metadata) {
   return 2 * Math.min(leftHalfWorld, rightHalfWorld);
 }
 
-function projectUprightPoint(metadata, frameIndex, point) {
-  const yaw = metadata.yawDegrees[frameIndex % 7] * Math.PI / 180;
-  const pitch = metadata.pitchDegrees[Math.floor(frameIndex / 7)] * Math.PI / 180;
-  const rotatedX = point.x * Math.cos(yaw) + point.z * Math.sin(yaw);
-  const rotatedZ = -point.x * Math.sin(yaw) + point.z * Math.cos(yaw);
-  const origin = metadata.frames[frameIndex].origin;
-  return {
-    x: origin.x + rotatedX * metadata.pixelsPerWorldUnit,
-    y: origin.y - (point.y * Math.cos(pitch) - rotatedZ * Math.sin(pitch))
-      * metadata.pixelsPerWorldUnit,
-  };
-}
-
-function projectedWorldBoxBounds(metadata, frameIndex, center, size, padding = 2) {
-  const points = [];
-  for (const x of [-0.5, 0.5]) for (const y of [-0.5, 0.5]) for (const z of [-0.5, 0.5]) {
-    points.push(projectUprightPoint(metadata, frameIndex, {
-      x: center.x + x * size.x,
-      y: center.y + y * size.y,
-      z: center.z + z * size.z,
-    }));
-  }
-  return {
-    minX: Math.floor(Math.min(...points.map(({ x }) => x))) - padding,
-    maxX: Math.ceil(Math.max(...points.map(({ x }) => x))) + padding,
-    minY: Math.floor(Math.min(...points.map(({ y }) => y))) - padding,
-    maxY: Math.ceil(Math.max(...points.map(({ y }) => y))) + padding,
-  };
-}
-
-function isGeneratedCyanSample(rgba, offset) {
-  const [red, green, blue, alpha] = rgba.subarray(offset, offset + 4);
-  return alpha >= 48 && red >= 112 && green >= 224 && blue >= 224
-    && Math.abs(green - blue) <= 24;
-}
-
-function countGeneratedCyanDifference(candidate, reference, bounds) {
-  assert.equal(candidate.width, reference.width);
-  assert.equal(candidate.height, reference.height);
-  let count = 0;
-  const minX = Math.max(0, bounds.minX);
-  const maxX = Math.min(candidate.width - 1, bounds.maxX);
-  const minY = Math.max(0, bounds.minY);
-  const maxY = Math.min(candidate.height - 1, bounds.maxY);
-  for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
-    const offset = (y * candidate.width + x) * 4;
-    if (isGeneratedCyanSample(candidate.rgba, offset)
-        && !isGeneratedCyanSample(reference.rgba, offset)) count += 1;
-  }
-  return count;
-}
-
-function generatedCyanEvidence(decoded, bounds) {
-  let count = 0;
-  let maxHorizontalRun = 0;
-  const minX = Math.max(0, bounds.minX);
-  const maxX = Math.min(decoded.width - 1, bounds.maxX);
-  const minY = Math.max(0, bounds.minY);
-  const maxY = Math.min(decoded.height - 1, bounds.maxY);
-  for (let y = minY; y <= maxY; y += 1) {
-    let run = 0;
-    for (let x = minX; x <= maxX; x += 1) {
-      const offset = (y * decoded.width + x) * 4;
-      if (isGeneratedCyanSample(decoded.rgba, offset)) {
-        count += 1;
-        run += 1;
-        maxHorizontalRun = Math.max(maxHorizontalRun, run);
-      } else run = 0;
-    }
-  }
-  return { count, maxHorizontalRun };
-}
-
 function pngAlphaStats(relativePaths) {
   return relativePaths.map((relativePath) => {
     const { width, height, rgba } = decodePngRgba(relativePath);
@@ -430,15 +357,23 @@ test('the fresh-render comparator permits only one bounded opaque color sample g
   }
 });
 
-test('both player frames are decodable 512 by 384 transparent PNGs', () => {
-  for (const relativePath of ['assets/ship/player-neutral.png', 'assets/ship/player-thrust.png']) {
+test('all player frames are decodable 512 by 384 transparent PNGs', () => {
+  for (const relativePath of [
+    'assets/ship/player-neutral.png',
+    'assets/ship/player-thrust.png',
+    'assets/ship/player-super.png',
+  ]) {
     assertPng(relativePath);
     assert.deepEqual(sipsDimensions(relativePath), { width: 512, height: 384 });
   }
 });
 
-test('both player frames keep transparent zero-RGB padding on all four borders', () => {
-  const relativePaths = ['assets/ship/player-neutral.png', 'assets/ship/player-thrust.png'];
+test('all player frames keep transparent zero-RGB padding on all four borders', () => {
+  const relativePaths = [
+    'assets/ship/player-neutral.png',
+    'assets/ship/player-thrust.png',
+    'assets/ship/player-super.png',
+  ];
   for (const stats of pngAlphaStats(relativePaths)) {
     assert.deepEqual(stats.borders, { bottom: 0, left: 0, right: 0, top: 0 }, stats.path);
     assert.ok(stats.transparentPixels > 0, `${stats.path} must retain an alpha channel`);
@@ -590,7 +525,7 @@ test('the documented offline render contract pins renderer and derived output ha
       `${relativePath} must have its current SHA-256 in the render recipe`,
     );
   }
-  assert.match(recipe, /swift tools\/render-ship\.swift \\\n\s+--model .*Striker\.obj \\\n\s+--texture .*Striker_Blue\.png/);
+  assert.match(recipe, /python3 tools\/build-world-atlases\.py/);
 });
 
 test('the semantic spectrum recipe pins deterministic tooling and every derived runtime hash', () => {
@@ -1995,104 +1930,47 @@ test('declared armor envelopes and pitch rows retain the approved perspective hi
   }
 });
 
-test('rendered cyan bands and high-tier gold follow the recipe hierarchy', () => {
-  const manifest = JSON.parse(read('tools/world-assets.json'));
-  const goldOutput = [255, 255, 160, 255];
-  const highIDs = new Set(['structure-reactor', 'structure-tower']);
-  for (const id of UPRIGHT_ATLAS_IDS) {
+test('v4 realistic atlases keep warm hazard and sensor accents on every upright asset', () => {
+  const hueSat = (red, green, blue) => {
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const delta = max - min;
+    const saturation = max === 0 ? 0 : delta / max;
+    let hue = 0;
+    if (delta !== 0) {
+      if (max === red) hue = 60 * (((green - blue) / delta) % 6);
+      else if (max === green) hue = 60 * ((blue - red) / delta + 2);
+      else hue = 60 * ((red - green) / delta + 4);
+    }
+    return [hue < 0 ? hue + 360 : hue, saturation];
+  };
+  const warmRatio = (id) => {
     const { width, height, rgba } = decodePngRgba(`assets/world/${id}.png`);
-    let goldPixels = 0;
-    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * 4;
-      const [red, green, blue, alpha] = rgba.subarray(offset, offset + 4);
-      if (red === goldOutput[0] && green === goldOutput[1]
-        && blue === goldOutput[2] && alpha === goldOutput[3]) goldPixels += 1;
+    let visible = 0;
+    let warm = 0;
+    for (let index = 0; index < width * height; index += 1) {
+      const offset = index * 4;
+      if (rgba[offset + 3] < 64) continue;
+      visible += 1;
+      const [hue, saturation] = hueSat(rgba[offset], rgba[offset + 1], rgba[offset + 2]);
+      if (saturation > 0.4 && hue >= 10 && hue <= 65) warm += 1;
     }
-    assert.equal(goldPixels > 0, highIDs.has(id), `${id} gold-beacon evidence`);
+    return warm / visible;
+  };
+  for (const id of UPRIGHT_ATLAS_IDS) {
+    assert.ok(warmRatio(id) >= 0.01, `${id} needs visible warm accent pixels`);
   }
-  const corridorLow = manifest.assets.find(({ id }) => id === 'corridor-low').generatedDetails;
-  const corridorMedium = manifest.assets.find(({ id }) => id === 'corridor-medium').generatedDetails;
-  assert.deepEqual(corridorLow, {
-    runtimeContinuity: true, cyanBandY: [390],
-  });
-  assert.deepEqual(corridorMedium, {
-    runtimeContinuity: true, cyanBandY: [460, 910],
-  });
-  for (const details of [corridorLow, corridorMedium]) {
-    assert.equal(Object.keys(details).some((key) => /^(?:text|label|locale|font)$/i.test(key)), false);
-  }
-
-  for (const { id, runtimeKey, ratios } of [
-    { id: 'barrier-rail', runtimeKey: 'barrierRail', ratios: [0.34] },
-    { id: 'barrier-crate', runtimeKey: 'barrierCrate', ratios: [0.34] },
-    { id: 'structure-pylon', runtimeKey: 'structurePylon', ratios: [0.34, 0.68] },
-    { id: 'structure-bastion', runtimeKey: 'structureBastion', ratios: [0.34, 0.68] },
-    { id: 'structure-reactor', runtimeKey: 'structureReactor', ratios: [0.34, 0.68] },
-    { id: 'structure-tower', runtimeKey: 'structureTower', ratios: [0.34, 0.68] },
-  ]) {
-    const decoded = decodePngRgba(`assets/world/${id}.png`);
-    const metadata = WORLD_ATLAS_MANIFEST[runtimeKey];
-    const geometry = WORLD_GEOMETRY[metadata.category];
-    const seamHeight = Math.max(6, Math.min(geometry.worldHeight * 0.018, 18));
-    for (const ratio of ratios) {
-      let count = 0;
-      let maxHorizontalRun = 0;
-        for (let frameIndex = 0; frameIndex < 21; frameIndex += 1) {
-        const evidence = generatedCyanEvidence(decoded, projectedWorldBoxBounds(
-          metadata,
-          frameIndex,
-          {
-            x: 0,
-            y: geometry.baseY + geometry.worldHeight * ratio,
-            z: metadata.detailFrontZ + 4,
-          },
-          { x: geometry.worldWidth * 0.48, y: seamHeight, z: 8 },
-        ));
-        count += evidence.count;
-        maxHorizontalRun = Math.max(maxHorizontalRun, evidence.maxHorizontalRun);
-      }
-      assert.ok(count >= 40, `${id} ${ratio} generated seam needs projected pixel evidence`);
-      assert.ok(maxHorizontalRun >= 8,
-        `${id} ${ratio} generated seam needs contiguous evidence, not incidental colormap cyan`);
-    }
-  }
-
-  const corridorEvidence = new Map();
-  for (const { id, referenceID, runtimeKey, details } of [
-    { id: 'corridor-low', referenceID: 'barrier-rail', runtimeKey: 'corridorLow', details: corridorLow },
-    { id: 'corridor-medium', referenceID: 'structure-pylon', runtimeKey: 'corridorMedium', details: corridorMedium },
-  ]) {
-    const candidate = decodePngRgba(`assets/world/${id}.png`);
-    const reference = decodePngRgba(`assets/world/${referenceID}.png`);
-    const metadata = WORLD_ATLAS_MANIFEST[runtimeKey];
-    const geometry = WORLD_GEOMETRY[metadata.category];
-    const bandEvidence = details.cyanBandY.map((bandY) => {
-      let count = 0;
-      for (let frameIndex = 0; frameIndex < 21; frameIndex += 1) {
-        count += countGeneratedCyanDifference(candidate, reference, projectedWorldBoxBounds(
-          metadata,
-          frameIndex,
-          { x: 0, y: bandY, z: metadata.detailFrontZ + 3 },
-          { x: geometry.worldWidth * 0.72, y: 12, z: 6 },
-        ));
-      }
-      assert.ok(count >= 100, `${id} generated band Y=${bandY} needs projected raster evidence`);
-      return count;
-    });
-    corridorEvidence.set(id, bandEvidence);
-
-  }
-  assert.equal(corridorEvidence.get('corridor-low').length, 1);
-  assert.equal(corridorEvidence.get('corridor-medium').length, 2);
-  const renderer = read('tools/render-world-assets.swift').toString('utf8');
-  assert.match(renderer, /let gold = flatMaterial\(srgb\(0xff, 0xd6, 0x6b\)/);
+  assert.ok(warmRatio('barrier-rail') >= 0.10, 'barrier-rail keeps large hazard striping');
+  assert.ok(warmRatio('barrier-crate') >= 0.02, 'barrier-crate keeps hazard markings');
+  assert.ok(warmRatio('drone-scout') >= 0.02, 'drone-scout keeps its sensor eye');
+  assert.ok(warmRatio('drone-striker') >= 0.02, 'drone-striker keeps its sensor eye');
 });
 
-test('gap-edge remains the byte-identical legacy 3584 by 512 road-edge atlas', () => {
+test('gap-edge remains the frozen 3584 by 512 road-edge atlas', () => {
   const relativePath = 'assets/world/gap-edge.png';
   assertPng(relativePath);
   assert.deepEqual(sipsDimensions(relativePath), { width: 3584, height: 512 });
-  assert.equal(sha256(relativePath), 'c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49');
+  assert.equal(sha256(relativePath), 'e2b9f8f23fb74ca88789e792d16c4a941d697f005e79bab89e58f0b2b4988b9d');
 });
 
 test('world-art provenance pins official free archives, CC0 licenses, and reproduction command', () => {
@@ -2195,11 +2073,11 @@ test('visual preloading reports every local asset and requires both player frame
   assert.equal(result.shipFramesReady, true);
   assert.equal(result.fallbackRequired, false);
   assert.equal(result.timedOut, false);
-  assert.equal(result.loadedCount, 26);
+  assert.equal(result.loadedCount, 38);
   assert.equal(result.failedCount, 0);
   assert.equal(result.assets.ship.neutral.loaded, true);
   assert.equal(result.assets.ship.thrust.loaded, true);
-  assert.equal(Object.keys(result.assets.ui).length, 4);
+  assert.equal(Object.keys(result.assets.ui).length, 15);
   assert.equal(result.assets.ui.hologramPanel.loaded, true);
   assert.equal(result.assets.ui.industrialMeter.loaded, true);
   assert.equal(Object.keys(result.assets.icons).length, 6);
@@ -2350,7 +2228,7 @@ test('visual preloading returns deterministic failure diagnostics on timeout', a
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 26);
+  assert.equal(result.failedCount, 38);
 });
 
 test('timeout seals image handlers so late completion cannot mutate terminal diagnostics', async () => {
@@ -2377,7 +2255,7 @@ test('timeout seals image handlers so late completion cannot mutate terminal dia
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(JSON.stringify(result, (key, value) => key === 'element' ? undefined : value), frozenSnapshot);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 26);
+  assert.equal(result.failedCount, 38);
 });
 
 test('visual preloading survives an Image constructor security failure', async () => {
@@ -2394,7 +2272,7 @@ test('visual preloading survives an Image constructor security failure', async (
   assert.equal(result.shipFramesReady, false);
   assert.equal(result.fallbackRequired, true);
   assert.equal(result.loadedCount, 0);
-  assert.equal(result.failedCount, 26);
+  assert.equal(result.failedCount, 38);
 });
 
 test('player frame selection uses thrust only when both frames are ready', () => {

@@ -343,7 +343,7 @@ function simulationSnapshot(sandbox) {
   })`, sandbox);
 }
 
-test('game wiring renders the V1.2 badge and localized pause panel without taking focus', () => {
+test('game wiring renders the V1.3 badge and localized pause panel without taking focus', () => {
   const { sandbox, documentObject, elements } = makeGameUiSandbox();
   const preservedFocus = elements.game;
   preservedFocus.focus();
@@ -360,12 +360,12 @@ test('game wiring renders the V1.2 badge and localized pause panel without takin
     pauseHidden: STATE.ui.pauseScreen.hidden,
   })`, sandbox);
   assert.deepEqual({ ...rendered }, {
-    versionText: 'V1.2',
-    versionLabel: 'Version 1.2',
+    versionText: 'V1.3',
+    versionLabel: 'Version 1.3',
     pauseTitle: 'GAME PAUSED',
     pauseHint: 'Press P to resume',
     pauseControl: 'Pause / resume: P',
-    fuelBurstControl: 'Fuel burst: fuel ≥ 75% + hold W / ↑ for 1s (costs 50% fuel)',
+    fuelBurstControl: 'Fuel burst: fuel ≥ 70% + hold W / ↑ for 1s (costs 40% fuel)',
     pauseHidden: false,
   });
   assert.equal(documentObject.activeElement, preservedFocus);
@@ -380,11 +380,11 @@ test('game wiring renders the V1.2 badge and localized pause panel without takin
     pauseHidden: STATE.ui.pauseScreen.hidden,
   })`, sandbox);
   assert.deepEqual({ ...localized }, {
-    versionLabel: '版本 1.2',
+    versionLabel: '版本 1.3',
     pauseTitle: '游戏已暂停',
     pauseHint: '按 P 继续',
     pauseControl: '暂停 / 继续：P',
-    fuelBurstControl: '燃料爆发：燃料 ≥ 75% 时按住 W / ↑ 1 秒（消耗 50% 燃料）',
+    fuelBurstControl: '燃料爆发：燃料 ≥ 70% 时按住 W / ↑ 1 秒（消耗 40% 燃料）',
     pauseHidden: false,
   });
   assert.equal(documentObject.activeElement, preservedFocus);
@@ -1821,6 +1821,44 @@ test('reduced-motion Canvas rendering freezes decorative parallax while normal r
   assert.notDeepEqual(capture(false, 0), capture(false, 100));
 });
 
+// v1.3.2 路面抗闪烁：mipmap 分级 + 纹素对齐（真实激活纹理路径，三个级别都要用到）
+test('road deck is pure vector and never samples the retired photo textures', () => {
+  const { sandbox } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  const result = JSON.parse(vm.runInContext(`(() => {
+    const mk = (tag) => ({ tag, naturalWidth: 1024, naturalHeight: 1024 });
+    STATE.visualAssets = {
+      assets: {
+        ui: {
+          roadSurface: { loaded: true, element: mk('L0-sharp') },
+          roadSurfaceMip1: { loaded: true, element: mk('L1-mid') },
+          roadSurfaceMip2: { loaded: true, element: mk('L2-far') },
+        },
+      },
+    };
+    const draws = [];
+    const gradient = { addColorStop() {} };
+    const context = new Proxy({
+      createLinearGradient() { return gradient; },
+      createRadialGradient() { return gradient; },
+      drawImage(img, sx, sy) { draws.push([img && img.tag, sy]); },
+    }, {
+      get(target, key) {
+        if (key in target) return target[key];
+        return () => {};
+      },
+      set() { return true; },
+    });
+    renderTrack(context);
+    return JSON.stringify({
+      taggedDraws: draws.filter((d) => d[0]).length,
+    });
+  })()`, sandbox));
+
+  assert.equal(result.taggedDraws, 0,
+    'vector deck must not drawImage the road photo textures (seam/banding/flicker source)');
+});
+
 test('reduced-motion freezes pickup animation and suppresses random ship trails and flame jitter', () => {
   const { sandbox } = makeGameUiSandbox();
   const capturePickup = (reduced, time) => JSON.parse(vm.runInContext(`(() => {
@@ -1942,6 +1980,51 @@ test('fuel and reward icons retain their silhouettes while sharing metal rims an
   }
 });
 
+test('reward pickups draw their realistic sprite when the asset is loaded, keeping glow and metal rim', () => {
+  const { sandbox } = makeGameUiSandbox();
+  const capture = (type, assetKey) => JSON.parse(vm.runInContext(`(() => {
+    STATE.width = 960;
+    STATE.height = 600;
+    STATE.time = 1;
+    const sprite = { naturalWidth: 512, naturalHeight: 512 };
+    STATE.visualAssets = { assets: { ui: { ${assetKey}: { loaded: true, element: sprite } } } };
+    const events = [];
+    const target = {
+      fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+      beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {}, ellipse() {},
+      fill() { events.push({ type: 'fill', style: typeof this.fillStyle === 'string' ? this.fillStyle : 'gradient' }); },
+      stroke() { events.push({ type: 'stroke', style: typeof this.strokeStyle === 'string' ? this.strokeStyle : 'gradient' }); },
+      drawImage(...args) { events.push({ type: 'drawImage', same: args[0] === sprite }); },
+      createLinearGradient() { return { addColorStop() {} }; },
+      createRadialGradient() {
+        return { addColorStop(offset, color) { events.push({ type: 'stop', offset, color }); } };
+      },
+      save() {}, restore() {}, translate() {}, rotate() {}, fillText() {},
+    };
+    const context = new Proxy(target, {
+      get(object, key) { return key in object ? object[key] : () => {}; },
+      set(object, key, value) { object[key] = value; return true; },
+    });
+    renderPickup(context, LANE_TYPE.${type}, 3, 10, 900, 1200);
+    return JSON.stringify(events);
+  })()`, sandbox));
+
+  const spriteGlow = {
+    BOOST: 'rgba(255,240,130,',
+    SLOW: 'rgba(190,110,255,',
+    TRIPLE: 'rgba(120,240,255,',
+    MAGNET: 'rgba(255,110,110,',
+  };
+  for (const [type, expected] of Object.entries(spriteGlow)) {
+    const assetKey = 'pickup' + type.charAt(0) + type.slice(1).toLowerCase();
+    const events = capture(type, assetKey);
+    assert.ok(events.some((event) => event.type === 'drawImage' && event.same), `${type} draws its sprite`);
+    assert.equal(events.filter((event) => event.type === 'drawImage').length, 1, `${type} draws exactly one sprite`);
+    assert.ok(events.some((event) => event.type === 'fill' && event.style === '#111a31'), `${type} keeps navy rim`);
+    assert.ok(events.some((event) => event.type === 'stop' && event.color.startsWith(expected)), `${type} keeps semantic glow`);
+  }
+});
+
 test('reduced-motion freezes event-horizon decoration, ship navigation lights, energy dashes, and orbit effects', () => {
   const { sandbox } = makeGameUiSandbox();
   const capture = (renderer, reduced, time) => JSON.parse(vm.runInContext(`(() => {
@@ -2055,7 +2138,7 @@ test('the game refreshes its cached command-center snapshot from active storage 
 
 // ---- v1.2.0 燃料爆发（Fuel Burst）：W/↑ 在地面且燃料 ≥75% 时主动超级加速 ----
 
-test('holding W for one second triggers fuel burst from the ground at or above 75 percent fuel', () => {
+test('holding W for one second triggers fuel burst from the ground at or above 70 percent fuel', () => {
   const { sandbox, windowObject } = makeGameUiSandbox();
   vm.runInContext('startGame()', sandbox);
   vm.runInContext('STATE.fuel = 100; STATE.speed = 20; STATE.tutorial.active = false;', sandbox);
@@ -2093,7 +2176,7 @@ test('holding W for one second triggers fuel burst from the ground at or above 7
   assert.equal(fired.jumpsUsed, 0, 'burst must not consume a jump');
   assert.ok(Math.abs(fired.prevSpeed - (20 + 0.4 * 0.99)) < 1e-6,
     `burst must remember the speed reached while charging, got ${fired.prevSpeed}`);
-  assert.ok(Math.abs(fired.fuel - (50 - 4.5 * fired.elapsed)) < 1e-6, `fuel ≈ 50 minus drain, got ${fired.fuel}`);
+  assert.ok(Math.abs(fired.fuel - (60 - 4.5 * fired.elapsed)) < 1e-6, `fuel ≈ 100 minus 40 cost minus drain, got ${fired.fuel}`);
   assert.ok(fired.burstT > 2.9 && fired.burstT <= 3, `burstT should start near 3s, got ${fired.burstT}`);
 });
 
@@ -2130,10 +2213,27 @@ test('a burst charge is cancelled silently when the conditions break mid-charge'
   })`, sandbox);
   assert.equal(snap.chargeT, 0, 'charge must cancel when BOOST takes over');
   assert.equal(snap.burstT, 0);
-  assert.ok(snap.fuel > 90, `no 50-percent burst fuel cost, got ${snap.fuel}`);
+  assert.ok(snap.fuel > 85, `no 40-percent burst fuel cost, got ${snap.fuel}`);
 
   windowObject.dispatch('keyup', { key: 'w', code: 'KeyW' });   // 松手不再补跳（蓄力已取消）
   assert.equal(vm.runInContext('STATE.jumpsUsed', sandbox), 0);
+});
+
+test('a burst charge survives fuel dropping below the threshold mid-charge and still fires', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  vm.runInContext('STATE.tutorial.active = false; STATE.fuel = 80;', sandbox);   // 关闭练习场（其会钉住燃料）；开始蓄力时满足 ≥70%
+
+  windowObject.dispatch('keydown', { key: 'w', code: 'KeyW' });
+  vm.runInContext('collectPickup = () => {}; pickupFuel = () => {}; updatePhysics(0.5)', sandbox);
+  vm.runInContext('STATE.fuel = 60; updatePhysics(0.6)', sandbox);   // 蓄力中跌破 70%：不再取消，蓄满 1.1s 触发
+
+  const snap = vm.runInContext(`({
+    chargeT: STATE.fuelBurstChargeT, burstT: STATE.fuelBurstT, fuel: STATE.fuel,
+  })`, sandbox);
+  assert.equal(snap.chargeT, 0, 'charge state resets after the burst fires');
+  assert.ok(snap.burstT > 0, `burst must fire once charging started above the threshold, got burstT=${snap.burstT}`);
+  assert.ok(snap.fuel < 60, `the 40-percent burst cost applies on trigger, got ${snap.fuel}`);
 });
 
 test('Space and K always jump even when fuel burst is ready', () => {
@@ -2155,7 +2255,7 @@ test('Space and K always jump even when fuel burst is ready', () => {
 });
 
 test('W stays inert below the fuel burst threshold or while airborne', () => {
-  for (const setup of ['STATE.fuel = 74;', 'STATE.fuel = 100; STATE.playerY = 500; STATE.jumpsUsed = 1;']) {
+  for (const setup of ['STATE.fuel = 69;', 'STATE.fuel = 100; STATE.playerY = 500; STATE.jumpsUsed = 1;']) {
     const { sandbox, windowObject } = makeGameUiSandbox();
     vm.runInContext('startGame()', sandbox);
     vm.runInContext(setup, sandbox);
@@ -2165,7 +2265,7 @@ test('W stays inert below the fuel burst threshold or while airborne', () => {
 
     const snap = vm.runInContext(`({ fuel: STATE.fuel, burstT: STATE.fuelBurstT, jumpsUsed: STATE.jumpsUsed, playerY: STATE.playerY })`, sandbox);
     assert.equal(snap.burstT, 0, `fuel burst must stay locked under setup: ${setup}`);
-    assert.ok(snap.fuel >= 74 - CONFIG_TOLERANCE, `no burst fuel cost under setup: ${setup}`);
+    assert.ok(snap.fuel >= 69 - CONFIG_TOLERANCE, `no burst fuel cost under setup: ${setup}`);
     assert.equal(snap.jumpsUsed, jumpsBefore, `W must not jump under setup: ${setup}`);
     assert.equal(snap.playerY, setup.includes('playerY = 500') ? 500 : 0, `W must not lift the ship under setup: ${setup}`);
   }
@@ -2285,7 +2385,7 @@ test('the first mission walks through all five tutorial phases and marks them se
     return JSON.stringify({
       seen,
       active: t.active,
-      stored: STATE.storage.getItem('skyroads_tutorial_seen'),
+      stored: STATE.storage.getItem('skyroads_tutorial_seen_v2'),
     });
   })()`, sandbox));
 
@@ -2295,7 +2395,7 @@ test('the first mission walks through all five tutorial phases and marks them se
 });
 
 test('a pilot who has seen the tutorial skips it on later missions', () => {
-  const stored = new Map([['skyroads_tutorial_seen', 'true']]);
+  const stored = new Map([['skyroads_tutorial_seen_v2', 'true']]);
   const storage = {
     getItem(key) { return stored.has(key) ? stored.get(key) : null; },
     setItem(key, value) { stored.set(key, String(value)); },
@@ -2325,7 +2425,7 @@ test('the tutorial times out without marking it seen, so later missions still of
     return JSON.stringify({
       beforeCap,
       active: STATE.tutorial.active,
-      stored: STATE.storage.getItem('skyroads_tutorial_seen'),
+      stored: STATE.storage.getItem('skyroads_tutorial_seen_v2'),
     });
   })()`, sandbox));
 
@@ -2359,7 +2459,7 @@ test('the tutorial no longer ends when the player leaves the warmup zone early',
 });
 
 test('the Training button forces the full tutorial even for a pilot who has seen it', () => {
-  const stored = new Map([['skyroads_tutorial_seen', 'true']]);
+  const stored = new Map([['skyroads_tutorial_seen_v2', 'true']]);
   const storage = {
     getItem(key) { return stored.has(key) ? stored.get(key) : null; },
     setItem(key, value) { stored.set(key, String(value)); },
