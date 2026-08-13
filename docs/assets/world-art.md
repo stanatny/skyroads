@@ -1,10 +1,24 @@
 # Orbital Defense world atlas provenance
 
-The runtime set contains twelve perspective-correct upright atlases plus the preserved legacy road-edge atlas. The upright atlases are deterministic offline renders of CC0 Kenney models downloaded on **2026-08-03**. Each is a `2240 × 960` transparent PNG containing 21 own-cell crops: yaw `[-80, -55, -30, 0, 30, 55, 80]` across three pitch rows `[20, 55, 80]`, with `320 × 320` cells. `assets/world/gap-edge.png` remains the byte-identical `3584 × 512` legacy road-edge atlas with seven `512 × 512` yaw frames `[-30, -20, -10, 0, 10, 20, 30]`. Source archives, extracted OBJ/MTL files, and textures are render inputs only and are not committed.
+## v4 realistic pipeline (current)
+
+The runtime set contains twelve perspective-correct upright atlases plus the road-edge atlas. Since v4 the upright atlases are synthesized from AI-generated master renders committed under `assets-src/masters/` (full generation prompts archived in `assets-src/PROMPTS.md`, anchor geometry in `assets-src/atlas-anchors.json`). Each is a `2240 × 960` transparent PNG containing 21 own-cell crops: yaw `[-80, -55, -30, 0, 30, 55, 80]` across three pitch rows `[20, 55, 80]`, with `320 × 320` cells. `assets/world/gap-edge.png` is a `3584 × 512` road-edge atlas with seven `512 × 512` yaw frames `[-30, -20, -10, 0, 10, 20, 30]`, composited from the same master set. The masters are original AI-generated images, not third-party stock; they are committed so the pipeline is reproducible offline.
+
+Rebuild everything from the repository root:
+
+```sh
+python3 tools/build-world-atlases.py
+```
+
+The builder erases generator watermarks, thresholds and trims alpha, derives the 21-view envelope from the frozen v3 shape metadata, unifies a 216-alpha edge ring, self-calibrates pixels-per-world-unit against measured center-frame spans, and rewrites the `GENERATED_UPRIGHT_ATLAS_DATA` block embedded in `src/world-art.js` (no runtime JSON request). It also composites `assets/ship/player-neutral.png` and `assets/ship/player-thrust.png` (512 × 384) and `assets/world/gap-edge.png`.
 
 The active gameplay runtime loads color-only derivatives from `assets/world/semantic/`. They preserve this source set's dimensions, frame order, alpha crops, and world-origin metadata and are reproduced by `node tools/recolor-semantic-assets.js`; see `docs/assets/semantic-spectrum.md`.
 
-## Official sources and licenses
+## Legacy v3 SceneKit pipeline (superseded)
+
+The v3 upright atlases were deterministic offline renders of CC0 Kenney models downloaded on **2026-08-03**. Source archives, extracted OBJ/MTL files, and textures were render inputs only and are not committed. The sections below freeze that provenance for the historical record.
+
+### Official sources and licenses
 
 | Source | Official page | Archive | Archive SHA-256 | License copy | License SHA-256 |
 | --- | --- | --- | --- | --- | --- |
@@ -13,7 +27,7 @@ The active gameplay runtime loads color-only derivatives from `assets/world/sema
 
 Both license files are exact byte-for-byte copies of the upstream **Creative Commons CC0 1.0 Universal** text. The archive links were obtained from each official Kenney page; no source-edition or third-party mirror was used.
 
-## Audited render inputs
+### Legacy v3 audited render inputs
 
 `tools/world-assets.json` maps every recipe to these exact source-relative paths and hashes. The renderer rejects absolute paths, network URLs, traversal, source-edition paths, unused inputs, and hash mismatches before SceneKit imports a model.
 
@@ -45,7 +59,7 @@ Both license files are exact byte-for-byte copies of the upstream **Creative Com
 | `space-kit/Models/OBJ format/turret_single.mtl` | `762ff003991e23328663179e8246dbe450f15f2467cc1947ff144c0ff1f49c8b` |
 | `space-kit/Models/OBJ format/turret_single.obj` | `2b3492cde9c9496d73963669d8d59e9f5ebccb9dcbf15dbf5336e7ca630c6a89` |
 
-## Recipes and rendering contract
+### Legacy v3 recipes and rendering contract
 
 | Atlas | Category | Source components |
 | --- | --- | --- |
@@ -71,7 +85,7 @@ Space Kit solid materials map by audited material name to warm white, graphite, 
 
 Generated atlas details use cyan #68e8ff, orange #ff8a42, and wall-high-only gold #ffd66b. Low walls have one cyan band at 34% of their height; medium and high walls have two at 34% and 68%, while high walls retain their gold beacons. Corridor atlases contain only their source-derived body and generated cyan bands: low at Y 390, medium at Y 460 and 910. Their recipes declare `runtimeContinuity: true`; runtime Canvas owns the 648-unit plinth, paired conduits at X ±18 and Y 540/1120, caps, and chevron. Connected ends meet the exact shared segment boundary, while open ends inset by 6 world units. No full-depth plinth or conduit is baked into the atlas, and no locale-dependent text is rendered.
 
-## Reproduction and determinism gate
+### Legacy v3 reproduction and determinism gate
 
 After validating the archive SHA-256 values above, extract them as space-kit and modular-space-kit below an external working directory. Run three fresh sequential processes:
 
@@ -242,24 +256,24 @@ The gate rejects any metadata, geometry, alpha, multi-channel, report, gap, or w
 
 The frozen A/B/D metadata, reports, and all thirteen PNGs were byte-identical. Independent C landed on the previously observed `drone-striker` renderer variance, so it was excluded; no tolerance was exercised by the frozen three-process set. Against the previous repository state, all eleven non-corridor PNGs remain byte-identical and only the two corridor atlases change.
 
-All 252 upright cells are non-empty, keep transparent own-cell borders, clear RGB under alpha zero, and preserve stable origin round trips. The twelve upright files total 1,911,996 bytes; including the unchanged gap atlas, the world set totals 2,054,364 bytes.
+All 252 upright cells are non-empty, keep transparent own-cell borders, clear RGB under alpha zero, and preserve stable origin round trips. The twelve upright files total 8,708,896 bytes; including the gap atlas, the world set totals 9,447,670 bytes.
 
 ## Derived outputs
 
 | Repository path | Bytes | SHA-256 |
 | --- | ---: | --- |
-| assets/world/drone-scout.png | 177265 | c700f47ecdccfe5f3400f5947cf5494331442c80a347205efa1caaca71d5ba82 |
-| assets/world/drone-striker.png | 159888 | 774ec0bae0db51b05d2dd5ce48e4449b576c246414a6578cefb07b301b47f376 |
-| assets/world/turret-sentry.png | 75925 | b7688afbe1767a772abf9f397fd524e5e241a6d1ffc29ff849ce948583615fb9 |
-| assets/world/turret-heavy.png | 81690 | bc915327eb3b8354e94d8f78a9a1e6a2f38208f30a15b55736a3126e414cb4a3 |
-| assets/world/barrier-rail.png | 215559 | 28a2f5ee63b70708e593c1f1e82ac6c5094fcc9c3464023004581c310f6f879a |
-| assets/world/barrier-crate.png | 177262 | c0b327ffbccdc0ba3880200ac9832fd42872f1c707951188a9c1df58000394f1 |
-| assets/world/structure-pylon.png | 178138 | 340d52a6371b6ed19107b977f6f12c4757156599dbc383d8cdcef39e9d088da5 |
-| assets/world/structure-bastion.png | 143230 | 5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9 |
-| assets/world/structure-reactor.png | 125535 | b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa |
-| assets/world/structure-tower.png | 174978 | ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436 |
-| assets/world/corridor-low.png | 221643 | 28b7ffa57ccf7feadce8910cbc6f18cc603d2532a6163e3367b0081c607df661 |
-| assets/world/corridor-medium.png | 180883 | 877199033c76c2fd5da5498e21c07d3e44d966408907ad423662fc2cc5166503 |
-| assets/world/gap-edge.png | 142368 | c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49 |
+| assets/world/drone-scout.png | 648369 | 4d54dd4fcb65b73251ca5650b8dea9a5b15b6f0fbbb6e7509b7456ebd17b0a45 |
+| assets/world/drone-striker.png | 485782 | f8d2c9e75885945a5f1c565b7588174e84f79eef6715e14bc9e011c3edc45b65 |
+| assets/world/turret-sentry.png | 899735 | 60d56394fa03d647e931acd011dcf981cc1135a0e68338489efd488ccaa08c9c |
+| assets/world/turret-heavy.png | 976273 | 20347c49fb5600a055d18130e111f4f9d4d1edd0a9f80442e3642b10df2e31ca |
+| assets/world/barrier-rail.png | 353667 | 154fcf7635e3cf3ae2f0d1c2911fd36580ccc473f2e0339791462b9ba3404817 |
+| assets/world/barrier-crate.png | 294453 | 3bba94628454ec4b5d3376e9baaca7a9ea18f91b7731e49d3d9842da053c2fcb |
+| assets/world/structure-pylon.png | 1355708 | 9613aab9ac2ce8dc42feb32b46ffd710d2eee4bc20b2c2e150668bca59f2af8a |
+| assets/world/structure-bastion.png | 486346 | dc62d0cc12e4a56d0400c221c516dca49126fff2953a3a79cca724e0aac99d78 |
+| assets/world/structure-reactor.png | 1099337 | 5feb3ae96dbcd5e5b5c7c8a2ffd03a9ea166b8f83cea0a59983b2dd2291d46a2 |
+| assets/world/structure-tower.png | 1149834 | fafc6f4b9ac8024b306ee9b68985a4a2caf6a7616038f5e899e34a2d54aed029 |
+| assets/world/corridor-low.png | 327912 | 9b1ad5e21583f904071fa5f4a337be23c754404d82ab5d1685b7e3d7d9887d09 |
+| assets/world/corridor-medium.png | 631480 | 271713afc18a2f2fbaaf7bace82adb171736316da9d04e41962247ea7f5b218c |
+| assets/world/gap-edge.png | 738774 | e2b9f8f23fb74ca88789e792d16c4a941d697f005e79bab89e58f0b2b4988b9d |
 
-The final majority contact sheets were inspected at original detail before freezing. All 252 upright views have complete silhouettes, coherent opposite-side yaw reveals, increasing top exposure across pitch rows, stable anchors, transparent padding, and no cull holes or clipping. Drones are directionally readable and smaller than buildings; low/medium/high and corridor silhouettes and accents remain distinct.
+The v4 contact sheets were inspected at original detail before freezing. All 252 upright views have complete silhouettes, coherent opposite-side yaw reveals, increasing top exposure across pitch rows, stable anchors, transparent padding, and no cull holes or clipping. Drones are directionally readable and smaller than buildings; low/medium/high and corridor silhouettes and accents remain distinct.

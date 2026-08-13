@@ -106,6 +106,7 @@ const CONFIG = {
 
   // ---- 赛道生成（可解性参数，详见第 4 节注释）----
   WARMUP_SEGMENTS: 24,         // 起跑热身区：全 ROAD（偶有燃料），放缓后略加长
+  TUTORIAL_SPEED_CAP: 16,      // 教学模式限速（段/秒）：练习场环境，给新手反应时间
   REACTION_SEGS: 8,            // 障碍簇/窄桥之间的全路面缓冲段数
                                //   推导：满速 24 段/秒 × 变道 0.18 秒 = 4.32 段/次变道，
                                //   8 段 ≈ 1.85 倍单次变道行程；核心保障仍是
@@ -165,6 +166,16 @@ const CONFIG = {
   MAGNET_DURATION: 8,          // 磁铁持续秒数
   MAGNET_RANGE: 3,             // 吸附车道半径：±3 车道内的燃料自动飞来（无视高度；7 车道几乎全幅）
   MAGNET_SEG_AHEAD: 2,         // 吸附纵深：当前段 + 前方 2 段
+
+  // ---- 燃料爆发（v1.2.0 新能力：满燃料主动超级加速）----
+  FUEL_BURST_MIN: 70,          // 触发燃料爆发所需最低燃料百分比（v1.3.1：门槛回调，避免过于频繁）
+  FUEL_BURST_COST: 40,         // 燃料爆发消耗燃料百分比（v1.3.1）
+  FUEL_BURST_DURATION: 3,      // 燃料爆发持续秒数
+  FUEL_BURST_SPEED: 36,        // 燃料爆发速度（复用 BOOST_SPEED）
+  FUEL_BURST_WARN_TIME: 1,     // 燃料爆发到期预警窗口（秒）
+  FUEL_BURST_CHARGE_TIME: 1,   // 按住 W/↑ 蓄力触发燃料爆发所需秒数（松手取消）
+  FUEL_BURST_GRACE: 1,         // 燃料爆发结束后的无敌保护秒数（金色护盾环提示），
+                               //   防止速度骤降瞬间撞障 —— 视听上"爆发结束"，操作上给一拍缓冲
 
   // ---- 战斗系统（K 跳/按住滑翔 · J 点按子弹 / 按住 1.5 秒蓄力导弹）----
   // 敌人是挂在 segment 上的独立实体（seg.enemies），不是 LANE_TYPE ——
@@ -235,6 +246,15 @@ const STATE = {
   shots: [],                   // 飞行中的子弹/导弹 { kind, seg, lanePosition }（发射瞬间连续位置）
   bulletCD: 0,                 // 子弹冷却剩余秒数
   boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
+  // 燃料爆发（v1.2.0）
+  fuelBurstT: 0,               // 燃料爆发剩余时间（秒，>0 期间无敌穿透 + 速度锁定 FUEL_BURST_SPEED）
+  fuelBurstPrevSpeed: 0,       // 燃料爆发前的速度（>0 表示待恢复，爆发后恢复到此速度）
+  fuelBurstWarnStage: 0,       // 燃料爆发预警已响到第几声（0..3，防重发）
+  fuelBurstChargeT: 0,         // W/↑ 按住蓄力进度（秒，>0 表示蓄力中；满 FUEL_BURST_CHARGE_TIME 自动触发）
+  fuelBurstChargeStage: 0,     // 燃料爆发蓄力提示音已响到第几声（防重发）
+  fuelBurstGraceT: 0,          // 燃料爆发结束后的无敌保护剩余时间（秒，FUEL_BURST_GRACE 倒计时）
+  // 燃料/计分
+  boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
   // 燃料/计分
   fuel: CONFIG.FUEL_MAX,
   distanceMeters: 0,
@@ -266,6 +286,10 @@ const STATE = {
   // 时间
   lastTime: 0,
   time: 0,                     // 全局时钟（任何模式下都累加），驱动物体动画
+  // v1.2.0 新手引导
+  tutorial: globalThis.Skyroads && globalThis.Skyroads.tutorial
+    ? globalThis.Skyroads.tutorial.createTutorialState()
+    : null,
 };
 
 function currentCanvasMotionPolicy() {
@@ -376,6 +400,8 @@ function clearAllInputState() {
   for (const code of Object.keys(KEYS)) delete KEYS[code];
   STATE.chargeT = 0;
   STATE.chargeStage = 0;
+  STATE.fuelBurstChargeT = 0;
+  STATE.fuelBurstChargeStage = 0;
   STATE.gliding = false;
   touchStart = null;
   syncPropulsionAudio();
@@ -452,15 +478,28 @@ window.addEventListener('keydown', (e) => {
   const direction = directionForCode(code);
   if (direction !== 0 && STATE.mode === 'PLAYING') {
     const result = pressDirection(STATE.movement, direction);
-    if (result.started || result.reversed) sfxLane();
+    if (result.started || result.reversed) {
+      sfxLane();
+      if (STATE.tutorial) STATE.tutorial.laneChanged = true;   // 键盘变道同样计入引导
+    }
     return;
   }
 
   if (!shouldHandleGameInput(gameInputDescriptor(e))) return;
   switch (code) {
-    case 'Space':
     case 'ArrowUp':
     case 'KeyW':
+      // v1.2.0：W/↑ 专用于燃料爆发蓄力（地面 + 燃料≥70% 时按住 1 秒触发），
+      // 不再承担跳跃 —— 条件不满足时静默忽略，避免"想爆发却变成跳"的误导。
+      // 跳跃只有 Space / K（触屏点按）。
+      if (canFuelBurst()) {
+        if (STATE.fuelBurstChargeT <= 0) {
+          STATE.fuelBurstChargeT = 0.001;   // 蓄力开始标记（updatePhysics 累积，keyup 取消）
+          STATE.fuelBurstChargeStage = 0;
+        }
+      }
+      break;
+    case 'Space':
     case 'KeyK':
       tryJump(); break;
     case 'KeyJ':
@@ -482,6 +521,13 @@ window.addEventListener('keyup', (e) => {
     const result = releaseDirection(STATE.movement, direction);
     if (STATE.mode === 'PLAYING' && result.reversed) sfxLane();
     return;
+  }
+  // W/↑ 松手：蓄力未满 FUEL_BURST_CHARGE_TIME(1)s → 静默取消蓄力（不再退化跳跃，
+  // W/↑ 已不承担跳跃功能）；蓄满由 updatePhysics 自动触发燃料爆发（蓄力状态已清零，此处不会再进）
+  if ((code === 'KeyW' || code === 'ArrowUp') && STATE.fuelBurstChargeT > 0
+      && !KEYS.KeyW && !KEYS.ArrowUp) {
+    STATE.fuelBurstChargeT = 0;
+    STATE.fuelBurstChargeStage = 0;
   }
   // J 松手发射：蓄满 CHARGE_TIME(1.5)s → 蓄力导弹；未满 → 普通子弹
   if (code === 'KeyJ' && STATE.mode === 'PLAYING' && STATE.chargeT > 0) {
@@ -556,7 +602,10 @@ window.addEventListener('touchcancel', () => { touchStart = null; }, { passive: 
 
 function trySwitchLane(dir) {
   const result = requestDiscreteLaneChange(STATE.movement, dir);
-  if (result.started) sfxLane();           // 轻 whoosh
+  if (result.started) {
+    sfxLane();           // 轻 whoosh
+    if (STATE.tutorial) STATE.tutorial.laneChanged = true;
+  }
 }
 
 function tryJump() {
@@ -567,6 +616,7 @@ function tryJump() {
     STATE.playerY = 0.01;
     STATE.jumpsUsed = 1;
     sfxJump();
+    if (STATE.tutorial) STATE.tutorial.jumped = true;
   } else if (STATE.jumpsUsed > 0 && STATE.jumpsUsed < (STATE.tripleT > 0 ? 3 : CONFIG.MAX_JUMPS)) {
     // 第二/第三段：空中跃升推进器点火，垂直速度重置为起跳初速。
     // 三段跳为青白星限时奖励（TRIPLE_DURATION 秒）；第三段顶点 3×879=2637 >
@@ -598,9 +648,44 @@ function tryJump() {
   }
 }
 
+// v1.2.0 燃料爆发是否可开始蓄力：地面上 + 燃料≥70% + 不在 BOOST / 爆发无敌状态。
+// v1.3.0：燃料门槛只在"开始蓄力"这一刻检查 —— 蓄力一旦开始，即使燃料跌破 70% 也照常触发。
+// W/↑ 在此状态下蓄力燃料爆发而非跳跃；Space/K 永远是跳跃。
+function canFuelBurst() {
+  return STATE.mode === 'PLAYING'
+    && STATE.playerY <= 0 && STATE.playerVY <= 0 && STATE.jumpsUsed === 0
+    && STATE.fuel >= CONFIG.FUEL_BURST_MIN
+    && STATE.boostT <= 0 && STATE.fuelBurstT <= 0;
+}
+
+// v1.3.0 蓄力中途取消条件（不含燃料门槛）：起跳 / 吃到 BOOST / 爆发已激活 / 离开 PLAYING。
+// 燃料在 1 秒蓄力期间跌破 70% 不再取消蓄力 —— 门槛只在 keydown 开始蓄力时检查一次。
+function fuelBurstChargeBroken() {
+  return STATE.mode !== 'PLAYING'
+    || STATE.playerY > 0 || STATE.playerVY > 0 || STATE.jumpsUsed !== 0
+    || STATE.boostT > 0 || STATE.fuelBurstT > 0;
+}
+
+// v1.2.0 燃料爆发：消耗 FUEL_BURST_COST(50%) 燃料，锁定 FUEL_BURST_SPEED(36 m/s)
+// 持续 FUEL_BURST_DURATION(3)s，期间无敌穿透，结束前 FUEL_BURST_WARN_TIME(1)s 预警。
+// v1.3.0：触发瞬间不再复查燃料门槛（蓄力开始即锁定资格），但仍要求状态有效。
+function tryFuelBurst() {
+  if (fuelBurstChargeBroken()) return;
+  STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_BURST_COST);
+  STATE.fuelFlash = 0.6;       // HUD 燃料条短暂变橙：提示"正在大量耗油"
+  STATE.fuelBurstPrevSpeed = STATE.speed;
+  STATE.fuelBurstT = CONFIG.FUEL_BURST_DURATION;
+  STATE.fuelBurstWarnStage = 0;
+  STATE.fuelBurstGraceT = 0;      // 新爆发覆盖上一轮的到期保护期
+  sfxFuelBurst();
+  syncPropulsionAudio();
+  if (STATE.tutorial) STATE.tutorial.fuelBursted = true;
+}
+
 // 跳跃键是否按住（滑翔判定用；KEYS 表 keydown/keyup 维护按住状态，重复按键已抑制）
 function jumpHeld() {
-  return !!(KEYS.Space || KEYS.ArrowUp || KEYS.KeyW || KEYS.KeyK);
+  // v1.2.0：W/↑ 已专用于燃料爆发蓄力，不再是跳跃键 —— 滑翔只认 Space/K
+  return !!(KEYS.Space || KEYS.KeyK);
 }
 
 // ---- 开火：J 点按子弹（无限，冷却 0.22s）/ 按住 1.5 秒蓄力导弹（松手发射）----
@@ -620,6 +705,7 @@ function fireBullet() {
     y: STATE.playerY,
   });
   sfxShoot();
+  if (STATE.tutorial) STATE.tutorial.shot = true;
 }
 
 // 蓄力导弹（J 按住蓄满 CHARGE_TIME(1.5)s 松手发射）：无弹药概念，蓄力时间就是成本
@@ -635,6 +721,7 @@ function fireMissile() {
     y: STATE.playerY,
   });
   sfxMissile();
+  if (STATE.tutorial) STATE.tutorial.shot = true;
 }
 
 // ============================================================
@@ -1441,6 +1528,58 @@ function sceneDepthTreatment(zRel) {
 }
 
 // 渲染跑道：从远到近（画家算法）
+// v1.3.1 虚空洞质感 v2「洞中有宇宙」：近黑井底 + 井内迷你星点（闪烁）+ 紫蓝星云雾
+// + 近缘青色 rim 光。深蓝紫色系与锈红岩面赛道天然区分；全部确定性相位，reduced-motion 冻结
+function drawGapAbyss(ctx, p1, p2, p3, p4, segIndex, lane, depth) {
+  const style = sceneStyle();
+  // 井体：近端井壁 → 远端井底的纵深渐变
+  const wellGrad = ctx.createLinearGradient(0, p1.y, 0, p3.y);
+  wellGrad.addColorStop(0, style.gap.well);
+  wellGrad.addColorStop(1, style.gap.core);
+  ctx.fillStyle = wellGrad;
+  quad(ctx, p1, p2, p3, p4); ctx.fill();
+  const glowA = Math.min(0.5, depth.seamAlpha * 2);
+  const t = visualAnimationTime();
+  const hash = (n) => {
+    const s = Math.sin(segIndex * 12.9898 + lane * 78.233 + n * 37.719) * 43758.5453;
+    return s - Math.floor(s);
+  };
+  // 星云雾：井底中央一团紫蓝色星云（青蓝芯 → 蓝 → 紫外缘），洞口里能看见"另一片宇宙"
+  const midX = (p1.x + p2.x + p3.x + p4.x) / 4;
+  const midY = (p1.y + p3.y) / 2;
+  const mistR = Math.max(6, Math.abs(p2.x - p1.x) * 0.85);
+  const mist = ctx.createRadialGradient(midX, midY, 0, midX, midY, mistR);
+  mist.addColorStop(0, 'rgba(93,232,255,' + (0.20 * glowA).toFixed(3) + ')');
+  mist.addColorStop(0.45, 'rgba(96,145,255,' + (0.13 * glowA).toFixed(3) + ')');
+  mist.addColorStop(1, 'rgba(160,93,255,0)');
+  ctx.fillStyle = mist;
+  quad(ctx, p1, p2, p3, p4); ctx.fill();
+  // 井内迷你星点：3 颗/段，哈希定位，随时间确定性闪烁
+  for (let k = 0; k < 3; k++) {
+    const laneF = 0.15 + 0.7 * hash(k);
+    const depthF = 0.2 + 0.6 * hash(k + 10);
+    const nx = p1.x + (p2.x - p1.x) * laneF;
+    const fx = p4.x + (p3.x - p4.x) * laneF;
+    const sx = nx + (fx - nx) * depthF;
+    const sy = p1.y + (p3.y - p1.y) * depthF;
+    const tw = 0.55 + 0.45 * Math.sin(t * 2.6 + hash(k + 20) * 6.28);
+    ctx.fillStyle = 'rgba(200,235,255,' + (tw * 0.8 * glowA).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(sx, sy, Math.max(0.8, 1.6 * (1 - depthF * 0.5)), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 近缘青色 rim 光：洞口边缘的危险提示，与 event-horizon 警示色系一致
+  const rim = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+  rim.addColorStop(0, 'rgba(93,232,255,0)');
+  rim.addColorStop(0.5, 'rgba(93,232,255,' + (0.55 * glowA).toFixed(3) + ')');
+  rim.addColorStop(1, 'rgba(93,232,255,0)');
+  ctx.strokeStyle = rim;
+  ctx.lineWidth = Math.max(1, Math.abs(p1.y - p3.y) * 0.08);
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+  ctx.stroke();
+}
+
 function renderTrack(ctx) {
   const track = STATE.track;
   const halfRoad = CONFIG.ROAD_WIDTH / 2;
@@ -1457,6 +1596,16 @@ function renderTrack(ctx) {
       gapType: LANE_TYPE.GAP,
     })
     : fallbackVisibleGapRegions(track, startIdx, endIdx);
+  // v1.3.5 纯矢量甲板（弃用照片纹理）：路面全部按段确定性绘制——
+  // 没有纹理采样，从原理上杜绝接缝错位 / 横纹板条 / 运动闪烁。
+  // 造型：暖锈色金属板（呼应火星主题）+ 板间凹槽 + 受光棱线 + 铆钉
+  const hexShade = (hex, amt) => {
+    const n = parseInt(hex.slice(1), 16);
+    const c = (v) => Math.max(0, Math.min(255, v + amt));
+    return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
+  };
+  const deckA = '#4d2f22';   // 深锈棕（与侧裙 #472c1e 同族，压暗以衬出飞船与道具）
+  const deckB = '#5a3929';   // 交替板块色，轻微提亮
 
   // 第一遍：路面梯形
   for (let i = startIdx; i >= endIdx; i--) {
@@ -1466,8 +1615,44 @@ function renderTrack(ctx) {
     if (zFar < 8) continue;
 
     const style = sceneStyle();
-    const baseDark = (Math.floor(i / 3) % 2 === 0) ? style.road.deckA : style.road.deckB;
+    const baseDark = (Math.floor(i / 3) % 2 === 0) ? deckA : deckB;
     const depthTreatment = sceneDepthTreatment((zNear + zFar) / 2);
+
+    // 矢量甲板铺底：覆盖该段全部非 GAP 车道（GAP 车道稍后由深渊效果覆盖）
+    if (seg.lanes.some((t) => t !== LANE_TYPE.GAP)) {
+      const q1 = project(-halfRoad, 0, zNear);
+      const q2 = project(halfRoad, 0, zNear);
+      const q3 = project(halfRoad, 0, zFar);
+      const q4 = project(-halfRoad, 0, zFar);
+      if (q1.visible && q3.visible) {
+        // 板体纵深渐变：远端沉、近端受光（ plates 有体积感而非平色 ）
+        const grad = ctx.createLinearGradient(0, q3.y, 0, q1.y);
+        grad.addColorStop(0, hexShade(baseDark, -30));
+        grad.addColorStop(0.7, baseDark);
+        grad.addColorStop(1, hexShade(baseDark, 18));
+        ctx.fillStyle = grad;
+        quad(ctx, q1, q2, q3, q4); ctx.fill();
+        // 远端板间凹槽（暗线把一块块板分开，强化纵深节奏）
+        ctx.strokeStyle = 'rgba(10,5,3,' + Math.min(1, depthTreatment.seamAlpha * 2.2).toFixed(3) + ')';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(q4.x, q4.y); ctx.lineTo(q3.x, q3.y);
+        ctx.stroke();
+        // 近端受光棱线（暖色亮边，板材"厚度"感）
+        ctx.strokeStyle = 'rgba(255,196,150,' + Math.min(1, depthTreatment.seamAlpha * 1.1).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y);
+        ctx.stroke();
+        // 深度雾衰减：远处段没入深空背景色
+        const fog = (1 - depthTreatment.worldAlpha) * 0.6;
+        if (fog > 0.02) {
+          ctx.fillStyle = `rgba(9,7,16,${Math.min(1, fog).toFixed(3)})`;
+          quad(ctx, q1, q2, q3, q4); ctx.fill();
+        }
+      }
+    }
+
     for (let lane = 0; lane < CONFIG.LANES; lane++) {
       const type = seg.lanes[lane];
       const xL = -halfRoad + lane * laneWidth;
@@ -1477,13 +1662,41 @@ function renderTrack(ctx) {
       const p3 = project(xR, 0, zFar);
       const p4 = project(xL, 0, zFar);
       if (!p3.visible) continue;
-      if (type === LANE_TYPE.GAP) continue;
+      if (type === LANE_TYPE.GAP) {
+        drawGapAbyss(ctx, p1, p2, p3, p4, i, lane, depthTreatment);
+        continue;
+      }
       if (!p1.visible) continue;
-      ctx.fillStyle = baseDark;
-      quad(ctx, p1, p2, p3, p4); ctx.fill();
-      // 车道分隔线
+      // v1.3.5 甲板质感①：奇偶车道明暗交替（打破整片平色）
+      if (lane % 2 === 1) {
+        ctx.fillStyle = 'rgba(255,255,255,0.045)';
+        quad(ctx, p1, p2, p3, p4); ctx.fill();
+      }
+      // v1.3.5 甲板质感②：车道内纵向拉丝高光（金属甲板"刷痕"）
+      ctx.strokeStyle = 'rgba(255,222,190,' + (depthTreatment.seamAlpha * 0.5).toFixed(3) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p1.x + (p2.x - p1.x) * 0.5, p1.y);
+      ctx.lineTo(p4.x + (p3.x - p4.x) * 0.5, p4.y);
+      ctx.stroke();
+      // v1.3.5 甲板质感③：近端两侧铆钉（随段高缩放，确定性位置，无动画）
+      {
+        const bh = p1.y - p4.y;
+        const r = Math.max(0.5, Math.min(2.6, bh * 0.05));
+        ctx.fillStyle = 'rgba(20,10,6,' + Math.min(1, depthTreatment.seamAlpha * 1.8).toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.arc(p1.x + (p2.x - p1.x) * 0.08, p1.y - bh * 0.28, r, 0, Math.PI * 2);
+        ctx.arc(p1.x + (p2.x - p1.x) * 0.92, p1.y - bh * 0.28, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 车道分隔线（v1.3.1 双层：柔和凹槽底 + 亮色细线，7 车道在岩面纹理上依然清晰可辨）
       if (lane > 0) {
-        ctx.strokeStyle = `rgba(${style.road.laneRgb},${depthTreatment.seamAlpha.toFixed(3)})`;
+        ctx.strokeStyle = 'rgba(6,10,16,' + Math.min(1, depthTreatment.seamAlpha * 1.6).toFixed(3) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p4.x, p4.y);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(${style.road.laneRgb},${Math.min(1, depthTreatment.seamAlpha * 1.3).toFixed(3)})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y); ctx.lineTo(p4.x, p4.y);
@@ -1491,17 +1704,48 @@ function renderTrack(ctx) {
       }
     }
 
-    // 横向跑道边线（增强纵深感）
-    if (i % 4 === 0) {
+    // 横向板块接缝（增强纵深感）：每段一条细亮棱，4 段主线更粗更亮。
+    // 不做深色暗缝——深色横线在岩面纹理上会被看成"裂缝漏空"
+    {
       const nearLeft = project(-halfRoad, 0, zNear);
       const nearRight = project(halfRoad, 0, zNear);
       if (nearLeft.visible) {
-        ctx.strokeStyle = `rgba(${style.road.edgeRgb},${(depthTreatment.seamAlpha * 0.78).toFixed(3)})`;
-        ctx.lineWidth = 1;
+        const strong = i % 4 === 0;
+        ctx.strokeStyle = `rgba(${style.road.edgeRgb},${(depthTreatment.seamAlpha * (strong ? 0.95 : 0.38)).toFixed(3)})`;
+        ctx.lineWidth = strong ? 1.5 : 1;
         ctx.beginPath();
         ctx.moveTo(nearLeft.x, nearLeft.y);
         ctx.lineTo(nearRight.x, nearRight.y);
         ctx.stroke();
+      }
+    }
+
+    // v1.3.1 悬浮路面侧裙：路面外缘向下延伸的岩层侧面，营造"浮空厚板"的 3D 体量。
+    // 边缘车道是虚空洞时该侧裙边断开（板块确实缺了一角）
+    {
+      const skirtDrop = 150;
+      for (const s of [-1, 1]) {
+        const edgeLane = s < 0 ? 0 : CONFIG.LANES - 1;
+        if (seg.lanes[edgeLane] === LANE_TYPE.GAP) continue;
+        const t1 = project(s * halfRoad, 0, zNear);
+        const t2 = project(s * halfRoad, 0, zFar);
+        const b2 = project(s * halfRoad, -skirtDrop, zFar);
+        const b1 = project(s * halfRoad, -skirtDrop, zNear);
+        if (!t1.visible || !t2.visible) continue;
+        const sideGrad = ctx.createLinearGradient(0, t2.y, 0, Math.max(b1.y, t2.y + 1));
+        sideGrad.addColorStop(0, '#472c1e');
+        sideGrad.addColorStop(0.45, '#241209');
+        sideGrad.addColorStop(1, '#050202');
+        ctx.fillStyle = sideGrad;
+        quad(ctx, t1, t2, b2, b1); ctx.fill();
+        // 侧裙顶部受光棱线（亮边把"厚板"从背景里托出来）
+        ctx.strokeStyle = 'rgba(255,205,155,' + Math.min(1, depthTreatment.seamAlpha * 1.5).toFixed(3) + ')';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(t1.x, t1.y); ctx.lineTo(t2.x, t2.y); ctx.stroke();
+        // 侧裙底部没入虚空的暗边
+        ctx.strokeStyle = 'rgba(0,0,0,' + Math.min(1, depthTreatment.seamAlpha * 2).toFixed(3) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(b1.x, b1.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
       }
     }
   }
@@ -1554,6 +1798,71 @@ function drawPickupMetalRim(ctx, point, radius) {
   ctx.stroke();
 }
 
+// v1.3.0 写实道具精灵（assets/pickups/，AI 生成金属装置图标）：
+// 加载成功时绘制写实精灵，失败时回退到下方矢量图标（剪影与语义色不变，游戏可读性不受素材影响）
+const PICKUP_SPRITE_KEYS = {
+  BOOST: 'pickupBoost',
+  SLOW: 'pickupSlow',
+  TRIPLE: 'pickupTriple',
+  MAGNET: 'pickupMagnet',
+};
+const PICKUP_SPRITE_GLOW = {
+  BOOST: ['255,240,130', '150,230,255'],
+  SLOW: ['190,110,255', '190,110,255'],
+  TRIPLE: ['120,240,255', '120,240,255'],
+  MAGNET: ['255,110,110', '255,110,110'],
+};
+
+function drawPickupSprite(ctx, sprite, type, point, radius, animationTime, phase) {
+  const [inner, outer] = PICKUP_SPRITE_GLOW[type];
+  const pulse = 0.75 + 0.25 * Math.sin(animationTime * 4 + phase);
+  // v1.3.1 冲天光柱：老远就能看见"那里有道具"，光柱颜色即道具语义色
+  const beamW = radius * (0.5 + 0.12 * pulse);
+  const beamTop = point.y - radius * 9;
+  const beam = ctx.createLinearGradient(point.x, beamTop, point.x, point.y);
+  beam.addColorStop(0, 'rgba(' + outer + ',0)');
+  beam.addColorStop(0.7, 'rgba(' + inner + ',' + (0.16 * pulse).toFixed(3) + ')');
+  beam.addColorStop(1, 'rgba(' + inner + ',' + (0.5 * pulse).toFixed(3) + ')');
+  ctx.fillStyle = beam;
+  ctx.fillRect(point.x - beamW / 2, beamTop, beamW, radius * 9);
+  // 加强版大光晕（比普通障碍亮一个量级，与赛道底色拉开）
+  const glow = ctx.createRadialGradient(point.x, point.y, radius * 0.2, point.x, point.y, radius * 3.0);
+  glow.addColorStop(0, 'rgba(' + inner + ',' + (0.62 * pulse).toFixed(3) + ')');
+  glow.addColorStop(0.5, 'rgba(' + outer + ',' + (0.3 * pulse).toFixed(3) + ')');
+  glow.addColorStop(1, 'rgba(' + outer + ',0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius * 3.0, 0, Math.PI * 2);
+  ctx.fill();
+  drawPickupMetalRim(ctx, point, radius);
+  // 亮白描边环：把道具从深色赛道背景上"抠"出来
+  ctx.strokeStyle = 'rgba(255,255,255,' + (0.5 + 0.3 * pulse).toFixed(3) + ')';
+  ctx.lineWidth = Math.max(1.5, radius * 0.09);
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius * 1.36, 0, Math.PI * 2);
+  ctx.stroke();
+  const bob = Math.sin(animationTime * 3 + phase) * 0.06;
+  const scale = 1 + 0.05 * Math.sin(animationTime * 4.4 + phase);
+  const size = radius * 3.2 * scale;
+  ctx.save();
+  ctx.translate(point.x, point.y);
+  ctx.rotate(bob);
+  ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+  ctx.restore();
+  // 环绕能量火花（2 颗对转，确定性相位，reduced-motion 下随 animationTime 冻结）
+  for (let k = 0; k < 2; k++) {
+    const angle = animationTime * 2.4 + phase + k * Math.PI;
+    ctx.fillStyle = 'rgba(255,255,255,' + (0.6 + 0.3 * Math.sin(animationTime * 6 + k)).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(
+      point.x + Math.cos(angle) * radius * 1.62,
+      point.y + Math.sin(angle) * radius * 0.95,
+      Math.max(1, radius * 0.09), 0, Math.PI * 2,
+    );
+    ctx.fill();
+  }
+}
+
 function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
   const cx = laneCenterX(lane);
   const zMid = (zNear + zFar) / 2;
@@ -1565,6 +1874,13 @@ function renderPickup(ctx, type, lane, segIndex, zNear, zFar) {
   const u = p.scale * STATE.width / 2;
   const R = Math.max(2, 110 * u);
   const spin = animationTime * 2 + phase;
+
+  const spriteKey = PICKUP_SPRITE_KEYS[type];
+  const sprite = spriteKey ? hudAsset(spriteKey) : null;
+  if (sprite) {
+    drawPickupSprite(ctx, sprite, type, p, R, animationTime, phase);
+    return;
+  }
 
   if (type === LANE_TYPE.BOOST) {
     // 黄/青白色光晕（呼吸）
@@ -2773,6 +3089,13 @@ function drawThrusterJet(ctx, {
   outerAlpha,
   airflow = false,
 }) {
+  // v1.3.3 喷流动感：双频锯齿抖动（一阵一阵地猛喷）+ 尖端摆动 + 分叉焰尖 + 马赫环。
+  // visualAnimationTime 在 reduced-motion 下为 0，自动冻结为稳定形态
+  const jt = visualAnimationTime();
+  const flick = 1 + 0.14 * Math.sin(jt * 31 + engineX * 0.13) + 0.07 * Math.sin(jt * 53 + engineX * 0.07);
+  const jetSway = Math.sin(jt * 19 + engineX * 0.11) * 0.05 * halfWidth;
+  length = length * flick;
+  const tipX = engineX + jetSway;
   const bloom = ctx.createRadialGradient(
     engineX, engineY + length * 0.20, 0,
     engineX, engineY + length * 0.26, halfWidth * (airflow ? 0.58 : 0.48),
@@ -2794,18 +3117,10 @@ function drawThrusterJet(ctx, {
   ctx.fillStyle = outerColor.replace(/,[^,]+\)$/, `,${outerAlpha.toFixed(3)})`);
   ctx.beginPath();
   ctx.moveTo(engineX - 0.15 * halfWidth, engineY);
-  ctx.quadraticCurveTo(
-    engineX - 0.13 * halfWidth,
-    engineY + length * 0.46,
-    engineX,
-    engineY + length,
-  );
-  ctx.quadraticCurveTo(
-    engineX + 0.13 * halfWidth,
-    engineY + length * 0.46,
-    engineX + 0.15 * halfWidth,
-    engineY,
-  );
+  ctx.quadraticCurveTo(engineX - 0.12 * halfWidth, engineY + length * 0.38, engineX - 0.06 * halfWidth + jetSway * 0.6, engineY + length * 0.74);
+  ctx.quadraticCurveTo(engineX - 0.02 * halfWidth + jetSway * 0.8, engineY + length * 0.88, tipX, engineY + length);
+  ctx.quadraticCurveTo(engineX + 0.05 * halfWidth + jetSway * 0.7, engineY + length * 0.84, engineX + 0.07 * halfWidth, engineY + length * 0.70);
+  ctx.quadraticCurveTo(engineX + 0.12 * halfWidth, engineY + length * 0.38, engineX + 0.15 * halfWidth, engineY);
   ctx.closePath();
   ctx.fill();
 
@@ -2815,7 +3130,7 @@ function drawThrusterJet(ctx, {
   ctx.quadraticCurveTo(
     engineX - 0.07 * halfWidth,
     engineY + length * 0.43,
-    engineX,
+    engineX + jetSway * 0.6,
     engineY + length * 0.72,
   );
   ctx.quadraticCurveTo(
@@ -2830,10 +3145,22 @@ function drawThrusterJet(ctx, {
   ctx.fillStyle = 'rgba(255,255,255,0.960)';
   ctx.beginPath();
   ctx.moveTo(engineX - 0.038 * halfWidth, engineY);
-  ctx.lineTo(engineX, engineY + length * (airflow ? 0.43 : 0.50));
+  ctx.lineTo(engineX + jetSway * 0.4, engineY + length * (airflow ? 0.43 : 0.50));
   ctx.lineTo(engineX + 0.038 * halfWidth, engineY);
   ctx.closePath();
   ctx.fill();
+
+  // 马赫环：喷流内 2 枚压缩波亮斑，独立相位闪烁（火箭尾焰的动感标志）
+  for (let k = 0; k < 2; k++) {
+    const pos = 0.34 + k * 0.24;
+    const ra = (0.30 + 0.30 * Math.sin(jt * 43 + k * 2.2 + engineX * 0.09)) * outerAlpha;
+    if (ra < 0.02) continue;
+    const rw = 0.045 * halfWidth * (1 - k * 0.2);
+    ctx.fillStyle = 'rgba(255,250,225,' + Math.max(0, ra).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.ellipse(engineX + jetSway * pos, engineY + length * pos, rw, rw * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (airflow) {
     ctx.strokeStyle = 'rgba(144,242,255,0.500)';
@@ -2852,6 +3179,115 @@ function drawThrusterJet(ctx, {
   }
   void shipHeight;
 }
+
+// v1.3.1 主引擎火焰（炫酷版）：多层泪滴焰体（外橙红 → 中橙黄 → 白热芯，全程渐隐）
+// + 喷口光晕 + 两侧摇曳火舌 + 尾迹火星。摇曳由 visualAnimationTime 驱动，
+// reduced-motion 下冻结为稳定形态
+function drawMainEngineFlame(ctx, exX, nozzleY, W2, H, side) {
+  const t = visualAnimationTime();
+  // 动感①：速度越大火焰越长（巡航 0.82x → 满速 1.37x）；
+  // 动感②：低频"咆哮脉冲"（三次方包络）让火焰一阵一阵地猛喷，而不是匀速摇曳
+  const speedK = 0.82 + 0.55 * Math.min(1, (STATE.speed || 0) / CONFIG.MAX_SPEED);
+  const roar = 1 + 0.22 * Math.pow(Math.max(0, Math.sin(t * 3.1 + side * 1.7)), 3);
+  const fl = H * (0.55
+    + 0.13 * Math.sin(t * 23 + side * 2.1)
+    + 0.07 * Math.sin(t * 41 + side * 0.7)
+    + 0.04 * Math.sin(t * 67 + side * 3.3)) * speedK * roar;
+  const sway = Math.sin(t * 17 + side * 1.3) * 0.07 * W2;
+  // ① 喷口光晕（大范围径向橙光，把引擎区域"点亮"）
+  const glow = ctx.createRadialGradient(exX, nozzleY + fl * 0.18, 0, exX, nozzleY + fl * 0.18, W2 * 0.6);
+  glow.addColorStop(0, 'rgba(255,160,70,0.45)');
+  glow.addColorStop(0.5, 'rgba(255,100,40,0.15)');
+  glow.addColorStop(1, 'rgba(255,100,40,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(exX, nozzleY + fl * 0.18, W2 * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+  // ② 喷口蓝色焰根：火箭喷流紧贴喷口的高温蓝白区（酷炫感的核心来源之一）
+  {
+    const root = ctx.createRadialGradient(exX, nozzleY + fl * 0.03, 0, exX, nozzleY + fl * 0.03, W2 * 0.16);
+    root.addColorStop(0, 'rgba(200,230,255,0.95)');
+    root.addColorStop(0.45, 'rgba(130,190,255,0.50)');
+    root.addColorStop(1, 'rgba(90,150,255,0)');
+    ctx.fillStyle = root;
+    ctx.beginPath();
+    ctx.ellipse(exX, nozzleY + fl * 0.03, W2 * 0.16, W2 * 0.20, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // ③ 焰体四层：共用泪滴曲线，宽度/长度/颜色逐层收拢；三段渐变让衰减更自然
+  const layers = [
+    { w: 0.34, len: 1.00, c0: 'rgba(255,80,20,0.55)', cm: 'rgba(255,110,35,0.30)', c1: 'rgba(255,60,20,0)' },
+    { w: 0.24, len: 0.78, c0: 'rgba(255,150,50,0.88)', cm: 'rgba(255,175,70,0.50)', c1: 'rgba(255,120,40,0)' },
+    { w: 0.15, len: 0.55, c0: 'rgba(255,215,120,0.96)', cm: 'rgba(255,195,95,0.60)', c1: 'rgba(255,150,60,0)' },
+    { w: 0.075, len: 0.34, c0: 'rgba(255,255,245,1)', cm: 'rgba(255,242,195,0.75)', c1: 'rgba(255,220,150,0)' },
+  ];
+  for (const L of layers) {
+    // 宽度也带闪烁 + 分叉尾（W 形焰尖）： smooth 泪滴会像"橙色水滴"，分叉才有火焰的舔舐感
+    const flick = 1 + 0.10 * Math.sin(t * 37 + L.len * 7 + side * 1.9);
+    const lw = L.w * W2 * flick;
+    const ll = fl * L.len;
+    const tipX = exX + sway * L.len * 1.5;
+    const grad = ctx.createLinearGradient(exX, nozzleY, tipX, nozzleY + ll);
+    grad.addColorStop(0, L.c0);
+    grad.addColorStop(0.55, L.cm);
+    grad.addColorStop(1, L.c1);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(exX - lw, nozzleY);
+    ctx.quadraticCurveTo(exX - lw * 0.72 + sway * 0.3, nozzleY + ll * 0.38, exX - lw * 0.34 + sway * 0.8, nozzleY + ll * 0.72);
+    ctx.quadraticCurveTo(exX - lw * 0.12 + sway, nozzleY + ll * 0.86, tipX - lw * 0.05, nozzleY + ll);
+    ctx.quadraticCurveTo(tipX + lw * 0.16 + sway * 0.2, nozzleY + ll * 0.84, exX + lw * 0.36 + sway * 0.8, nozzleY + ll * 0.70);
+    ctx.quadraticCurveTo(exX + lw * 0.72 + sway * 0.3, nozzleY + ll * 0.38, exX + lw, nozzleY);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // ④ 马赫环：焰体内 3 枚压缩波亮斑（真实火箭喷流的标志性细节），独立相位闪烁
+  for (let k = 0; k < 3; k++) {
+    const pos = 0.28 + k * 0.22;
+    const ringW = (0.105 - k * 0.022) * W2;
+    const ra = (0.38 + 0.30 * Math.sin(t * 47 + k * 2.3 + side * 1.1)) * (1 - k * 0.18);
+    ctx.fillStyle = 'rgba(255,246,215,' + Math.max(0, ra).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.ellipse(exX + sway * pos * 1.5, nozzleY + fl * pos, ringW, ringW * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // ⑤ 两侧摇曳火舌（独立相位，比主焰细、略短）
+  for (const ts of [-1, 1]) {
+    const tongueLen = fl * (0.62 + 0.14 * Math.sin(t * 29 + ts * 2.4 + side));
+    const tx = exX + ts * 0.17 * W2;
+    const tw = 0.05 * W2;
+    const tSway = Math.sin(t * 31 + ts * 1.7 + side * 0.9) * 0.06 * W2;
+    const tg = ctx.createLinearGradient(tx, nozzleY, tx + tSway, nozzleY + tongueLen);
+    tg.addColorStop(0, 'rgba(255,170,75,0.60)');
+    tg.addColorStop(0.6, 'rgba(255,120,45,0.30)');
+    tg.addColorStop(1, 'rgba(255,90,30,0)');
+    ctx.fillStyle = tg;
+    ctx.beginPath();
+    ctx.moveTo(tx - tw, nozzleY);
+    ctx.quadraticCurveTo(tx - tw + tSway * 0.5, nozzleY + tongueLen * 0.5, tx + tSway, nozzleY + tongueLen);
+    ctx.quadraticCurveTo(tx + tw + tSway * 0.5, nozzleY + tongueLen * 0.5, tx + tw, nozzleY);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // ⑥ 尾迹火星：4 颗/引擎，带一小段上溯尾迹线（比单纯圆点更有"迸溅"感）
+  for (let k = 0; k < 4; k++) {
+    const cyc = (t * 1.7 + k * 0.25 + side * 0.21) % 1;
+    const sx = exX + sway + Math.sin(t * 13 + k * 2.6 + side) * 0.09 * W2 * cyc;
+    const sy = nozzleY + fl * (0.7 + 0.6 * cyc);
+    const alpha = 0.75 * (1 - cyc);
+    ctx.strokeStyle = 'rgba(255,190,110,' + (alpha * 0.6).toFixed(3) + ')';
+    ctx.lineWidth = Math.max(0.8, (1 - cyc) * 1.6);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - 5 * (1 - cyc));
+    ctx.lineTo(sx, sy);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,215,140,' + alpha.toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(sx, sy, Math.max(0.8, (1 - cyc) * 2.4), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 
 function drawSustainedThrusterJets(ctx, geometry, feedback) {
   if (feedback.mode !== 'glide' && feedback.mode !== 'boost') return;
@@ -2960,6 +3396,18 @@ function renderPlayer(ctx) {
     ctx.beginPath();
     ctx.ellipse(sh.x, sh.y, 170 * su * hRatio, 45 * su * hRatio, 0, 0, Math.PI * 2);
     ctx.fill();
+    // v1.3.3 超级形态：战舰落地一团金色能量光池（地面被点亮的"变强"感）
+    if (STATE.tripleT > 0) {
+      const poolPulse = canvasPulse(0.8, 0.2, 6);
+      const pool = ctx.createRadialGradient(sh.x, sh.y, 0, sh.x, sh.y, 200 * su * hRatio);
+      pool.addColorStop(0, 'rgba(255,205,95,' + (0.30 * hRatio * poolPulse).toFixed(3) + ')');
+      pool.addColorStop(0.6, 'rgba(255,170,60,' + (0.12 * hRatio * poolPulse).toFixed(3) + ')');
+      pool.addColorStop(1, 'rgba(255,170,60,0)');
+      ctx.fillStyle = pool;
+      ctx.beginPath();
+      ctx.ellipse(sh.x, sh.y, 200 * su * hRatio, 56 * su * hRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // 飞船本体：屏幕位置由 project() 计算（zRel = CAMERA_BACK，即玩家当前段）
@@ -2987,7 +3435,7 @@ function renderPlayer(ctx) {
       size: 1 + Math.random() * 2.5,
       streak: false,
     });
-    if (STATE.boostT > 0) {
+    if (STATE.boostT > 0 || STATE.fuelBurstT > 0) {
       for (let k = 0; k < 3; k++) {
         STATE.trail.push({
           x: cx + (Math.random() - 0.5) * 1.4 * W2,
@@ -3081,32 +3529,86 @@ function renderPlayer(ctx) {
   ctx.transform(1, 0, laneOff * 0.030, 1, 0, 0);          // 剪切：x 随 y 偏移
 
   const presentation = globalThis.Skyroads.presentation;
-  const energized = STATE.boostT > 0 || STATE.tripleT > 0 || STATE.playerY > 0 || STATE.jumpBurst > 0;
+  const energized = STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.tripleT > 0 || STATE.playerY > 0 || STATE.jumpBurst > 0;
   const visualPlan = presentation.playerVisualLayerPlan(STATE.visualAssets, {
     energized,
     chargeActive: STATE.chargeT > 0 && STATE.mode === 'PLAYING',
-    boostActive: STATE.boostT > 0,
+    boostActive: STATE.boostT > 0 || STATE.fuelBurstT > 0,
     superActive: STATE.tripleT > 0,
   });
   const thrusterFeedback = presentation.thrusterFeedbackState({
     gliding: STATE.gliding && STATE.fuel > 0 && STATE.mode === 'PLAYING',
     jumpBurst: STATE.jumpBurst,
     jumpBurstTier: STATE.jumpBurstTier,
-    boostActive: STATE.boostT > 0,
+    boostActive: STATE.boostT > 0 || STATE.fuelBurstT > 0,
     superActive: STATE.tripleT > 0,
     reducedMotion: STATE.reducedMotion,
   });
   const shipFrame = visualPlan.shipFrame;
   const spanK = STATE.gliding ? 1.15 : 1;
   drawSustainedThrusterJets(ctx, { halfWidth: W2, height: H }, thrusterFeedback);
+
+  // v1.2.0 燃料爆发蓄气特效（船体下层）：金色能量环随进度收缩增强 + 环绕火花向船体汇聚
+  if (STATE.fuelBurstChargeT > 0) {
+    const chargeRatio = Math.max(0, Math.min(1, STATE.fuelBurstChargeT / CONFIG.FUEL_BURST_CHARGE_TIME));
+    const chargeTime = visualAnimationTime();
+    const auraPulse = 0.55 + 0.45 * chargeRatio;
+    const auraR = H * (1.5 - 0.55 * chargeRatio);          // 光环随蓄力收拢
+    const aura = ctx.createRadialGradient(0, -0.3 * H, auraR * 0.15, 0, -0.3 * H, auraR);
+    aura.addColorStop(0, `rgba(255,214,110,${(0.34 * auraPulse).toFixed(3)})`);
+    aura.addColorStop(0.65, `rgba(255,190,80,${(0.16 * auraPulse).toFixed(3)})`);
+    aura.addColorStop(1, 'rgba(255,190,80,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(0, -0.3 * H, auraR, 0, Math.PI * 2);
+    ctx.fill();
+    // 环绕火花：沿椭圆轨道旋转并向船体收拢（reduced-motion 下静止、数量减半）
+    const sparkCount = STATE.reducedMotion ? 4 : 8;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = chargeTime * 4.2 + (i / sparkCount) * Math.PI * 2;
+      const orbit = H * (1.6 - 0.9 * chargeRatio) * (1 + 0.06 * Math.sin(chargeTime * 9 + i));
+      const sparkAlpha = 0.35 + 0.55 * chargeRatio;
+      ctx.fillStyle = `rgba(255,224,140,${sparkAlpha.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(Math.cos(angle) * orbit, -0.3 * H + Math.sin(angle) * orbit * 0.55, 1.2 + 1.4 * chargeRatio, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // v1.2.0 燃料爆发到期保护期：金色脉冲护盾环，明确提示"短暂无敌、即将恢复正常速度"
+  if (STATE.fuelBurstGraceT > 0) {
+    const gracePulse = canvasPulse(0.5, 0.5, 12);
+    const graceFade = Math.min(1, STATE.fuelBurstGraceT / (CONFIG.FUEL_BURST_GRACE * 0.4));  // 末尾 40% 渐隐
+    ctx.globalAlpha = (0.3 + 0.5 * gracePulse) * graceFade;
+    ctx.strokeStyle = '#ffd76a';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(0, -0.3 * H, H * (1.05 + 0.18 * gracePulse), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   if (shipFrame) {
     const frameRect = presentation.computeShipDrawRect(STATE.width, STATE.height, 4 / 3);
+    // v1.3.3 超级形态：金色战舰视觉体积放大 1.4 倍（仅表现层放大，碰撞仍占一格）
+    const superScale = STATE.tripleT > 0 ? 1.4 : 1;
+    const frameW = frameRect.width * superScale;
+    const frameH = frameRect.height * superScale;
+    // v1.3.1 精灵模式同样绘制主引擎火焰（画在船体贴图下层，火焰自引擎后方喷出）；
+    // glide/boost 由持续矢量喷流负责，避免双重火焰。
+    // v1.3.3 超级形态金色战舰自带金色喷焰，矢量橙焰跳过，避免撞色
+    const drawSpriteFlame = thrusterFeedback.mode !== 'glide' && thrusterFeedback.mode !== 'boost' && STATE.tripleT <= 0;
+    if (drawSpriteFlame) {
+      for (const s of [-1, 1]) {
+        drawMainEngineFlame(ctx, s * 0.42 * W2, 0.18 * H, W2, H, s);
+      }
+    }
     ctx.drawImage(
       shipFrame,
-      -frameRect.width / 2,
-      -frameRect.height * 0.75,
-      frameRect.width,
-      frameRect.height,
+      -frameW / 2,
+      -frameH * 0.75,
+      frameW,
+      frameH,
     );
   } else {
   // ---- 双引擎舱 + 双主尾焰（橙色主引擎；超级加速期间尾焰拉长变大）----
@@ -3114,19 +3616,7 @@ function renderPlayer(ctx) {
   for (const s of [-1, 1]) {
     const exX = s * 0.42 * W2;
     if (drawBaseFlame) {
-      const fl = (0.40 + decorativeRandom() * 0.22) * H;
-      ctx.fillStyle = '#ff8833';
-      ctx.beginPath();
-      ctx.moveTo(exX - 0.12 * W2, 0.18 * H);
-      ctx.lineTo(exX, 0.18 * H + fl);
-      ctx.lineTo(exX + 0.12 * W2, 0.18 * H);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#ffd9a0';
-      ctx.beginPath();
-      ctx.moveTo(exX - 0.06 * W2, 0.18 * H);
-      ctx.lineTo(exX, 0.18 * H + fl * 0.55);
-      ctx.lineTo(exX + 0.06 * W2, 0.18 * H);
-      ctx.closePath(); ctx.fill();
+      drawMainEngineFlame(ctx, exX, 0.18 * H, W2, H, s);
     }
     // 引擎舱体（金属纵向渐变装甲）
     const nacG = ctx.createLinearGradient(exX, -0.08 * H, exX, 0.22 * H);
@@ -3346,63 +3836,29 @@ function renderPlayer(ctx) {
 
   drawJumpIgnitionBurst(ctx, { halfWidth: W2, height: H }, thrusterFeedback);
 
-  // ---- 超级形态变身：金白能量装甲（顶部双光刃 + 金色翼缘辉光 + 金座舱 +
-  //      金色流动能量中脊）。预警期（tripleT < TRIPLE_WARN_TIME）与光环同频
-  //      time×10 急促闪烁；常驻期 time×6 慢脉冲，一眼可辨"我是超级形态" ----
+  // ---- 超级形态变身 v1.3.3「黄金战舰换模」：变身的核心是整船换成金色凤凰战舰
+  //      （player-super.png，见 resolvePlayerShipFrame 的 super 分支），画布层只保留
+  //      克制的仪式性点缀：双反向旋转符环 + 三颗轨道能量球。
+  //      预警期（tripleT < TRIPLE_WARN_TIME）time×10 急促闪烁；常驻期 time×6 慢脉冲 ----
   if (visualPlan.layers.includes('super-surface')) {
     const sWarn = STATE.tripleT < CONFIG.TRIPLE_WARN_TIME;
     const sF = sWarn ? canvasPulse(0.55, 0.45, 10) : canvasPulse(0.85, 0.15, 6);
-    // 顶部双光刃（能量鳍，自座舱后方向斜上方展开，金色半透明）
-    for (const s of [-1, 1]) {
-      ctx.fillStyle = 'rgba(255,214,110,' + (0.55 * sF).toFixed(3) + ')';
+    const tS = visualAnimationTime();
+    // ① 双反向旋转符环：虚线椭圆环正反旋转，把战舰"锁"进能量法阵（确定性相位）
+    ctx.save();
+    for (const ring of [[1.5, 1, 0.10, 0.06], [1.78, -1, 0.05, 0.09]]) {
+      ctx.setLineDash([Math.max(2, ring[2] * H), Math.max(2, ring[3] * H)]);
+      ctx.lineDashOffset = ring[1] * tS * 0.9 * H;
+      ctx.strokeStyle = 'rgba(255,224,140,' + (0.5 * sF).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(1, 0.016 * H);
       ctx.beginPath();
-      ctx.moveTo(s * 0.06 * W2, -0.28 * H);
-      ctx.lineTo(s * 0.30 * W2, -0.86 * H - noseLift * 0.5);
-      ctx.lineTo(s * 0.16 * W2, -0.24 * H);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,244,200,' + (0.85 * sF).toFixed(3) + ')';
-      ctx.lineWidth = Math.max(1, 0.014 * H);
+      ctx.ellipse(0, -0.15 * H, ring[0] * W2, ring[0] * 0.62 * H, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
-    // 金色翼缘辉光（沿两翼前缘叠一层金色描边）
-    ctx.strokeStyle = 'rgba(255,214,110,' + (0.9 * sF).toFixed(3) + ')';
-    ctx.lineWidth = Math.max(1.5, 0.03 * H);
-    ctx.beginPath();
-    ctx.moveTo(0, noseY); ctx.lineTo(-W2 * spanK, 0.18 * H);
-    ctx.moveTo(0, noseY); ctx.lineTo(W2 * spanK, 0.18 * H);
-    ctx.stroke();
-    // 金色座舱罩（覆盖原蓝色玻璃，同形状）
-    ctx.fillStyle = 'rgba(255,226,140,' + (0.38 * sF).toFixed(3) + ')';
-    ctx.beginPath();
-    ctx.moveTo(0, -0.55 * H - noseLift * 0.8);
-    ctx.lineTo(-0.16 * W2, -0.05 * H);
-    ctx.lineTo(0.16 * W2, -0.05 * H);
-    ctx.closePath(); ctx.fill();
-    // 机身金色能量中脊（流动虚线，与青色饰条同机制但更亮更快）
-    ctx.save();
-    ctx.setLineDash([Math.max(2, 0.06 * H), Math.max(2, 0.04 * H)]);
-    ctx.lineDashOffset = -visualAnimationTime() * 0.7 * H;
-    ctx.strokeStyle = 'rgba(255,236,170,' + (0.95 * sF).toFixed(3) + ')';
-    ctx.lineWidth = Math.max(1.5, 0.024 * H);
-    ctx.beginPath();
-    ctx.moveTo(0, 0.30 * H);
-    ctx.lineTo(0, noseY + 0.05 * H);
-    ctx.stroke();
     ctx.restore();
-    // 船体金色能量洗（沿机翼轮廓叠一层半透明金，整船"镀"上变身色）
-    ctx.fillStyle = 'rgba(255,205,95,' + (0.13 * sF).toFixed(3) + ')';
-    ctx.beginPath();
-    ctx.moveTo(0, noseY);
-    ctx.lineTo(-W2 * spanK, 0.18 * H);
-    ctx.lineTo(-0.62 * W2 * spanK, 0.10 * H);
-    ctx.lineTo(-0.30 * W2, 0.30 * H);
-    ctx.lineTo(0.30 * W2, 0.30 * H);
-    ctx.lineTo(0.62 * W2 * spanK, 0.10 * H);
-    ctx.lineTo(W2 * spanK, 0.18 * H);
-    ctx.closePath(); ctx.fill();
-    // 三颗轨道能量球（绕船体椭圆轨道旋转，确定性相位，随船体倾斜）
+    // ② 三颗轨道能量球（绕船体椭圆轨道旋转，确定性相位，随船体倾斜）
     for (let k = 0; k < 3; k++) {
-      const oa = visualAnimationTime() * 2.4 + k * (Math.PI * 2 / 3);
+      const oa = tS * 2.4 + k * (Math.PI * 2 / 3);
       const ox = Math.cos(oa) * 1.25 * W2;
       const oy = Math.sin(oa) * 0.75 * H - 0.15 * H;
       const orad = Math.max(2, 0.05 * H);
@@ -3417,9 +3873,6 @@ function renderPlayer(ctx) {
     }
   }
 
-  // ---- J 蓄力能量场（第六轮反馈：原效果太浅，全面加强）----
-  // 机头前方能量球显著长大（0.35H → 1.2H）+ 白亮核心（>30%）+ 折线电弧（>40%）
-  // + 满蓄金色旋转虚线环 —— 不看 HUD 也能明确感知蓄力进度
   if (visualPlan.layers.includes('charge')) {
     const cf = Math.min(1, STATE.chargeT / CONFIG.CHARGE_TIME);
     const full = cf >= 1;
@@ -3471,6 +3924,22 @@ function renderPlayer(ctx) {
 
   ctx.restore();
 
+  // v1.3.0 变身冲击波：superFx 触发瞬间，自船体扩散的双金色冲击环（先快后慢、逐环延迟）
+  if (STATE.superFx > 0 && STATE.mode === 'PLAYING') {
+    const prog = 1 - STATE.superFx / 0.9;      // 0→1（扩散进度）
+    for (const ring of [[0, 0.05], [0.18, 0.03]]) {
+      const fp = Math.max(0, Math.min(1, (prog - ring[0]) / (1 - ring[0])));
+      if (fp <= 0) continue;
+      const eased = 1 - (1 - fp) * (1 - fp);   // ease-out：先快后慢
+      const rr = (0.6 + eased * 4.2) * Math.max(W2, H);
+      ctx.strokeStyle = 'rgba(255,224,140,' + (0.55 * (1 - fp)).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(1, ring[1] * H * (1 - fp * 0.5));
+      ctx.beginPath();
+      ctx.arc(cx, cyR, rr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
   // ---- 超级加速光环：青白色速度场光罩（剩余 < BOOST_WARN_TIME 时急促闪烁，
   //      与屏幕边缘预警光晕同频 time×8，节奏对齐）----
   if (visualPlan.layers.includes('boost-aura')) {
@@ -3487,16 +3956,16 @@ function renderPlayer(ctx) {
     ctx.fill();
   }
 
-  // ---- 超级形态金色光环：脉冲能量场光罩（预警期与 HUD 条/船体同频 time×10
-  //      急促闪烁；与 BOOST 青白光环可叠加，色温截然不同）----
+  // ---- 超级形态金色光环：柔和的脉冲能量场光罩（预警期与 HUD 条/船体同频 time×10
+  //      急促闪烁；变身主体是金色战舰换模，光环只作衬底）----
   if (visualPlan.layers.includes('super-aura')) {
     const fading = STATE.tripleT < CONFIG.TRIPLE_WARN_TIME ? canvasPulse(0.5, 0.5, 10) : 1;
-    const ar = Math.max(W2, H) * 1.75;
+    const ar = Math.max(W2, H) * 1.6;
     const pulse = canvasPulse(0.9, 0.1, 6) * fading;
     const aura2 = ctx.createRadialGradient(cx, cyR, ar * 0.5, cx, cyR, ar);
     aura2.addColorStop(0, 'rgba(255,214,110,0)');
-    aura2.addColorStop(0.75, 'rgba(255,214,110,' + (0.22 * pulse).toFixed(3) + ')');
-    aura2.addColorStop(1, 'rgba(255,240,190,' + (0.60 * pulse).toFixed(3) + ')');
+    aura2.addColorStop(0.75, 'rgba(255,214,110,' + (0.10 * pulse).toFixed(3) + ')');
+    aura2.addColorStop(1, 'rgba(255,240,190,' + (0.42 * pulse).toFixed(3) + ')');
     ctx.fillStyle = aura2;
     ctx.beginPath();
     ctx.arc(cx, cyR, ar, 0, Math.PI * 2);
@@ -3505,7 +3974,7 @@ function renderPlayer(ctx) {
 }
 
 // ============================================================
-// 6. 背景 Background —— 星空 / 星云 / 行星 / 流星 / 地平线剪影
+// 6. 背景 Background —— 银河 / 星云 / 行星 / 流星 / 陨石带 / 彗星 / 地平线辉光
 // ============================================================
 // 三层视差星层：drift = 每 segment 的视差漂移像素系数（近层亮且快，远层暗且慢）
 const STAR_LAYERS = (function () {
@@ -3525,63 +3994,135 @@ const STAR_LAYERS = (function () {
   });
 })();
 
-// 地平线山脉剪影轮廓（固定种子，确定性）
-const SILHOUETTE = (function () {
-  let seed = 777;
+// v1.3.1 陨石带形状表（固定种子 LCG，确定性多边形顶点；取代原地平线移动山体）
+const ASTEROID_BELT = (function () {
+  let seed = 4242;
   function rand() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
-  const peaks = [];
-  for (let i = 0; i <= 26; i++) peaks.push(0.25 + rand() * 0.75);
-  return peaks;
+  const defs = [
+    { x: 0.15, y: 0.42, r: 0.020, speed: 2.2, depth: 0.9, spin: 0.10 },
+    { x: 0.42, y: 0.30, r: 0.013, speed: 1.5, depth: 0.6, spin: -0.14 },
+    { x: 0.66, y: 0.52, r: 0.026, speed: 2.8, depth: 1.0, spin: 0.08 },
+    { x: 0.85, y: 0.36, r: 0.011, speed: 1.2, depth: 0.5, spin: 0.16 },
+    { x: 0.30, y: 0.62, r: 0.017, speed: 3.4, depth: 0.8, spin: -0.11 },
+    { x: 0.58, y: 0.72, r: 0.009, speed: 4.1, depth: 0.4, spin: 0.20 },
+  ];
+  const rocks = [];
+  for (const d of defs) {
+    const n = 8 + Math.floor(rand() * 4);
+    const verts = [];
+    for (let vi = 0; vi < n; vi++) {
+      // 顶点半径 0.5~1.35 大幅起伏 + 角度抖动：轮廓崎岖，不再是规则多边形
+      verts.push(Object.freeze({
+        a: (vi / n) * Math.PI * 2 + (rand() - 0.5) * 0.35,
+        r: 0.50 + rand() * 0.85,
+      }));
+    }
+    const tone = 8 + Math.floor(rand() * 10);
+    rocks.push(Object.freeze({
+      ...d,
+      phase: rand() * Math.PI * 2,
+      shade: `rgb(${tone + 4},${tone},${tone + 7})`,
+      verts: Object.freeze(verts),
+    }));
+  }
+  return Object.freeze(rocks);
 })();
 
 function renderBackground(ctx) {
   const w = STATE.width, h = STATE.height;
   const horizon = h * CONFIG.HORIZON_RATIO;   // 与投影地平线一致
   const style = sceneStyle();
-  // 天空渐变
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, style.background.upper);
-  grad.addColorStop(0.32, style.background.horizon);
-  grad.addColorStop(1, style.background.lower);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
-  // 星云色块（2 团低透明度径向渐变，固定位置）
-  const nebulae = [
-    { x: 0.20, y: 0.10, r: 0.32, c: 'rgba(114,72,121,0.13)' },
-    { x: 0.62, y: 0.22, r: 0.26, c: 'rgba(73,96,108,0.10)' },
-  ];
-  for (const nb of nebulae) {
-    const ng = ctx.createRadialGradient(nb.x * w, nb.y * h, 0, nb.x * w, nb.y * h, nb.r * w);
-    ng.addColorStop(0, nb.c);
-    ng.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = ng;
-    ctx.fillRect(0, 0, w, horizon);
+  // v1.3.1 银河实景背景（assets/bg/galaxy.jpg）：cover 适配 + 轻微里程视差；
+  // 加载失败时回退到原渐变天空
+  const galaxy = hudAsset('bgGalaxy');
+  if (galaxy && galaxy.naturalWidth > 0 && galaxy.naturalHeight > 0) {
+    const scale = Math.max(w / galaxy.naturalWidth, h / galaxy.naturalHeight);
+    const dw = galaxy.naturalWidth * scale;
+    const dh = galaxy.naturalHeight * scale;
+    const driftRange = Math.max(1, dw - w);
+    const drift = STATE.reducedMotion ? 0 : (STATE.position * 0.6) % driftRange;
+    ctx.drawImage(galaxy, -drift, (h - dh) / 2, dw, dh);
+    // 压暗渐变：保证赛道与 HUD 的可读性
+    const dim = ctx.createLinearGradient(0, 0, 0, h);
+    dim.addColorStop(0, 'rgba(4,6,12,0.10)');
+    dim.addColorStop(0.32, 'rgba(4,6,12,0.30)');
+    dim.addColorStop(1, 'rgba(4,6,12,0.62)');
+    ctx.fillStyle = dim;
+    ctx.fillRect(0, 0, w, h);
+  } else {
+    // 天空渐变
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, style.background.upper);
+    grad.addColorStop(0.32, style.background.horizon);
+    grad.addColorStop(1, style.background.lower);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    // 星云色块（多团低透明度径向渐变，固定位置；银河实景加载后由实景取代）
+    const nebulae = [
+      { x: 0.20, y: 0.10, r: 0.32, c: 'rgba(114,72,121,0.13)' },
+      { x: 0.62, y: 0.22, r: 0.26, c: 'rgba(73,96,108,0.10)' },
+      { x: 0.45, y: 0.30, r: 0.40, c: 'rgba(255,150,80,0.08)' },   // 地平线上的落日余晖
+      { x: 0.08, y: 0.28, r: 0.22, c: 'rgba(60,200,220,0.07)' },   // 左侧青色远云
+    ];
+    for (const nb of nebulae) {
+      const ng = ctx.createRadialGradient(nb.x * w, nb.y * h, 0, nb.x * w, nb.y * h, nb.r * w);
+      ng.addColorStop(0, nb.c);
+      ng.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = ng;
+      ctx.fillRect(0, 0, w, horizon);
+    }
   }
-  // 大行星（右上天空）+ 光晕 + 行星环
+  // 大行星（右上天空）：v1.3.1 优先使用写实贴图（assets/bg/planet.png），保留光晕
   const pxX = 0.80 * w, pxY = 0.11 * h, pr = 0.055 * h;
   const halo = ctx.createRadialGradient(pxX, pxY, pr * 0.5, pxX, pxY, pr * 2.2);
   halo.addColorStop(0, 'rgba(255,190,130,0.28)');
   halo.addColorStop(1, 'rgba(255,190,130,0)');
   ctx.fillStyle = halo;
   ctx.beginPath(); ctx.arc(pxX, pxY, pr * 2.2, 0, Math.PI * 2); ctx.fill();
-  const pg = ctx.createLinearGradient(pxX - pr, pxY - pr, pxX + pr, pxY + pr);
-  pg.addColorStop(0, '#e8a86a');
-  pg.addColorStop(0.55, '#b06a3f');
-  pg.addColorStop(1, '#5a2f22');
-  ctx.fillStyle = pg;
-  ctx.beginPath(); ctx.arc(pxX, pxY, pr, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = 'rgba(240,210,170,0.45)';
-  ctx.lineWidth = Math.max(1, pr * 0.10);
-  ctx.beginPath();
-  ctx.ellipse(pxX, pxY + pr * 0.15, pr * 1.7, pr * 0.42, -0.25, 0, Math.PI * 2);
-  ctx.stroke();
-  // 三层视差星层（随里程漂移，循环回绕）
+  const planetSprite = hudAsset('bgPlanet');
+  if (planetSprite && planetSprite.naturalWidth > 0) {
+    const ps = pr * 2.7;   // 贴图含行星环，略大于球体直径
+    ctx.drawImage(planetSprite, pxX - ps / 2, pxY - ps / 2, ps, ps);
+  } else {
+    const pg = ctx.createLinearGradient(pxX - pr, pxY - pr, pxX + pr, pxY + pr);
+    pg.addColorStop(0, '#e8a86a');
+    pg.addColorStop(0.55, '#b06a3f');
+    pg.addColorStop(1, '#5a2f22');
+    ctx.fillStyle = pg;
+    ctx.beginPath(); ctx.arc(pxX, pxY, pr, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(240,210,170,0.45)';
+    ctx.lineWidth = Math.max(1, pr * 0.10);
+    ctx.beginPath();
+    ctx.ellipse(pxX, pxY + pr * 0.15, pr * 1.7, pr * 0.42, -0.25, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // v1.3.1 冰卫星（左上天空）：优先写实贴图（assets/bg/moon.png），保留冷色光晕
+  const mxX = 0.12 * w, mxY = 0.16 * h, mr = 0.020 * h;
+  const mHalo = ctx.createRadialGradient(mxX, mxY, mr * 0.4, mxX, mxY, mr * 2.4);
+  mHalo.addColorStop(0, 'rgba(160,220,255,0.20)');
+  mHalo.addColorStop(1, 'rgba(160,220,255,0)');
+  ctx.fillStyle = mHalo;
+  ctx.beginPath(); ctx.arc(mxX, mxY, mr * 2.4, 0, Math.PI * 2); ctx.fill();
+  const moonSprite = hudAsset('bgMoon');
+  if (moonSprite && moonSprite.naturalWidth > 0) {
+    const ms = mr * 2.15;
+    ctx.drawImage(moonSprite, mxX - ms / 2, mxY - ms / 2, ms, ms);
+  } else {
+    const mg = ctx.createLinearGradient(mxX - mr, mxY - mr, mxX + mr, mxY + mr);
+    mg.addColorStop(0, '#cfe8f2');
+    mg.addColorStop(0.6, '#7fa8bd');
+    mg.addColorStop(1, '#33505f');
+    ctx.fillStyle = mg;
+    ctx.beginPath(); ctx.arc(mxX, mxY, mr, 0, Math.PI * 2); ctx.fill();
+  }
+  // 三层视差星层（随里程漂移，循环回绕；v1.3.1 星星带确定性闪烁）
+  const starTime = visualAnimationTime();
   for (const layer of STAR_LAYERS) {
     const off = STATE.reducedMotion ? 0 : (STATE.position * layer.drift) % w;
     ctx.fillStyle = '#ffffff';
     for (const s of layer.stars) {
       const sx = (((s.x * w - off) % w) + w) % w;
-      ctx.globalAlpha = s.b;
+      ctx.globalAlpha = s.b * (0.72 + 0.28 * Math.sin(starTime * 2.2 + s.x * 40 + s.y * 17));
       ctx.beginPath();
       ctx.arc(sx, s.y * horizon, s.r, 0, Math.PI * 2);
       ctx.fill();
@@ -3603,44 +4144,193 @@ function renderBackground(ctx) {
     ctx.lineTo(mx, my);
     ctx.stroke();
   }
-  // 地平线剪影：远山 + 空间站小塔（视差慢速移动，两份循环拼接）
-  const silW = w * 1.5;
-  const silOff = STATE.reducedMotion ? 0 : (STATE.position * 6) % silW;
-  for (const rep of [0, 1]) {
-    const baseX = rep * silW - silOff;
-    const N = SILHOUETTE.length;
-    const step = silW / (N - 1);
-    ctx.fillStyle = '#0b0d12';
+  // 远景巡逻机：2 架剪影缓慢横越天空（确定性周期与相位，reduced-motion 下冻结）
+  for (let k = 0; k < 2; k++) {
+    const cyc = (visualAnimationTime() / (26 + k * 17) + k * 0.47) % 1;
+    const dir = k % 2 === 0 ? 1 : -1;
+    const fx = (dir > 0 ? (-0.08 + cyc * 1.16) : (1.08 - cyc * 1.16)) * w;
+    const fy = (0.16 + 0.09 * k) * horizon + Math.sin(cyc * Math.PI * 2) * 0.02 * horizon;
+    const fs = 0.012 * h * (1 + k * 0.4);
+    ctx.fillStyle = 'rgba(16,20,28,0.85)';
     ctx.beginPath();
-    ctx.moveTo(baseX, horizon + 2);
-    for (let i = 0; i < N; i++) {
-      ctx.lineTo(baseX + i * step, horizon - SILHOUETTE[i] * 0.085 * h);
-    }
-    ctx.lineTo(baseX + silW, horizon + 2);
+    ctx.moveTo(fx + dir * fs * 1.6, fy);
+    ctx.lineTo(fx - dir * fs * 1.2, fy - fs * 0.55);
+    ctx.lineTo(fx - dir * fs * 0.7, fy);
+    ctx.lineTo(fx - dir * fs * 1.2, fy + fs * 0.55);
     ctx.closePath();
     ctx.fill();
-    // 空间站小塔（2 座/份）+ 确定性闪烁灯
-    for (const ti of [7, 18]) {
-      const tx = baseX + ti * step;
-      const ty = horizon - SILHOUETTE[ti] * 0.085 * h;
-      const th = 0.045 * h;
-      ctx.fillStyle = '#181b21';
-      ctx.fillRect(tx - 3, ty - th, 6, th);
-      const bl = canvasPulse(0.5, 0.5, 3, ti + rep * 2);
-      ctx.fillStyle = 'rgba(255,120,120,' + (0.3 + 0.6 * bl).toFixed(3) + ')';
+    const navBlink = canvasPulse(0.5, 0.5, 5, k * 1.3);
+    ctx.fillStyle = 'rgba(255,120,120,' + (0.35 + 0.6 * navBlink).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(fx - dir * fs * 0.6, fy, Math.max(1, fs * 0.16), 0, Math.PI * 2); ctx.fill();
+  }
+  // v1.3.2 地平线银河光带（取代生硬的发光横带）：一团团软星云（椭圆径向渐变，
+  // 边缘自然消隐到 0）+ 沿带分布的密集星群，让赛道尽头"融进银河"而不是撞上一道亮边。
+  // v1.3.3 去"光带感"：光团不再排在同一水平线上——高度/纵向半径各自散开，
+  // 另加两团超宽超低透明度的底层辉光，整条银河"晕"进天空而不是一条带子
+  {
+    const bandTilt = -0.05 * h;   // 光带左低右高的轻微倾斜（银河带的自然斜率）
+    // 底层辉光（超宽、极淡，把整片地平线区域柔和大面积点亮）
+    for (const wsh of [
+      { x: 0.30, y: 0.10, rx: 0.55, ry: 0.16, c: '150,170,255', a: 0.05 },
+      { x: 0.74, y: 0.13, rx: 0.50, ry: 0.19, c: '190,170,255', a: 0.045 },
+    ]) {
+      const cxp = wsh.x * w;
+      const cyp = horizon - wsh.y * h + wsh.x * bandTilt;
+      const g = ctx.createRadialGradient(cxp, cyp, 0, cxp, cyp, wsh.rx * w);
+      g.addColorStop(0, 'rgba(' + wsh.c + ',' + wsh.a + ')');
+      g.addColorStop(1, 'rgba(' + wsh.c + ',0)');
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(tx, ty - th - 2, 2, 0, Math.PI * 2);
+      ctx.ellipse(cxp, cyp, wsh.rx * w, wsh.ry * h, 0, 0, Math.PI * 2);
       ctx.fill();
+    }
+    // 结构光团：x/y/纵向半径各不相同（y 为相对地平线的抬升，ry 直接为屏幕高占比）
+    const puffs = [
+      { x: 0.06, y: 0.020, rx: 0.26, ry: 0.055, c: '140,170,255', a: 0.060 },
+      { x: 0.22, y: 0.095, rx: 0.20, ry: 0.120, c: '225,230,255', a: 0.075 },
+      { x: 0.38, y: 0.030, rx: 0.28, ry: 0.070, c: '170,140,255', a: 0.055 },
+      { x: 0.52, y: 0.125, rx: 0.22, ry: 0.145, c: '235,225,245', a: 0.080 },
+      { x: 0.66, y: 0.048, rx: 0.25, ry: 0.085, c: '150,180,255', a: 0.060 },
+      { x: 0.82, y: 0.105, rx: 0.20, ry: 0.125, c: '220,205,255', a: 0.070 },
+      { x: 0.95, y: 0.035, rx: 0.18, ry: 0.070, c: '200,215,255', a: 0.050 },
+    ];
+    for (const pf of puffs) {
+      const cxp = pf.x * w;
+      const cyp = horizon - pf.y * h + pf.x * bandTilt;
+      const rx = pf.rx * w;
+      const g = ctx.createRadialGradient(cxp, cyp, 0, cxp, cyp, rx);
+      g.addColorStop(0, 'rgba(' + pf.c + ',' + pf.a + ')');
+      g.addColorStop(0.55, 'rgba(' + pf.c + ',' + (pf.a * 0.45).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(' + pf.c + ',0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(cxp, cyp, rx, pf.ry * h, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 银河尘埃暗纹（2 条，让光带有层次而不是均匀发光）
+    for (const dl of [{ x: 0.33, y: 0.045, rx: 0.14 }, { x: 0.67, y: 0.052, rx: 0.12 }]) {
+      const cxp = dl.x * w;
+      const cyp = horizon - dl.y * h + dl.x * bandTilt;
+      const g = ctx.createRadialGradient(cxp, cyp, 0, cxp, cyp, dl.rx * w);
+      g.addColorStop(0, 'rgba(5,7,16,0.20)');
+      g.addColorStop(1, 'rgba(5,7,16,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(cxp, cyp, dl.rx * w, dl.rx * w * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 沿带密集星群（确定性哈希位置，慢速视差漂移 + 闪烁；reduced-motion 冻结）
+    const mwOff = STATE.reducedMotion ? 0 : (STATE.position * 0.9) % w;
+    for (let k = 0; k < 64; k++) {
+      const hx = Math.sin(k * 12.9898) * 43758.5453;
+      const hy = Math.sin(k * 78.233) * 12543.1234;
+      const fx = hx - Math.floor(hx);
+      const fy = hy - Math.floor(hy);
+      const sx = (((fx * 1.2 * w - mwOff) % w) + w) % w;
+      const bandCenter = horizon - (0.06 + 0.05 * Math.sin(fx * Math.PI)) * h + fx * bandTilt;
+      const sy = bandCenter + (fy - 0.5) * 0.16 * h;
+      const tw = 0.45 + 0.55 * Math.sin(starTime * 2.8 + k * 1.7);
+      ctx.globalAlpha = (0.25 + 0.55 * fy) * tw;
+      ctx.fillStyle = fy > 0.85 ? '#ffe8c8' : '#dfe8ff';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 0.6 + fy * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // v1.3.1 陨石带（取代原移动山体/峡谷剪影）：多边形岩块在不同深度漂移 + 自转，
+  // 暗色岩体 + 银河侧 rim 光；位置随里程视差，reduced-motion 下归零冻结
+  for (const rock of ASTEROID_BELT) {
+    const span = w * (1.3 + rock.depth * 0.5);
+    const drift = STATE.reducedMotion ? 0 : (STATE.position * rock.speed) % span;
+    const ax = ((((rock.x * span - drift) % span) + span) % span) - span * 0.15;
+    const ay = rock.y * horizon;
+    const ar = rock.r * h;
+    const rot = visualAnimationTime() * rock.spin + rock.phase;
+    // 同形多边形路径（scale/ox/oy 用于背光面阴影的偏移缩小版）
+    const traceRock = (scale, ox, oy) => {
+      ctx.beginPath();
+      for (let vi = 0; vi < rock.verts.length; vi++) {
+        const ang = rock.verts[vi].a + rot;
+        const rr = ar * rock.verts[vi].r * scale;
+        const vx = ax + ox + Math.cos(ang) * rr;
+        const vy = ay + oy + Math.sin(ang) * rr * 0.78;
+        if (vi === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+      }
+      ctx.closePath();
+    };
+    ctx.fillStyle = rock.shade;
+    traceRock(1, 0, 0);
+    ctx.fill();
+    // 背光面阴影（偏移的小一号同形多边形，给岩块一点体积感而不是扁平剪纸）
+    ctx.fillStyle = 'rgba(2,3,8,0.45)';
+    traceRock(0.66, ar * 0.18, ar * 0.14);
+    ctx.fill();
+    // rim 光：极弱的银河侧亮缘（几乎只是剪影与星空的分界）
+    ctx.strokeStyle = 'rgba(170,195,255,' + (0.04 + rock.depth * 0.07).toFixed(3) + ')';
+    ctx.lineWidth = 1;
+    traceRock(1, 0, 0);
+    ctx.stroke();
+  }
+  // v1.3.1 大彗星：偶发划过（约 24s 一颗），带彗发辉光与长尾；reduced-motion 下不出现
+  if (!STATE.reducedMotion) {
+    const cyc = (visualAnimationTime() / 24 + 0.31) % 1;
+    if (cyc < 0.16) {
+      const f = cyc / 0.16;
+      const cx = (0.75 - f * 0.55) * w;
+      const cy = (0.10 + f * 0.38) * horizon;
+      const fade = Math.sin(f * Math.PI);
+      const comaR = 0.016 * h;
+      const coma = ctx.createRadialGradient(cx, cy, 0, cx, cy, comaR * 3);
+      coma.addColorStop(0, 'rgba(255,255,240,' + (0.85 * fade).toFixed(3) + ')');
+      coma.addColorStop(0.35, 'rgba(190,225,255,' + (0.35 * fade).toFixed(3) + ')');
+      coma.addColorStop(1, 'rgba(190,225,255,0)');
+      ctx.fillStyle = coma;
+      ctx.beginPath(); ctx.arc(cx, cy, comaR * 3, 0, Math.PI * 2); ctx.fill();
+      // 长尾：两条渐隐尾迹（背向运动方向扩散）
+      for (const [spread, alpha] of [[0.0, 0.75], [0.35, 0.4]]) {
+        const tailLen = (0.16 + spread * 0.05) * w;
+        const tailGrad = ctx.createLinearGradient(cx, cy, cx + tailLen, cy - tailLen * 0.5);
+        tailGrad.addColorStop(0, 'rgba(215,240,255,' + (alpha * fade).toFixed(3) + ')');
+        tailGrad.addColorStop(1, 'rgba(215,240,255,0)');
+        ctx.strokeStyle = tailGrad;
+        ctx.lineWidth = Math.max(1, comaR * (0.9 - spread * 0.5));
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + tailLen, cy - tailLen * (0.5 + spread * 0.25));
+        ctx.stroke();
+      }
     }
   }
 }
 
-// 跑道两侧装饰灯柱（纯装饰，不参与碰撞）：每 6 段一对，
-// 随 position 向后飞驰增强速度感；灯光颜色交替、确定性闪烁
+// 跑道两侧装饰（纯装饰，不参与碰撞）：
+// ① 每 6 段一对灯柱；② 路面边缘流光
+// 全部随 position 向后飞驰增强速度感；灯光颜色交替、确定性闪烁
 function renderSideDecor(ctx) {
   const halfRoad = CONFIG.ROAD_WIDTH / 2;
   const startIdx = Math.floor(STATE.position) + CONFIG.RENDER_DISTANCE;
   const endIdx = Math.floor(STATE.position);
+
+  // ② 路面边缘流光：段奇偶交替点亮，随 position 前进自然形成向后流动的光带
+  for (let i = startIdx; i >= endIdx; i--) {
+    if (i < 0 || i % 2 !== 0) continue;
+    const zN = zRelOf(i), zF = zRelOf(i + 1);
+    if (zF < 8) continue;
+    const depth = sceneDepthTreatment((zN + zF) / 2);
+    for (const s of [-1, 1]) {
+      const a1 = project(s * halfRoad, 0, zN);
+      const a2 = project(s * halfRoad, 0, zF);
+      if (!a1.visible || !a2.visible) continue;
+      const lw = Math.max(1.5, Math.min(5, 60 * a1.scale * STATE.width / 2));
+      ctx.strokeStyle = 'rgba(120,220,255,' + (depth.seamAlpha * 1.6).toFixed(3) + ')';
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.moveTo(a1.x, a1.y); ctx.lineTo(a2.x, a2.y);
+      ctx.stroke();
+    }
+  }
+
   for (let i = startIdx; i >= endIdx; i--) {
     if (i < 0 || i % 6 !== 0) continue;
     const z = zRelOf(i);
@@ -3689,17 +4379,50 @@ function updatePhysics(dt) {
       }
     }
   }
+  // W/↑ 燃料爆发蓄力：按住累积至 FUEL_BURST_CHARGE_TIME(1)s 自动触发；
+  // v1.3.0：燃料跌破 70% 不再取消 —— 中途取消只保留状态性条件（起跳、吃到 BOOST 等）
+  if (STATE.fuelBurstChargeT > 0) {
+    if (fuelBurstChargeBroken()) {
+      STATE.fuelBurstChargeT = 0;
+      STATE.fuelBurstChargeStage = 0;
+    } else {
+      STATE.fuelBurstChargeT += dt;
+      const fbChargeStage = STATE.fuelBurstChargeT >= CONFIG.FUEL_BURST_CHARGE_TIME * 2 / 3
+        ? 2
+        : (STATE.fuelBurstChargeT >= CONFIG.FUEL_BURST_CHARGE_TIME / 3 ? 1 : 0);
+      if (fbChargeStage > STATE.fuelBurstChargeStage) {
+        STATE.fuelBurstChargeStage = fbChargeStage;
+        sfxChargeTick(fbChargeStage);      // 三段渐高蓄力提示音（1/3、2/3 进度）
+      }
+      if (STATE.fuelBurstChargeT >= CONFIG.FUEL_BURST_CHARGE_TIME) {
+        STATE.fuelBurstChargeT = 0;
+        STATE.fuelBurstChargeStage = 0;
+        tryFuelBurst();
+      }
+    }
+  }
   // 平滑加速：初速 8 = 满速 33%，ACCEL 0.4 → (24-8)/0.4 = 40 秒到满速。
   // BOOST 超级加速期间：速度锁定 BOOST_SPEED(36)；
   // 到期后恢复到吃闪电前的速度（boostPrevSpeed），再继续按 ACCEL 正常爬升。
+  // v1.2.0 燃料爆发：同理锁定速度，到期后恢复。
   if (STATE.boostT > 0) {
     STATE.speed = CONFIG.BOOST_SPEED;
+  } else if (STATE.fuelBurstT > 0) {
+    STATE.speed = CONFIG.FUEL_BURST_SPEED;
   } else {
     if (STATE.boostPrevSpeed > 0) {          // BOOST 刚结束：恢复加速前速度
       STATE.speed = STATE.boostPrevSpeed;
       STATE.boostPrevSpeed = 0;
     }
+    if (STATE.fuelBurstPrevSpeed > 0) {      // 燃料爆发刚结束：恢复加速前速度
+      STATE.speed = STATE.fuelBurstPrevSpeed;
+      STATE.fuelBurstPrevSpeed = 0;
+    }
     STATE.speed = Math.min(CONFIG.MAX_SPEED, STATE.speed + CONFIG.ACCEL * dt);
+    // 教学模式（练习场）：限速 TUTORIAL_SPEED_CAP，给新手充裕反应时间
+    if (STATE.tutorial && STATE.tutorial.active) {
+      STATE.speed = Math.min(STATE.speed, CONFIG.TUTORIAL_SPEED_CAP);
+    }
   }
 
   // 扫掠：一帧移动距离按 ≤ 0.5 segment 切分子步，
@@ -3720,6 +4443,7 @@ function updatePhysics(dt) {
     // 跳跃物理（含滑翔：空中 + 按住跳跃键 + 下落中 + 有燃料）
     if (STATE.playerY > 0 || STATE.playerVY > 0) {
       STATE.gliding = STATE.playerY > 0 && STATE.playerVY < 0 && jumpHeld() && STATE.fuel > 0;
+      if (STATE.gliding && STATE.tutorial) STATE.tutorial.glided = true;
       // 三段跳奖励期滑翔重力系数更小（TRIPLE_GLIDE_FACTOR 0.045 vs 基准 0.08），滞空更久
       const g = STATE.gliding
         ? CONFIG.GRAVITY * (STATE.tripleT > 0 ? CONFIG.TRIPLE_GLIDE_FACTOR : CONFIG.GLIDE_GRAVITY_FACTOR)
@@ -3737,8 +4461,14 @@ function updatePhysics(dt) {
 
     // 燃料消耗与计时；道具效果倒计时
     STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_DRAIN_RATE * sdt);
+    if (STATE.tutorial && STATE.tutorial.active) STATE.fuel = CONFIG.FUEL_MAX;   // 练习场：燃料锁定满格，随时可练燃料爆发
     STATE.elapsedMs += sdt * 1000;
     if (STATE.boostT > 0) STATE.boostT = Math.max(0, STATE.boostT - sdt);
+    if (STATE.fuelBurstT > 0) {
+      STATE.fuelBurstT = Math.max(0, STATE.fuelBurstT - sdt);
+      if (STATE.fuelBurstT === 0) fuelBurstEndFx();   // 自然到期：熄火特效 + 下行音 + 短暂无敌保护
+    }
+    if (STATE.fuelBurstGraceT > 0) STATE.fuelBurstGraceT = Math.max(0, STATE.fuelBurstGraceT - sdt);
     if (STATE.tripleT > 0) {
       STATE.tripleT = Math.max(0, STATE.tripleT - sdt);
       if (STATE.tripleT === 0) superPowerDownFx();   // 自然到期：熄火特效 + 下行音
@@ -3752,6 +4482,14 @@ function updatePhysics(dt) {
         sfxBoostWarn(stage);
       }
     }
+    // v1.2.0 燃料爆发到期预警：最后 FUEL_BURST_WARN_TIME(1)s 内 3 声渐高 beep
+    if (STATE.fuelBurstT > 0 && STATE.fuelBurstT <= CONFIG.FUEL_BURST_WARN_TIME) {
+      const fbStage = STATE.fuelBurstT > 0.66 ? 1 : (STATE.fuelBurstT > 0.33 ? 2 : 3);
+      if (fbStage > STATE.fuelBurstWarnStage) {
+        STATE.fuelBurstWarnStage = fbStage;
+        sfxFuelBurstWarn(fbStage);
+      }
+    }
     // 超级形态到期预警：最后 TRIPLE_WARN_TIME(3)s 内 3 声渐高 beep
     // （3 / 2 / 1s 三档阈值，tripleWarnStage 防重发；吃星/开局时重置）
     if (STATE.tripleT > 0 && STATE.tripleT <= CONFIG.TRIPLE_WARN_TIME) {
@@ -3762,6 +4500,18 @@ function updatePhysics(dt) {
       }
     }
     if (STATE.bulletCD > 0) STATE.bulletCD = Math.max(0, STATE.bulletCD - sdt);
+
+    // v1.2.0 更新新手引导
+    if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+      globalThis.Skyroads.tutorial.updateTutorial(STATE.tutorial, sdt, {
+        position: STATE.position,
+        playerY: STATE.playerY,
+        playerVY: STATE.playerVY,
+        fuel: STATE.fuel,
+        fuelBurstMin: CONFIG.FUEL_BURST_MIN,
+        storage: STATE.storage,
+      });
+    }
 
     updateEnemies(sdt);         // 无人机换道状态机（预警/平滑移动）
     advanceShots(sdt);          // 弹道推进 + 命中判定（同子步扫掠）
@@ -4019,6 +4769,29 @@ function superPowerDownFx() {
   sfxPowerDown();
 }
 
+// 燃料爆发自然到期：金白爆闪 + 金色冲击波环自船体扩散 + 12 颗金白余烬 + 下行熄火音，
+// 并进入 FUEL_BURST_GRACE(1)s 无敌保护期（金色护盾环提示）——
+// 解决"速度骤降瞬间撞上障碍物"的挫败感：视听上明确"爆发结束"，操作上给一拍缓冲
+function fuelBurstEndFx() {
+  STATE.fuelBurstGraceT = CONFIG.FUEL_BURST_GRACE;
+  const p = project(playerWorldX(), STATE.playerY, CONFIG.CAMERA_BACK);
+  if (p.visible) {
+    STATE.shockwave = { x: p.x, y: p.y, r: 8, alpha: 0.85, gold: true };
+    for (let i = 0; i < (STATE.reducedMotion ? 5 : 12); i++) {
+      const a = Math.random() * Math.PI * 2;
+      STATE.particles.push({
+        x: p.x + (Math.random() - 0.5) * 26, y: p.y + (Math.random() - 0.5) * 16,
+        vx: Math.cos(a) * 55, vy: -100 - Math.random() * 130,   // 向上升腾
+        life: 0.4 + Math.random() * 0.3, maxLife: 0.7,
+        color: Math.random() < 0.5 ? '#ffd76a' : '#fff3d0',
+        size: 1.5 + Math.random() * 2.5,
+      });
+    }
+  }
+  STATE.flash = Math.max(STATE.flash, 0.3 * currentCanvasMotionPolicy().deathFlashScale);
+  sfxFuelBurstEnd();
+}
+
 function pickupFuel(seg, laneIdx) {
   seg.lanes[laneIdx] = LANE_TYPE.ROAD;
   STATE.fuel = Math.min(CONFIG.FUEL_MAX, STATE.fuel + CONFIG.FUEL_PICKUP);
@@ -4078,7 +4851,9 @@ function checkCollisions(previousLanePosition, currentLanePosition) {
   if (STATE.fuel <= 0) { die('fuel'); return; }
   const seg = STATE.track[Math.floor(STATE.position)];
   if (!seg) return;
-  const invincible = STATE.boostT > 0;
+  // 教学模式（练习场）：撞墙/掉坑/撞敌机均不致死，零压力熟悉操作
+  const invincible = STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
+    || Boolean(STATE.tutorial && STATE.tutorial.active);
 
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     const type = seg.lanes[lane];
@@ -4214,6 +4989,12 @@ function resetGame() {
   STATE.recoil = 0;
   STATE.boostT = 0;
   STATE.boostPrevSpeed = 0;
+  STATE.fuelBurstT = 0;
+  STATE.fuelBurstPrevSpeed = 0;
+  STATE.fuelBurstWarnStage = 0;
+  STATE.fuelBurstChargeT = 0;
+  STATE.fuelBurstChargeStage = 0;
+  STATE.fuelBurstGraceT = 0;
   STATE.tripleT = 0;
   STATE.tripleWarnStage = 0;
   STATE.superFx = 0;
@@ -4234,6 +5015,10 @@ function resetGame() {
   STATE.shake = 0;
   STATE.shockwave = null;
   STATE.track = buildTrack();
+  // v1.2.0 重置引导状态（不清除已看过的标记，只重置运行期状态）
+  if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+    STATE.tutorial = globalThis.Skyroads.tutorial.createTutorialState();
+  }
 }
 
 function togglePause() {
@@ -4250,7 +5035,7 @@ function togglePause() {
   return true;
 }
 
-function startGame() {
+function startGame({ forceTutorial = false } = {}) {
   audioInit();                 // 首次有效手势：创建/resume 音效 AudioContext
   if (STATE.audioController) {
     STATE.audioController.unlock().then(refreshPresentation).catch(function () { refreshPresentation(); });
@@ -4260,10 +5045,19 @@ function startGame() {
   propulsionUiOwnsFocus = false;
   resetGame();
   STATE.mode = 'PLAYING';
+  // v1.2.0 启动新手引导（教学模式强制显示，无论是否看过）
+  if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+    globalThis.Skyroads.tutorial.startTutorial(STATE.tutorial, STATE.storage, { force: forceTutorial });
+  }
   syncPropulsionAudio();
   syncAdaptiveAudio(true);
   refreshPresentation();
   focusPrimarySurface();
+}
+
+// v1.2.0 教学模式入口：指挥中心"新手教学"按钮，强制本次任务显示完整引导
+function startTutorialMission() {
+  startGame({ forceTutorial: true });
 }
 
 function gotoMenu() {
@@ -4431,6 +5225,29 @@ function renderEffects(ctx) {
     g.addColorStop(0, cA); g.addColorStop(1, c0);
     ctx.fillStyle = g; ctx.fillRect(W - wE, 0, wE, Hh);
   }
+  // ---- 燃料爆发到期预警：屏幕边缘金色脉冲光晕（v1.2.0；比 BOOST 预警更亮更宽更急促）----
+  if (STATE.mode === 'PLAYING' && STATE.fuelBurstT > 0 && STATE.fuelBurstT < CONFIG.FUEL_BURST_WARN_TIME) {
+    const f = STATE.fuelBurstT / CONFIG.FUEL_BURST_WARN_TIME;   // 1 → 0
+    const pulse = canvasPulse(0.5, 0.5, 10);
+    const a = (0.16 + 0.42 * (1 - f)) * pulse;
+    const wE = (0.045 + 0.11 * f) * STATE.width;
+    const hE = (0.045 + 0.11 * f) * STATE.height;
+    const W = STATE.width, Hh = STATE.height;
+    const cA = 'rgba(255,200,80,' + a.toFixed(3) + ')';
+    const c0 = 'rgba(255,200,80,0)';
+    let g = ctx.createLinearGradient(0, 0, 0, hE);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, hE);
+    g = ctx.createLinearGradient(0, Hh, 0, Hh - hE);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(0, Hh - hE, W, hE);
+    g = ctx.createLinearGradient(0, 0, wE, 0);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, wE, Hh);
+    g = ctx.createLinearGradient(W, 0, W - wE, 0);
+    g.addColorStop(0, cA); g.addColorStop(1, c0);
+    ctx.fillStyle = g; ctx.fillRect(W - wE, 0, wE, Hh);
+  }
   // ---- 超级形态到期预警：屏幕边缘金红脉冲光晕，随剩余时间收缩
   //      （time×10 比 BOOST 的 ×8 更急促，色调金红以示区别）----
   if (STATE.mode === 'PLAYING' && STATE.tripleT > 0 && STATE.tripleT < CONFIG.TRIPLE_WARN_TIME) {
@@ -4549,6 +5366,7 @@ function drawFuelInstrument(ctx, layout) {
 
   const ratio = Math.max(0, Math.min(1, STATE.fuel / CONFIG.FUEL_MAX));
   const burning = STATE.gliding || STATE.fuelFlash > 0;
+  const fuelBurstReady = STATE.fuel >= CONFIG.FUEL_BURST_MIN && STATE.playerY <= 0 && STATE.playerVY <= 0 && STATE.boostT <= 0 && STATE.fuelBurstT <= 0;
   const barX = x + 12;
   const barY = y + 27;
   const barWidth = width - 24;
@@ -4558,6 +5376,21 @@ function drawFuelInstrument(ctx, layout) {
     ? `rgba(255,153,51,${canvasPulse(0.75, 0.25, 12).toFixed(3)})`
     : (ratio > 0.3 ? '#48d98b' : (ratio > 0.15 ? '#ffc857' : '#ff4f72'));
   ctx.fillRect(barX, barY, barWidth * ratio, 10);
+  // v1.2.0 燃料就绪高亮：≥70% 且地面时，燃料条边框金色脉冲
+  if (fuelBurstReady) {
+    const pulse = canvasPulse(0.9, 0.1, 8);
+    ctx.strokeStyle = `rgba(255,200,80,${pulse.toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(barX - 1, barY - 1, barWidth + 2, 12);
+  }
+  // v1.2.0 燃料爆发蓄力进度：按住 W/↑ 期间燃料条下方显示金色进度条
+  if (STATE.fuelBurstChargeT > 0) {
+    const chargeRatio = Math.max(0, Math.min(1, STATE.fuelBurstChargeT / CONFIG.FUEL_BURST_CHARGE_TIME));
+    ctx.fillStyle = 'rgba(2,8,18,0.88)';
+    ctx.fillRect(barX, barY + 14, barWidth, 4);
+    ctx.fillStyle = '#ffc857';
+    ctx.fillRect(barX, barY + 14, barWidth * chargeRatio, 4);
+  }
   drawHudMeterOverlay(ctx, barX, barY - 1, barWidth, 12);
   ctx.strokeStyle = 'rgba(143,243,255,0.62)';
   ctx.strokeRect(barX, barY, barWidth, 10);
@@ -4631,6 +5464,7 @@ function renderHUD(ctx) {
     chargeElapsed: STATE.chargeT,
     chargeRevealDelay: CONFIG.CHARGE_HUD_DELAY,
     boostActive: STATE.boostT > 0,
+    fuelBurstActive: STATE.fuelBurstT > 0,
     superActive: STATE.tripleT > 0,
     magnetActive: STATE.magnetT > 0,
   });
@@ -4645,6 +5479,14 @@ function renderHUD(ctx) {
       warning ? 'status.boostWarning' : 'status.boost',
       { seconds: uiNumber(STATE.boostT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) },
     ), STATE.boostT / CONFIG.BOOST_DURATION, '#7fe8ff', warning);
+    statusY += 36;
+  }
+  if (visibility.fuelBurst) {
+    const warning = STATE.fuelBurstT < CONFIG.FUEL_BURST_WARN_TIME;
+    drawContextStatus(ctx, layout.leftX, statusY, layout.leftWidth, uiText(
+      warning ? 'status.fuelBurstWarning' : 'status.fuelBurst',
+      { seconds: uiNumber(STATE.fuelBurstT, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) },
+    ), STATE.fuelBurstT / CONFIG.FUEL_BURST_DURATION, '#ffc857', warning);
     statusY += 36;
   }
   if (visibility.super) {
@@ -4678,6 +5520,17 @@ function renderHUD(ctx) {
 }
 
 function renderMenu(ctx) {
+  // v1.3.0 写实主菜单背景（assets/ui/menu-backdrop.jpg）：cover 适配铺满画布，加载失败时保持原压暗场景
+  const backdrop = hudAsset('menuBackdrop');
+  if (backdrop && backdrop.naturalWidth > 0 && backdrop.naturalHeight > 0) {
+    const scale = Math.max(
+      STATE.width / backdrop.naturalWidth,
+      STATE.height / backdrop.naturalHeight,
+    );
+    const dw = backdrop.naturalWidth * scale;
+    const dh = backdrop.naturalHeight * scale;
+    ctx.drawImage(backdrop, (STATE.width - dw) / 2, (STATE.height - dh) / 2, dw, dh);
+  }
   ctx.fillStyle = 'rgba(2,6,17,0.52)';
   ctx.fillRect(0, 0, STATE.width, STATE.height);
 }
@@ -4946,6 +5799,9 @@ function sfxFuel()       { sfxSweep(880, 880, 0.08, 'sine', 0.16);              
 function sfxBoost()      { sfxNoise(0.09, 0.15, 5200);                                       // 闪电加速：电流 zapp
                            sfxSweep(1200, 1800, 0.10, 'square', 0.08, 0.02);
                            sfxSweep(180, 820, 0.40, 'sawtooth', 0.16, 0.05); }                 //   + 上扬轰鸣
+function sfxFuelBurst()  { sfxNoise(0.12, 0.18, 4800);                                      // 燃料爆发：重电流 zapp
+                           sfxSweep(1000, 1600, 0.12, 'square', 0.10, 0.02);
+                           sfxSweep(220, 960, 0.35, 'sawtooth', 0.18, 0.04); }                 //   + 更猛的上扬轰鸣
 function sfxSlow()       { sfxSweep(560, 190, 0.32, 'sawtooth', 0.11); }                     // 减速：下坠滑音
 function sfxTriple()     { sfxSweep(220, 1400, 0.45, 'sawtooth', 0.14);                        // 超级形态变身：上扬充能
                            sfxNoise(0.20, 0.10, 4200);                                         //   + 能量迸发噪声
@@ -4954,6 +5810,7 @@ function sfxTriple()     { sfxSweep(220, 1400, 0.45, 'sawtooth', 0.14);         
                            sfxSweep(1320, 1320, 0.16, 'square', 0.13, 0.44); }
 function sfxPowerDown()  { sfxSweep(880, 160, 0.45, 'sawtooth', 0.14);                         // 超级形态结束：下行熄火
                            sfxSweep(440, 110, 0.40, 'triangle', 0.10, 0.06); }
+function sfxFuelBurstEnd() { sfxSweep(720, 140, 0.4, 'sawtooth', 0.12); }                      // 燃料爆发结束：下行熄火（比超级形态略低沉短促）
 function sfxDeath()      { sfxNoise(0.5, 0.35, 900);                                         // 死亡：噪声爆 + 低频轰
                            sfxSweep(160, 38, 0.5, 'sine', 0.30); }
 // ---- 战斗与预警音效 ----
@@ -4975,14 +5832,17 @@ function sfxBigBlast()   { sfxNoise(0.55, 0.30, 800);                           
                            sfxSweep(520, 90, 0.40, 'sawtooth', 0.12, 0.08); }
 function sfxBoostWarn(st){ const f = [990, 990, 1180, 1480][st] || 990;                      // BOOST 预警：3 声渐高 beep
                            sfxSweep(f, f, 0.09, 'square', 0.14); }
+function sfxFuelBurstWarn(st){ const f = [880, 880, 1040, 1280][st] || 880;                    // 燃料爆发预警：3 声渐高 beep（音色更厚实）
+                           sfxSweep(f, f, 0.09, 'sawtooth', 0.13); }
 function sfxTripleWarn(st){ const f = [780, 780, 940, 1180][st] || 780;                      // 超级形态预警：3 声渐高 beep（音色区别于 BOOST）
-                           sfxSweep(f, f, 0.10, 'triangle', 0.15); }
+                           sfxSweep(f, f, 0.09, 'square', 0.14); }
 
 function propulsionAudioMode() {
   if (STATE.mode !== 'PLAYING'
     || !propulsionAudioHasOwnership()
     || audioIsSfxMuted()) return 'off';
   if (STATE.boostT > 0) return 'boost';
+  if (STATE.fuelBurstT > 0) return 'boost';  // v1.2.0 燃料爆发复用 BOOST 音频参数
   if (STATE.gliding) return STATE.tripleT > 0 ? 'super' : 'ordinary';
   return 'off';
 }
@@ -5146,6 +6006,10 @@ function render() {
   renderEffects(ctx);
   ctx.restore();
   if (STATE.mode === 'PLAYING') renderHUD(ctx);
+  // v1.2.0 绘制新手引导提示
+  if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
+    globalThis.Skyroads.tutorial.renderTutorial(ctx, STATE.tutorial, STATE);
+  }
   if (STATE.mode === 'MENU') renderMenu(ctx);
   if (STATE.mode === 'GAMEOVER') renderGameOver(ctx);
 }
@@ -5321,6 +6185,7 @@ function init() {
       actions: {
         getMode: () => STATE.mode,
         start: startGame,
+        tutorial: startTutorialMission,
         menu: gotoMenu,
         getPlayerName: () => currentLeaderboardSnapshot().profile.name,
         beforeLeaderboard() {

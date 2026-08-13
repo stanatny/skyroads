@@ -58,12 +58,24 @@
     ship: Object.freeze({
       neutral: './assets/ship/semantic/player-neutral.png',
       thrust: './assets/ship/semantic/player-thrust.png',
+      super: './assets/ship/semantic/player-super.png',
     }),
     ui: Object.freeze({
       panel: './assets/ui/panel-frame-cyan.png',
       meter: './assets/ui/meter-frame-cyan.png',
       hologramPanel: './assets/ui/hologram-panel.png',
       industrialMeter: './assets/ui/industrial-meter-overlay.png',
+      pickupBoost: './assets/pickups/boost.png',
+      pickupSlow: './assets/pickups/slow.png',
+      pickupTriple: './assets/pickups/triple.png',
+      pickupMagnet: './assets/pickups/magnet.png',
+      menuBackdrop: './assets/ui/menu-backdrop.jpg',
+      bgGalaxy: './assets/bg/galaxy.jpg',
+      bgPlanet: './assets/bg/planet.png',
+      bgMoon: './assets/bg/moon.png',
+      roadSurface: './assets/bg/road-surface.jpg',
+    roadSurfaceMip1: './assets/bg/road-surface-mip1.jpg',
+    roadSurfaceMip2: './assets/bg/road-surface-mip2.jpg',
     }),
     icons: Object.freeze({
       translate: './assets/icons/translate.svg',
@@ -235,10 +247,12 @@
     });
   }
 
-  function resolvePlayerShipFrame(visualAssets, energized = false) {
+  function resolvePlayerShipFrame(visualAssets, energized = false, superActive = false) {
     if (!visualAssets || !visualAssets.shipFramesReady || !visualAssets.assets || !visualAssets.assets.ship) return null;
     const frames = visualAssets.assets.ship;
     if (!frames.neutral || !frames.thrust || !frames.neutral.loaded || !frames.thrust.loaded) return null;
+    // v1.3.3 超级形态专用船体模组（金色凤凰战舰）：加载成功时整船换模，而不是叠加光效
+    if (superActive && frames.super && frames.super.loaded) return frames.super.element || null;
     const frame = energized ? frames.thrust : frames.neutral;
     return frame.element || null;
   }
@@ -261,7 +275,7 @@
     boostActive = false,
     superActive = false,
   } = {}) {
-    const shipFrame = resolvePlayerShipFrame(visualAssets, energized);
+    const shipFrame = resolvePlayerShipFrame(visualAssets, energized, superActive);
     const layers = [shipFrame ? 'ship-image' : 'procedural-ship'];
     if (superActive) layers.push('super-surface');
     if (chargeActive) layers.push('charge');
@@ -323,6 +337,7 @@
     chargeElapsed = 0,
     chargeRevealDelay = 0.5,
     boostActive = false,
+    fuelBurstActive = false,
     superActive = false,
     magnetActive = false,
   } = {}) {
@@ -331,6 +346,7 @@
     return Object.freeze({
       charge: elapsed > 0 && elapsed >= revealDelay,
       boost: Boolean(boostActive),
+      fuelBurst: Boolean(fuelBurstActive),
       super: Boolean(superActive),
       magnet: Boolean(magnetActive),
     });
@@ -558,6 +574,7 @@
     listen(documentObject, 'keydown', onKeyDown);
     listen(elements.startButton, 'click', () => { if (actions.start) actions.start(); });
     listen(elements.restartButton, 'click', () => { if (actions.start) actions.start(); });
+    listen(elements.tutorialButton, 'click', () => { if (actions.tutorial) actions.tutorial(); });
     listen(elements.menuButton, 'click', () => { if (actions.menu) actions.menu(); });
     function runUtilityAction(action) {
       if (action) action();
@@ -744,11 +761,12 @@
     legacyBest.hidden = true;
     const startButton = makeButton(documentObject, 'start-mission', 'primary-action mission-action');
     startButton.setAttribute('aria-keyshortcuts', 'Enter Space');
+    const tutorialButton = makeButton(documentObject, 'start-tutorial', 'secondary-action');
     const titleLeaderboardButton = makeButton(documentObject, 'open-leaderboard', 'secondary-action');
-    const titleActions = makeElement(documentObject, 'div', { className: 'panel-actions' });
-    titleActions.append(startButton, titleLeaderboardButton);
+    const titleActions = makeElement(documentObject, 'div', { className: 'panel-actions wrap-actions' });
+    titleActions.append(startButton, tutorialButton, titleLeaderboardButton);
     const controlList = makeElement(documentObject, 'ul', { className: 'control-list' });
-    const controlItems = Array.from({ length: 5 }, () => makeElement(documentObject, 'li'));
+    const controlItems = Array.from({ length: 6 }, () => makeElement(documentObject, 'li'));
     controlList.append(...controlItems);
     const routeGuide = makeElement(documentObject, 'p', { className: 'route-guide' });
     elements.titleScreen.replaceChildren(
@@ -837,7 +855,7 @@
       ...elements,
       languageButton, musicButton, sfxButton,
       titleMeta, titleKicker, versionBadge, titleHeading, profileName, legacyBest,
-      startButton, titleLeaderboardButton, controlItems, routeGuide, pauseHeading, pauseHint,
+      startButton, titleLeaderboardButton, tutorialButton, controlItems, routeGuide, pauseHeading, pauseHint,
       gameOverHeading, deathReason, resultScore, resultDistance, resultElapsed, resultRank, resultNewBest,
       restartButton, menuButton, gameOverLeaderboardButton, gameOverRenameButton,
       leaderboardPanel, leaderboardHeading, leaderboardCutoff, leaderboardEmpty, leaderboardTableWrap, leaderboardTable,
@@ -910,8 +928,9 @@
     ui.titleHeading.textContent = translator.t('menu.title');
     ui.profileName.textContent = `${translator.t('rename.label')}: ${snapshot.profile.name}`;
     makeActionContent(documentObject, ui.startButton, translator.t('menu.start'), translator.t('shortcut.startRestart'));
+    ui.tutorialButton.textContent = translator.t('menu.tutorial');
     ui.titleLeaderboardButton.textContent = translator.t('menu.leaderboard');
-    const controlIds = ['controls.move', 'controls.jump', 'controls.shoot', 'controls.touch', 'controls.pause'];
+    const controlIds = ['controls.move', 'controls.jump', 'controls.fuelBurst', 'controls.shoot', 'controls.touch', 'controls.pause'];
     ui.controlItems.forEach((item, index) => { item.textContent = translator.t(controlIds[index]); });
     ui.routeGuide.textContent = translator.t('guide.routes');
     ui.pauseHeading.textContent = translator.t('pause.title');

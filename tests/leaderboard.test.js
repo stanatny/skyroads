@@ -238,7 +238,7 @@ test('document validation rejects wrong versions and malformed profiles', () => 
   assert.equal(validateDocument({ ...base, profile: { playerId: 'player-1', name: '\u0000' } }), null);
 });
 
-test('renameProfile changes only history owned by the current profile', () => {
+test('renameProfile updates the profile name but keeps historical entry names', () => {
   const document = {
     version: 1,
     profile: { playerId: 'player-1', name: 'Nova' },
@@ -249,7 +249,8 @@ test('renameProfile changes only history owned by the current profile', () => {
   };
   const renamed = renameProfile(document, '  Lyra\u0000  ');
   assert.equal(renamed.profile.name, 'Lyra');
-  assert.deepEqual(renamed.entries.map((entry) => entry.name), ['Lyra', 'Vega']);
+  // 历史记录保留创造纪录时的名字，不被改名回溯改写
+  assert.deepEqual(renamed.entries.map((entry) => entry.name), ['Nova', 'Vega']);
   assert.equal(document.profile.name, 'Nova');
 });
 
@@ -459,7 +460,7 @@ test('finalizeRun caches a nonqualifying run ID so repeated finalization is idem
   assert.equal(leaderboard.getSnapshot().entries.some((entry) => entry.id === 'miss'), false);
 });
 
-test('renamePlayer updates only entries owned by the current player ID', () => {
+test('renamePlayer updates the profile but keeps historical entry names', () => {
   const entries = [
     makeEntry(1),
     makeEntry(2, { id: 'other', playerId: 'other-player', name: 'Vega' }),
@@ -470,7 +471,8 @@ test('renamePlayer updates only entries owned by the current player ID', () => {
   const result = leaderboard.renamePlayer('  Lyra  ');
   assert.equal(result.changed, true);
   assert.equal(result.snapshot.profile.name, 'Lyra');
-  assert.deepEqual(result.snapshot.entries.map((entry) => entry.name), ['Lyra', 'Vega']);
+  // 改名只影响之后的成绩：既有记录保留落盘时的名字
+  assert.deepEqual(result.snapshot.entries.map((entry) => entry.name), ['Nova', 'Vega']);
 });
 
 test('two initialized controllers reconcile sequential runs and back up the latest active document', () => {
@@ -504,16 +506,19 @@ test('stale rename and run mutations rebase without losing peer history or profi
   second.renamePlayer('Lyra');
   let durable = JSON.parse(storage.values.get(STORAGE_KEYS.active));
   assert.equal(durable.profile.name, 'Lyra');
-  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-a', 'Lyra']]);
+  // run-a 落盘时署名 Nova，改名不回溯改写
+  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-a', 'Nova']]);
 
   first.finalizeRun({ id: 'run-b', distanceMeters: 200, enemyKills: 0, elapsedMs: 10 });
   durable = JSON.parse(storage.values.get(STORAGE_KEYS.active));
-  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-b', 'Lyra'], ['run-a', 'Lyra']]);
+  // 新成绩 run-b 使用改名后的 Lyra
+  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-b', 'Lyra'], ['run-a', 'Nova']]);
 
   second.renamePlayer('Vega');
   durable = JSON.parse(storage.values.get(STORAGE_KEYS.active));
   assert.equal(durable.profile.name, 'Vega');
-  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-b', 'Vega'], ['run-a', 'Vega']]);
+  // 再次改名同样不影响既有记录
+  assert.deepEqual(durable.entries.map((entry) => [entry.id, entry.name]), [['run-b', 'Lyra'], ['run-a', 'Nova']]);
   assert.deepEqual(JSON.parse(storage.values.get(STORAGE_KEYS.backup)).entries.map((entry) => entry.id), ['run-b', 'run-a']);
 });
 
@@ -675,7 +680,8 @@ test('repairing corrupt active state keeps a newer in-memory profile over its ol
 
   assert.equal(result.repaired, true);
   assert.equal(result.snapshot.profile.name, 'Lyra');
-  assert.equal(result.snapshot.entries[0].name, 'Lyra');
+  // 历史成绩保留落盘时的署名 Nova，改名只影响之后的记录
+  assert.equal(result.snapshot.entries[0].name, 'Nova');
   assert.equal(JSON.parse(storage.values.get(STORAGE_KEYS.active)).profile.name, 'Lyra');
 });
 

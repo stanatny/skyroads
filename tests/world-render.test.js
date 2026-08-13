@@ -386,7 +386,7 @@ function sourceTuple(metadata, frameIndex) {
   return [sx, sy, sw, sh];
 }
 
-test('road deck uses neutral steel layers and grounded structures draw semantic contact footprints', () => {
+test('road deck uses vector rust gradient layers and grounded structures draw semantic contact footprints', () => {
   const harness = createHarness();
   vm.runInContext(`
     STATE.position = 0;
@@ -396,11 +396,16 @@ test('road deck uses neutral steel layers and grounded structures draw semantic 
     }));
     renderTrack(__ctx);
   `, harness.sandbox);
+  const deckGradStops = harness.context.events
+    .filter((event) => event.type === 'fill' && event.style && typeof event.style === 'object')
+    .flatMap((event) => event.style.stops.map((stop) => stop[1]));
+  assert.ok(deckGradStops.includes('#4d2f22'));
+  assert.ok(deckGradStops.includes('#5a3929'));
   const deckFills = harness.context.events
     .filter((event) => event.type === 'fill')
     .map((event) => event.style);
-  assert.ok(deckFills.includes('#222a34'));
-  assert.ok(deckFills.includes('#28323d'));
+  assert.equal(deckFills.includes('#222a34'), false);
+  assert.equal(deckFills.includes('#28323d'), false);
   assert.equal(deckFills.includes('#3a3a55'), false);
   assert.equal(deckFills.includes('#34344e'), false);
   const seamAlphas = harness.context.events
@@ -1594,4 +1599,44 @@ test('missing gap topology module keeps an isolated gap visibly dangerous', () =
     event.type === 'stroke'
       && (event.style === '#ff6b4d' || event.style === '#ffb24c')
   )));
+});
+
+test('renderEffects paints expiry warning vignettes without throwing (boost / fuel burst / super form)', () => {
+  const harness = createHarness();
+  const scenarios = [
+    { name: 'boost', boostT: 'CONFIG.BOOST_WARN_TIME * 0.5', fuelBurstT: '0', tripleT: '0', color: '120,230,255' },
+    { name: 'fuel burst', boostT: '0', fuelBurstT: 'CONFIG.FUEL_BURST_WARN_TIME * 0.5', tripleT: '0', color: '255,200,80' },
+    { name: 'super form', boostT: '0', fuelBurstT: '0', tripleT: 'CONFIG.TRIPLE_WARN_TIME * 0.5', color: '255,170,60' },
+  ];
+  for (const scenario of scenarios) {
+    harness.context.events.length = 0;
+    // 回归：v1.2.0 开发期此处曾因重复 if 块残留未定义变量 hE，
+    // BOOST 进入到期预警窗口时 renderEffects 抛 ReferenceError → rAF 链中断 → 画面永久冻结
+    const created = [];
+    const originalCreateLinear = harness.context.createLinearGradient;
+    harness.context.createLinearGradient = (...args) => {
+      const g = originalCreateLinear(...args);
+      created.push(g);
+      return g;
+    };
+    try {
+      vm.runInContext(`
+        STATE.mode = 'PLAYING';
+        STATE.boostT = ${scenario.boostT};
+        STATE.fuelBurstT = ${scenario.fuelBurstT};
+        STATE.tripleT = ${scenario.tripleT};
+        renderEffects(__ctx);
+      `, harness.sandbox);
+    } finally {
+      harness.context.createLinearGradient = originalCreateLinear;
+    }
+    assert.ok(
+      created.length >= 4,
+      `${scenario.name} warning should paint 4 edge gradients, got ${created.length}`,
+    );
+    assert.ok(
+      created.some((g) => g.stops.some((stop) => String(stop[1]).includes(scenario.color))),
+      `${scenario.name} warning gradient should use rgba(${scenario.color},...)`,
+    );
+  }
 });

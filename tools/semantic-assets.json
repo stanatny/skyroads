@@ -3,91 +3,91 @@
   "assets": [
     {
       "source": "assets/ship/player-neutral.png",
-      "sourceSha256": "33d7acbe701d7dd243db72dcd6dc89541623160960f794611867699b562af7a4",
+      "sourceSha256": "6759153f2228079f519536bcf457b0ac12ac6ea838bb65e2b36d74ba92f529b8",
       "output": "assets/ship/semantic/player-neutral.png",
       "role": "player"
     },
     {
       "source": "assets/ship/player-thrust.png",
-      "sourceSha256": "00518ff8b002e5072254d2411d0484e587a8901cde7caf7deccd372733e60e7f",
+      "sourceSha256": "3b914404ce0e9a78b6aa4e4116f0edbb404fa1ffe8f7579e46925d77986e3aa7",
       "output": "assets/ship/semantic/player-thrust.png",
       "role": "player"
     },
     {
       "source": "assets/world/drone-scout.png",
-      "sourceSha256": "c700f47ecdccfe5f3400f5947cf5494331442c80a347205efa1caaca71d5ba82",
+      "sourceSha256": "4d54dd4fcb65b73251ca5650b8dea9a5b15b6f0fbbb6e7509b7456ebd17b0a45",
       "output": "assets/world/semantic/drone-scout.png",
       "role": "hostile"
     },
     {
       "source": "assets/world/drone-striker.png",
-      "sourceSha256": "774ec0bae0db51b05d2dd5ce48e4449b576c246414a6578cefb07b301b47f376",
+      "sourceSha256": "f8d2c9e75885945a5f1c565b7588174e84f79eef6715e14bc9e011c3edc45b65",
       "output": "assets/world/semantic/drone-striker.png",
       "role": "hostile"
     },
     {
       "source": "assets/world/turret-sentry.png",
-      "sourceSha256": "b7688afbe1767a772abf9f397fd524e5e241a6d1ffc29ff849ce948583615fb9",
+      "sourceSha256": "60d56394fa03d647e931acd011dcf981cc1135a0e68338489efd488ccaa08c9c",
       "output": "assets/world/semantic/turret-sentry.png",
       "role": "hostile"
     },
     {
       "source": "assets/world/turret-heavy.png",
-      "sourceSha256": "bc915327eb3b8354e94d8f78a9a1e6a2f38208f30a15b55736a3126e414cb4a3",
+      "sourceSha256": "20347c49fb5600a055d18130e111f4f9d4d1edd0a9f80442e3642b10df2e31ca",
       "output": "assets/world/semantic/turret-heavy.png",
       "role": "hostile"
     },
     {
       "source": "assets/world/barrier-rail.png",
-      "sourceSha256": "28a2f5ee63b70708e593c1f1e82ac6c5094fcc9c3464023004581c310f6f879a",
+      "sourceSha256": "154fcf7635e3cf3ae2f0d1c2911fd36580ccc473f2e0339791462b9ba3404817",
       "output": "assets/world/semantic/barrier-rail.png",
       "role": "structure"
     },
     {
       "source": "assets/world/barrier-crate.png",
-      "sourceSha256": "c0b327ffbccdc0ba3880200ac9832fd42872f1c707951188a9c1df58000394f1",
+      "sourceSha256": "3bba94628454ec4b5d3376e9baaca7a9ea18f91b7731e49d3d9842da053c2fcb",
       "output": "assets/world/semantic/barrier-crate.png",
       "role": "structure"
     },
     {
       "source": "assets/world/structure-pylon.png",
-      "sourceSha256": "340d52a6371b6ed19107b977f6f12c4757156599dbc383d8cdcef39e9d088da5",
+      "sourceSha256": "9613aab9ac2ce8dc42feb32b46ffd710d2eee4bc20b2c2e150668bca59f2af8a",
       "output": "assets/world/semantic/structure-pylon.png",
       "role": "structure"
     },
     {
       "source": "assets/world/structure-bastion.png",
-      "sourceSha256": "5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9",
+      "sourceSha256": "dc62d0cc12e4a56d0400c221c516dca49126fff2953a3a79cca724e0aac99d78",
       "output": "assets/world/semantic/structure-bastion.png",
       "role": "structure"
     },
     {
       "source": "assets/world/structure-reactor.png",
-      "sourceSha256": "b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa",
+      "sourceSha256": "5feb3ae96dbcd5e5b5c7c8a2ffd03a9ea166b8f83cea0a59983b2dd2291d46a2",
       "output": "assets/world/semantic/structure-reactor.png",
       "role": "structure"
     },
     {
       "source": "assets/world/structure-tower.png",
-      "sourceSha256": "ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436",
+      "sourceSha256": "fafc6f4b9ac8024b306ee9b68985a4a2caf6a7616038f5e899e34a2d54aed029",
       "output": "assets/world/semantic/structure-tower.png",
       "role": "structure"
     },
     {
       "source": "assets/world/corridor-low.png",
-      "sourceSha256": "28b7ffa57ccf7feadce8910cbc6f18cc603d2532a6163e3367b0081c607df661",
+      "sourceSha256": "9b1ad5e21583f904071fa5f4a337be23c754404d82ab5d1685b7e3d7d9887d09",
       "output": "assets/world/semantic/corridor-low.png",
       "role": "structure"
     },
     {
       "source": "assets/world/corridor-medium.png",
-      "sourceSha256": "877199033c76c2fd5da5498e21c07d3e44d966408907ad423662fc2cc5166503",
+      "sourceSha256": "271713afc18a2f2fbaaf7bace82adb171736316da9d04e41962247ea7f5b218c",
       "output": "assets/world/semantic/corridor-medium.png",
       "role": "structure"
     },
     {
       "source": "assets/world/gap-edge.png",
-      "sourceSha256": "c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49",
+      "sourceSha256": "e2b9f8f23fb74ca88789e792d16c4a941d697f005e79bab89e58f0b2b4988b9d",
       "output": "assets/world/semantic/gap-edge.png",
       "role": "gap"
     }

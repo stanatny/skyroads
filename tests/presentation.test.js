@@ -47,6 +47,7 @@ test('visual manifest points player frames at the semantic derivatives', () => {
   assert.deepEqual(VISUAL_ASSET_MANIFEST.ship, {
     neutral: './assets/ship/semantic/player-neutral.png',
     thrust: './assets/ship/semantic/player-thrust.png',
+    super: './assets/ship/semantic/player-super.png',
   });
 });
 
@@ -438,6 +439,7 @@ test('HUD visibility delays charge until the contextual reveal threshold', () =>
   assert.deepEqual(hudVisibilityPlan({}), {
     charge: false,
     boost: false,
+    fuelBurst: false,
     super: false,
     magnet: false,
   });
@@ -451,11 +453,13 @@ test('HUD visibility delays charge until the contextual reveal threshold', () =>
   }).charge, true);
   assert.deepEqual(hudVisibilityPlan({
     boostActive: true,
+    fuelBurstActive: true,
     superActive: true,
     magnetActive: true,
   }), {
     charge: false,
     boost: true,
+    fuelBurst: true,
     super: true,
     magnet: true,
   });
@@ -855,7 +859,7 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(ui.startButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
   assert.equal(ui.restartButton.getAttribute('aria-keyshortcuts'), 'Enter Space');
   assert.equal(ui.menuButton.getAttribute('aria-keyshortcuts'), 'Escape');
-  assert.equal(ui.controlItems.length, 5);
+  assert.equal(ui.controlItems.length, 6);
   assert.equal(ui.titleMeta.tagName, 'DIV');
   assert.equal(ui.titleMeta.className, 'title-meta');
   assert.deepEqual(ui.titleMeta.children, [ui.titleKicker, ui.versionBadge]);
@@ -918,7 +922,8 @@ test('command center builds one semantic control tree and renders translated sta
   assert.equal(ui.versionBadge.getAttribute('aria-label'), 'app.versionLabel:1.1');
   assert.equal(ui.pauseHeading.textContent, 'pause.title');
   assert.equal(ui.pauseHint.textContent, 'pause.resumeHint');
-  assert.equal(ui.controlItems[4].textContent, 'controls.pause');
+  assert.equal(ui.controlItems[2].textContent, 'controls.fuelBurst');
+  assert.equal(ui.controlItems[5].textContent, 'controls.pause');
   assert.equal(ui.profileName.textContent, 'rename.label: <Nova>');
   assert.equal(ui.deathReason.textContent, 'death.wall');
   assert.equal(ui.resultScore.textContent, 'result.score:123');

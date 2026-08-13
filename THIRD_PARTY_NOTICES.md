@@ -4,6 +4,10 @@ Downloaded on **2026-08-02** and **2026-08-03**. Only the files listed below are
 
 The repository's project license applies only to original project code and artwork. The third-party works below remain available under their respective licenses. Local semantic renaming, recoloring, raster rendering, compositing, and UI integration do not change those upstream licenses. "Upstream and committed" identifies byte-identical runtime copies; "upstream" alone identifies uncommitted render inputs. Derived output hashes are recorded separately in `docs/assets/ship-render.md` and `docs/assets/world-art.md`.
 
+## AI-generated v4 artwork
+
+The v4 ship frames, upright world atlases, and gap-edge atlas are synthesized from original AI-generated master images committed under `assets-src/masters/`, with generation prompts archived in `assets-src/PROMPTS.md` and anchor geometry in `assets-src/atlas-anchors.json`. The v1.3.3 super-form ship frame (`assets/ship/player-super.png` and its semantic copy) is likewise original AI-generated artwork (golden phoenix starfighter, generated with `assets/ship/player-thrust.png` as the composition reference; cleaned: watermark erase, alpha threshold, largest-component keep, transparent-border RGB zeroing). The v4 pickup sprites (`assets/pickups/`, from `assets-src/masters/pickups/` via `tools/build-pickup-sprites.py`), the environment textures (`assets/bg/`: galaxy backdrop, ringed planet, icy moon, Mars road surface — including the anti-flicker mipmap derivatives `road-surface-mip1.jpg` / `road-surface-mip2.jpg` blurred from the same master), and the main-menu backdrop (`assets/ui/menu-backdrop.jpg`) are likewise original AI-generated artwork. These masters are project artwork generated for this repository, not third-party stock, and are covered by the repository's project license. The masters were cleaned (watermark erase, alpha threshold, trim) and composited by `python3 tools/build-world-atlases.py`; derived output hashes are recorded in `docs/assets/world-art.md` and `docs/assets/ship-render.md`. The v3 Kenney/Quaternius pipeline below is kept as the superseded historical record.
+
 ## Quaternius — Ultimate Spaceships
 
 - Official source: https://quaternius.com/packs/ultimatespaceships.html
@@ -14,8 +18,7 @@ The repository's project license applies only to original project code and artwo
   - `Striker/OBJ/Striker.obj` — upstream SHA-256 `0f3ba504f07d57a5a3dae64357ee82ba60361e121f46eb6beb1635cea74baf1f`
   - `Striker/OBJ/Striker.mtl` — upstream SHA-256 `813dd98ed7cca2ea167804352df0ba13324c4b3990bf0a20f0f6154f1d02b41c`
   - `Striker/Textures/Striker_Blue.png` — upstream SHA-256 `38b2477b43a1253a15a3bdf4eec3473d334f9c281049b6cb7daeea265a955435`
-- Repository outputs: `assets/ship/player-neutral.png`, `assets/ship/player-thrust.png`, and the ship layer in `app/AppIcon.png`.
-- Modifications: fixed rear-high rendering, deep-navy texture multiply, cool key light, cyan rim light, restrained gold geometry, and optional cyan exhaust. See `docs/assets/ship-render.md`.
+- Legacy v3 repository outputs (superseded): `assets/ship/player-neutral.png`, `assets/ship/player-thrust.png`, and the ship layer in `app/AppIcon.png`. The v3 modifications were fixed rear-high rendering, deep-navy texture multiply, cool key light, cyan rim light, restrained gold geometry, and optional cyan exhaust. See `docs/assets/ship-render.md`.
 
 ## Kenney — Space Kit
 
@@ -45,15 +48,15 @@ The repository's project license applies only to original project code and artwo
   - `space-kit/Models/OBJ format/turret_single.mtl` — upstream SHA-256 `762ff003991e23328663179e8246dbe450f15f2467cc1947ff144c0ff1f49c8b`
   - `space-kit/Models/OBJ format/turret_single.obj` — upstream SHA-256 `2b3492cde9c9496d73963669d8d59e9f5ebccb9dcbf15dbf5336e7ca630c6a89`
 - Repository outputs:
-  - `assets/world/drone-scout.png` — SHA-256 `c700f47ecdccfe5f3400f5947cf5494331442c80a347205efa1caaca71d5ba82`
-  - `assets/world/drone-striker.png` — SHA-256 `774ec0bae0db51b05d2dd5ce48e4449b576c246414a6578cefb07b301b47f376`
-  - `assets/world/turret-sentry.png` — SHA-256 `b7688afbe1767a772abf9f397fd524e5e241a6d1ffc29ff849ce948583615fb9`
-  - `assets/world/turret-heavy.png` — SHA-256 `bc915327eb3b8354e94d8f78a9a1e6a2f38208f30a15b55736a3126e414cb4a3`
-  - `assets/world/barrier-rail.png` — SHA-256 `28a2f5ee63b70708e593c1f1e82ac6c5094fcc9c3464023004581c310f6f879a`
-  - `assets/world/structure-bastion.png` — SHA-256 `5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9`
-  - `assets/world/structure-reactor.png` — SHA-256 `b7dfe1838449eb5885e1ce9a032f00c0db936552a821b9134d647c9cf8ab06aa`
-  - `assets/world/corridor-low.png` — SHA-256 `28b7ffa57ccf7feadce8910cbc6f18cc603d2532a6163e3367b0081c607df661`
-  - `assets/world/gap-edge.png` — SHA-256 `c3a0962aee773cfa9ac129dba9b49764d297491307836472b1743fead4ebba49`
+  - `assets/world/drone-scout.png` — SHA-256 `4d54dd4fcb65b73251ca5650b8dea9a5b15b6f0fbbb6e7509b7456ebd17b0a45`
+  - `assets/world/drone-striker.png` — SHA-256 `f8d2c9e75885945a5f1c565b7588174e84f79eef6715e14bc9e011c3edc45b65`
+  - `assets/world/turret-sentry.png` — SHA-256 `60d56394fa03d647e931acd011dcf981cc1135a0e68338489efd488ccaa08c9c`
+  - `assets/world/turret-heavy.png` — SHA-256 `20347c49fb5600a055d18130e111f4f9d4d1edd0a9f80442e3642b10df2e31ca`
+  - `assets/world/barrier-rail.png` — SHA-256 `154fcf7635e3cf3ae2f0d1c2911fd36580ccc473f2e0339791462b9ba3404817`
+  - `assets/world/structure-bastion.png` — SHA-256 `dc62d0cc12e4a56d0400c221c516dca49126fff2953a3a79cca724e0aac99d78`
+  - `assets/world/structure-reactor.png` — SHA-256 `5feb3ae96dbcd5e5b5c7c8a2ffd03a9ea166b8f83cea0a59983b2dd2291d46a2`
+  - `assets/world/corridor-low.png` — SHA-256 `9b1ad5e21583f904071fa5f4a337be23c754404d82ab5d1685b7e3d7d9887d09`
+  - `assets/world/gap-edge.png` — SHA-256 `e2b9f8f23fb74ca88789e792d16c4a941d697f005e79bab89e58f0b2b4988b9d`
 
 ## Kenney — Modular Space Kit
 
@@ -68,13 +71,13 @@ The repository's project license applies only to original project code and artwo
   - `modular-space-kit/Models/OBJ format/room-large.mtl` — upstream SHA-256 `45a6736aa344a0c7e286b9c43c6a48f25b6a2f78d8c5949e430c3b4a93b4e060`
   - `modular-space-kit/Models/OBJ format/room-large.obj` — upstream SHA-256 `3ef1dc4b366e76b2bdd1ad44e5ad7a3e78c55e7d0fb067625dbaa6c38390b31e`
 - Repository outputs:
-  - `assets/world/barrier-crate.png` — SHA-256 `c0b327ffbccdc0ba3880200ac9832fd42872f1c707951188a9c1df58000394f1`
-  - `assets/world/structure-pylon.png` — SHA-256 `340d52a6371b6ed19107b977f6f12c4757156599dbc383d8cdcef39e9d088da5`
-  - `assets/world/structure-bastion.png` — SHA-256 `5a0e1c48be51c6841dd739bc41194ff13a9bad98411ad1d639d887eb72d756c9`
-  - `assets/world/structure-tower.png` — SHA-256 `ae90065ea755297ea2a62788171cc9d1aab6e11e665f37b7bfff51466a40c436`
-  - `assets/world/corridor-medium.png` — SHA-256 `877199033c76c2fd5da5498e21c07d3e44d966408907ad423662fc2cc5166503`
+  - `assets/world/barrier-crate.png` — SHA-256 `3bba94628454ec4b5d3376e9baaca7a9ea18f91b7731e49d3d9842da053c2fcb`
+  - `assets/world/structure-pylon.png` — SHA-256 `9613aab9ac2ce8dc42feb32b46ffd710d2eee4bc20b2c2e150668bca59f2af8a`
+  - `assets/world/structure-bastion.png` — SHA-256 `dc62d0cc12e4a56d0400c221c516dca49126fff2953a3a79cca724e0aac99d78`
+  - `assets/world/structure-tower.png` — SHA-256 `fafc6f4b9ac8024b306ee9b68985a4a2caf6a7616038f5e899e34a2d54aed029`
+  - `assets/world/corridor-medium.png` — SHA-256 `271713afc18a2f2fbaaf7bace82adb171736316da9d04e41962247ea7f5b218c`
 
-The two Kenney kits were normalized and assembled only as declared in `tools/world-assets.json`. Twelve upright outputs are `2240 × 960` transparent atlases with 21 yaw/pitch views; `gap-edge` remains the byte-identical legacy seven-yaw atlas. The renderer uses the Orbital Defense warm-white/graphite/cool-steel/cyan palette, places base seams and status lights on each source-derived +Z armor surface, keeps corridor atlases body-and-band-only, uses one low-wall cyan band, two medium/high-wall cyan bands, and wall-high-only gold beacons. Runtime Canvas owns corridor plinths, paired conduits, caps, and chevrons. Renderer SHA-256: `b6c2a2cffa83831672d7bd2985fd25f449f725311b354b9e0dec3a42bab3ba6b`. See `docs/assets/world-art.md`.
+The two Kenney kits were normalized and assembled only as declared in `tools/world-assets.json`. Twelve upright outputs are `2240 × 960` transparent atlases with 21 yaw/pitch views; `gap-edge` is the seven-yaw road-edge atlas. The renderer uses the Orbital Defense warm-white/graphite/cool-steel/cyan palette, places base seams and status lights on each source-derived +Z armor surface, keeps corridor atlases body-and-band-only, uses one low-wall cyan band, two medium/high-wall cyan bands, and wall-high-only gold beacons. Runtime Canvas owns corridor plinths, paired conduits, caps, and chevrons. Renderer SHA-256: `b6c2a2cffa83831672d7bd2985fd25f449f725311b354b9e0dec3a42bab3ba6b`. See `docs/assets/world-art.md`.
 
 ## Kenney — UI Pack: Sci-Fi 2.0
 
