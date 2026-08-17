@@ -28,3 +28,6 @@ __pycache__/
 
 # Local art exploration (not shipped)
 art-options/
+
+# macOS app bundle build artifact (rebuild via app/build.sh)
+*.app/

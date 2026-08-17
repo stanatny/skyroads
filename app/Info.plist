@@ -5,7 +5,7 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>星云巡航 Nebula Cruise</string>
+  <string>太空跳跳车</string>
   <key>CFBundleExecutable</key>
   <string>SkyRoads</string>
   <key>CFBundleIconFile</key>
@@ -13,13 +13,13 @@
   <key>CFBundleIdentifier</key>
   <string>com.skyroads.jumpcar</string>
   <key>CFBundleName</key>
-  <string>星云巡航 Nebula Cruise</string>
+  <string>太空跳跳车</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.3.0</string>
+  <string>1.0</string>
   <key>CFBundleVersion</key>
-  <string>5</string>
+  <string>1</string>
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
   <key>NSHighResolutionCapable</key>
