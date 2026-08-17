@@ -1,50 +1,50 @@
 ---
 name: game-ui-polish
-description: 游戏画面与 UI 视觉打磨工作流。当用户要求优化游戏外观、加特效、让画面"更酷/更精细/更明显"、设计 HUD 与状态反馈、用 AI 生成游戏素材（图标/贴图/精灵）或复用网上模组时触发。适用于 Canvas 2D / Web 游戏，也适用于其他技术栈游戏的视觉迭代。覆盖：视觉语义设计、程序化绘制细节、粒子与屏幕特效、增益/蓄力/预警全生命周期反馈、AI 素材与外部模组选型、无头验收。
+description: Visual and UI polish workflow for games. Trigger when the user asks to improve a game's look, add effects, make visuals "cooler/more detailed/more visible", design HUD and state feedback, generate game assets with AI (icons/textures/sprites), or reuse assets from the web. Applies to Canvas 2D / web games and to visual iteration in other game stacks. Covers visual-semantic design, procedural drawing detail, particle and screen effects, full-lifecycle feedback for buffs/charges/warnings, AI asset and external-module sourcing, and headless acceptance testing.
 ---
 
-# 游戏 UI 视觉打磨
+# Game UI Visual Polish
 
-## 核心原则
+## Core principles
 
-1. **所见即所判**：渲染与碰撞必须共用同一套投影/坐标。画面优化若改变实体位置或尺寸的呈现，先确认判定逻辑读取的是同一组数值，否则玩家会"死得莫名其妙"。
-2. **视觉语义先行**：建立并遵守全局配色语义表（如 红=危险、青=资源、金=限时增益、紫=敌机），新元素入表后再动手。并存的增益用色温区分（青白 vs 金），互不混淆。
-3. **状态变化必须"一眼可辨"**：任何限时增益/蓄力/减益，都要同时落在四个通道——**实体外观、HUD 计时、屏幕级特效、独立音效**。只做其中一两个，用户必然反馈"感觉不到"。
-4. **特效确定性纪律**：实体轮廓与判定相关动画全部由时钟/相位确定性驱动（`time + segIndex 相位`），禁止每帧随机；短寿命粒子（爆发、尾迹、电弧）允许随机。
+1. **What you see is what judges you**: rendering and collision must share the same projection/coordinates. If a visual change alters how an entity's position or size is presented, first confirm the hit logic reads the same values — otherwise players "die for no reason".
+2. **Visual semantics first**: establish and obey a global color-semantics table (e.g. red = danger, cyan = resource, gold = timed buff, purple = enemy). Add new elements to the table before drawing them. Coexisting buffs are distinguished by color temperature (cyan-white vs gold) so they never blur together.
+3. **State changes must be obvious at a glance**: every timed buff / charge / debuff lands on four channels at once — **entity appearance, HUD timer, screen-level effect, dedicated sound**. Ship only one or two and users will report "I can't feel it".
+4. **Deterministic-effects discipline**: entity silhouettes and judgment-relevant animation are driven deterministically by clock/phase (`time + segIndex` phase), never per-frame random; short-lived particles (bursts, trails, arcs) may randomize.
 
-## 工作流程
+## Workflow
 
-### 1. 诊断再动手
-先问"哪里不对"再画：画面与判定脱节？透视不一致（赛道有近大远小、实体却永远正面同比例）？状态无反馈？配色语义冲突？把诊断写进 plan 再改。
+### 1. Diagnose before drawing
+Ask "what's wrong" first: visuals decoupled from hit detection? Perspective mismatch (the road has near-big-far-small depth while entities stay front-facing at constant scale)? Missing state feedback? Color-semantic conflicts? Write the diagnosis into the plan before editing.
 
-### 2. 素材路线三选一
-- **程序化 Canvas 绘制**（默认）：渐变装甲、面板刻线、铆钉、航行灯、高光弧、流动虚线能量饰条。零依赖、可动画、风格统一。2D 几何风游戏优先这条。
-- **AI 生成素材**：图标、启动图、贴图等静态资产。生成后放入 `app/` 或 `assets/`，用构建脚本接入（本仓库范例：`app/build.sh` 用 `sips`+`iconutil` 把 `AppIcon.png` 打成 icns）。生成后必须 `ReadMediaFile` 验收，>10MB 先压缩再看。
-- **网上模组/素材库**：只在程序化与 AI 生成都达不到时引入；保留来源与许可靠证；优先无构建依赖的引入方式（CDN/单文件）。
+### 2. Pick one of three asset routes
+- **Procedural Canvas drawing** (default): gradient armor, panel seams, rivets, navigation lights, highlight arcs, flowing dashed energy trims. Zero dependencies, animatable, stylistically uniform. Preferred for 2D geometric-style games.
+- **AI-generated assets**: static assets such as icons, splash screens, textures. Place generated files under `app/` or `assets/` and wire them into the build script (in-repo example: `app/build.sh` packs `AppIcon.png` into an icns via `sips` + `iconutil`). Always verify generated images with `ReadMediaFile`; compress first if over 10 MB.
+- **Web modules / asset libraries**: only when procedural and AI generation both fall short. Keep provenance and license evidence; prefer integration with no build step (CDN / single file).
 
-### 3. 全生命周期反馈模板（增益/变身类）
-- **获得瞬间**：闪屏 + 冲击波环 + 爆发粒子 + 屏幕中央大字渐放 + 上扬充能音。
-- **持续期间**：实体外观变化（镀色/光刃/轨道能量球/光环脉冲）+ HUD 倒计时条 + 持续音效或尾迹。
-- **到期预警**（最后 N 秒）：分档渐高 beep（3/2/1s 三档 + 防重发 stage 计数）+ HUD 条变色急促闪烁 + 屏幕边缘脉冲光晕随剩余时间收缩 + 实体特效同频闪烁。频率要高于常态脉冲（如 ×10 vs ×6）。
-- **结束恢复**：余烬向上升腾消散 + 轻微闪屏 + 下行熄火音——"变回来了"必须有明确反馈，不能无声消失。
+### 3. Full-lifecycle feedback template (buffs / transformations)
+- **On acquisition**: screen flash + shockwave ring + burst particles + center-screen text scaling in + rising charge-up sound.
+- **While active**: entity appearance change (plating color / energy blades / orbiting orbs / pulsing aura) + HUD countdown bar + sustained sound or trail.
+- **Expiry warning** (final N seconds): escalating beeps in tiers (3/2/1 s tiers + a stage counter to prevent re-firing) + HUD bar color change with rapid blinking + pulsing screen-edge glow that shrinks as time runs out + entity effects blinking in sync. Warning frequency must exceed the normal pulse (e.g. ×10 vs ×6).
+- **On expiry**: embers rising and dissipating + light flash + descending power-down sound — "back to normal" needs explicit feedback; it must not vanish silently.
 
-### 4. 蓄力/充能类
-- 槽位**常驻**（空槽暗灰提示），不要随操作忽隐忽现；或至少蓄到一定阈值才出现。
-- 实体上的蓄力效果要随进度**显著**长大（参考：能量球 0.35→1.2 倍船高 + 白亮核心 + 折线电弧 + 满蓄旋转金环），用户不看 HUD 也能感知。
-- 分段提示音（1s/2s tick 渐高 + 满蓄 ding），松手按进度判定输出。
+### 4. Charge / power-up mechanics
+- The meter is **always visible** (dark gray when empty); never let it flicker in and out with input. Or at minimum only appear past a charge threshold.
+- The on-entity charge effect must grow **significantly** with progress (reference: energy ball 0.35→1.2× ship height + white-hot core + zigzag arcs + full-charge rotating gold ring) so users feel it without looking at the HUD.
+- Tiered audio cues (1 s / 2 s rising ticks + full-charge ding); releasing the key resolves output by progress.
 
-### 5. 拾取/吸附类
-- 给被吸物做**实体飞行动画**（生成飞行实体，渲染侧朝目标加速收敛，0.3~0.4s 消亡），不要只在原地冒粒子——"飞过来"的过程肉眼可见才有吸附感。
+### 5. Pickup / magnet mechanics
+- Give pulled items a **visible flight animation** (spawn a flying entity, render it accelerating toward the target, despawn after 0.3–0.4 s). Don't just puff particles in place — the "flying toward you" motion is what makes attraction readable.
 
-### 6. 音效即反馈
-Web Audio 程序化合成即可（零音频文件）：sweep（滑音）做跳跃/充能，噪声+低通做爆炸/喷火，方波/三角波音色区分不同预警。滑翔喷火等持续音用纯噪声+LFO，振荡器谐波会听成"电子报错"。macOS 按住键的系统提示音通过对全部游戏键 `preventDefault` 消除。
+### 6. Sound as feedback
+Procedural Web Audio synthesis suffices (zero audio files): sweeps for jumps/charges, noise + lowpass for explosions/fire, square vs triangle timbres to distinguish warnings. Sustained sounds like glide thrusters use pure noise + LFO — oscillator harmonics read as "electronic error beeping". The macOS key-hold system beep is removed by calling `preventDefault` on all game keys.
 
-## 验收（必做）
+## Acceptance (mandatory)
 
-- 每轮改完提取 `<script>` 跑 `node --check`。
-- 写**无头验收脚本**（桩掉 canvas/AudioContext/localStorage/requestAnimationFrame，eval 游戏源码 + 驱动断言）：状态机转换、数值门槛（如蓄力 3s 封顶、吸附范围边界±1 验证）、渲染烟测（每条新视觉分支都 render 一遍防抛异常）、20 局随机机器人冒烟。**捕获真实事件处理器派发假按键**，覆盖真实输入路径。
-- 不要轻信自查或子代理汇报，断言必须独立跑过才算完成。
+- After every round of edits, extract the `<script>` and run `node --check`.
+- Write a **headless acceptance script** (stub canvas/AudioContext/localStorage/requestAnimationFrame, eval the game source, drive assertions): state-machine transitions, numeric thresholds (e.g. charge caps at 3 s, magnet range boundaries ±1), render smoke tests (run every new visual branch once to catch exceptions), 20 random-bot smoke games. **Capture the real event handlers and dispatch synthetic key events** to cover the true input path.
+- Don't trust self-checks or subagent reports — the assertions must pass independently before the work counts as done.
 
-## 代码模式速查
+## Code-pattern quick reference
 
-具体的粒子爆发、冲击波、光环、预警边缘光晕、蓄力能量场、吸附飞行体、船体渐变装甲等可直接套用的 Canvas 代码模式，见 [references/canvas-effects-cookbook.md](references/canvas-effects-cookbook.md)。提炼自太空跳跳车游戏多轮 UI 打磨迭代的实战代码。
+Ready-to-adapt Canvas code patterns for particle bursts, shockwaves, auras, warning edge glows, charge energy fields, magnet flight entities, gradient ship armor, and more: see [references/canvas-effects-cookbook.md](references/canvas-effects-cookbook.md). Distilled from real iteration rounds on the SkyRoads hopper-car game.
