@@ -34,7 +34,7 @@ function createHarness(position = 160, lane = 3) {
     globalThis.__game = {
       STATE, CONFIG, enableFlightTerrain, disableFlightTerrain, heightAboveLane,
       tryJump, canFuelBurst, fireBullet, fireMissile, advanceShots, updatePhysics,
-      checkCollisions, enemyLane, resetGame, project,
+      checkCollisions, enemyLane, resetGame, project, updateEffects,
     };
     syncPropulsionAudio = () => {};
     shotBurstFx = () => {};
@@ -76,6 +76,37 @@ function advanceTo(harness, shot, target) {
     harness.game.advanceShots(0.005);
   }
 }
+
+test('magnet collection keeps world-space origins, respects its range and credits each crystal once', () => {
+  const { state, game, terrain } = createHarness(160, 0);
+  state.fuel = 10;
+  state.magnetT = 8;
+  state.track[161].lanes[2] = 'FUEL';
+  state.track[162].lanes[3] = 'FUEL';
+  state.track[161].lanes[4] = 'FUEL';
+  state.track[163].lanes[1] = 'FUEL';
+  game.updatePhysics(0.01);
+  assert.equal(state.magnetPulls.length, 2);
+  assert.ok(state.fuel > 45.8 && state.fuel < 46);
+  assert.equal(state.track[161].lanes[2], 'ROAD');
+  assert.equal(state.track[162].lanes[3], 'ROAD');
+  assert.equal(state.track[161].lanes[4], 'FUEL');
+  assert.equal(state.track[163].lanes[1], 'FUEL');
+  for (const pull of state.magnetPulls) {
+    close(pull.height, terrain.heightAt(pull.segment, pull.lane) + game.CONFIG.FUEL_BLOCK_HEIGHT);
+    assert.ok(pull.dur >= 0.6);
+  }
+  game.updatePhysics(0.01);
+  assert.equal(state.magnetPulls.length, 2);
+  assert.ok(state.fuel < 46);
+  game.updateEffects(0.35);
+  assert.equal(state.magnetPulls.length, 2);
+  assert.ok(state.magnetPulls.every((pull) => pull.t > 0.5));
+  // 开启减少动态效果也必须释放吸附实体，不能无限积累旧晶体。
+  state.reducedMotion = true;
+  game.updateEffects(0.4);
+  assert.equal(state.magnetPulls.length, 0);
+});
 
 test('a grounded pilot on an elevated platform can charge a burst and take a free first jump', () => {
   const { game, state, terrain } = createHarness(160, 0);

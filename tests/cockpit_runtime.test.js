@@ -68,3 +68,13 @@ test('context loss requests a static fallback repaint while a mission is paused'
   assert.equal(repaints, 1);
   assert.equal(f.state.mode, 'PAUSED');
 });
+
+test('sky audio cue disappears with a failed or disposed renderer', () => {
+  const cue = { active: true, phase: 0.35 };
+  const f = fixture({ create: () => ({ resize() {}, render() {}, dispose() {}, getSkyAudioCue: () => cue }) });
+  assert.equal(f.runtime.getSkyAudioCue(), cue);
+  f.runtime.dispose();
+  assert.equal(f.runtime.getSkyAudioCue(), null);
+  const fallback = fixture(null);
+  assert.equal(fallback.runtime.getSkyAudioCue(), null);
+});

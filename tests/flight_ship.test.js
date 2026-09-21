@@ -243,3 +243,90 @@ test('racing silhouette retains the previous maximum local width in both mechani
   box = bounds();
   assert.ok(box.max.x - box.min.x <= 5.7035);
 });
+
+test('super deployment unlocks shoulders before wings, dorsal fins and the lift drive', () => {
+  const { ship, state, update, resources } = createShip();
+  update(0);
+  const owned = resources.size;
+  state.tripleT = 12;
+  update(1 / 60);
+  const first = ship.getDiagnostics().transformation;
+  assert.ok(first.shoulders > 0);
+  assert.equal(first.wings, 0);
+  assert.equal(first.fins, 0);
+  assert.equal(first.drive, 0);
+  let wingBeforeFin = false;
+  let finBeforeDrive = false;
+  for (let frame = 2; frame < 150; frame += 1) {
+    update(frame / 60);
+    const phase = ship.getDiagnostics().transformation;
+    if (phase.wings > 0 && phase.fins === 0) wingBeforeFin = true;
+    if (phase.fins > 0 && phase.drive === 0) finBeforeDrive = true;
+  }
+  assert.ok(wingBeforeFin && finBeforeDrive, 'mechanical stages must visibly overlap rather than switch together');
+  assert.deepEqual({ ...ship.getDiagnostics().transformation }, {
+    shoulders: 1, wings: 1, fins: 1, drive: 1, liftJets: 2,
+  });
+  const portWing = ship.group.getObjectByName('port_super_shoulder');
+  const starboardWing = ship.group.getObjectByName('starboard_super_shoulder');
+  assert.ok(portWing.rotation.z < 0 && starboardWing.rotation.z > 0, 'the deployed wings must have positive dihedral');
+  assert.equal(resources.size, owned);
+  state.tripleT = 0;
+  for (let frame = 150; frame < 300; frame += 1) update(frame / 60);
+  assert.equal(ship.getDiagnostics().superBlend, 0);
+  assert.equal(ship.group.getObjectByName('super_power_spine').visible, false);
+  assert.equal(ship.group.getObjectByName('port_super_dorsal_fin').visible, false);
+  assert.equal(ship.group.getObjectByName('port_super_cannon_shroud').visible, false);
+  assert.equal(ship.getDiagnostics().transformation.liftJets, 0);
+  assert.equal(resources.size, owned);
+});
+
+test('pausing mid-deployment freezes mechanical transforms and exhaust phase until resume', () => {
+  const { ship, state, update } = createShip();
+  update(0);
+  state.tripleT = 10;
+  update(0.05);
+  const snapshot = () => {
+    ship.group.updateMatrixWorld(true);
+    const transforms = [];
+    const phases = [];
+    ship.group.traverse((object) => {
+      transforms.push(...object.matrix.elements);
+      if (object.material?.uniforms?.phase) phases.push(object.material.uniforms.phase.value);
+    });
+    return { transforms, phases, blend: ship.getDiagnostics().superBlend };
+  };
+  const before = snapshot();
+  assert.ok(before.blend > 0 && before.blend < 1);
+  state.mode = 'PAUSED';
+  for (let frame = 1; frame <= 15; frame += 1) update(frame);
+  assert.deepEqual(snapshot(), before);
+  state.mode = 'PLAYING';
+  update(15 + 1 / 60);
+  assert.ok(ship.getDiagnostics().superBlend > before.blend);
+});
+
+test('only super form deploys lift jets and their sustained lift responds to gliding', () => {
+  const { ship, state, update } = createShip();
+  Object.assign(state, { reducedMotion: true, boostT: 2, fuel: 80 });
+  update(0);
+  assert.equal(ship.getDiagnostics().superBlend, 0, 'boost alone must not transform the craft');
+  assert.equal(ship.group.getObjectByName('super_lift_vector_assembly').visible, false);
+  Object.assign(state, { tripleT: 12, boostT: 0 });
+  update(0.1);
+  const jet = ship.group.getObjectByName('port_super_lift_plume');
+  const shortPlume = jet.scale.y;
+  assert.equal(ship.getDiagnostics().transformation.liftJets, 2);
+  state.playerVY = 500;
+  update(0.2);
+  assert.ok(jet.scale.y > shortPlume * 2, 'jumping should show the active lift vector');
+  Object.assign(state, { playerVY: -120, gliding: true, playerY: 300 });
+  update(0.3);
+  const glidePlume = jet.scale.y;
+  assert.ok(glidePlume > shortPlume * 3);
+  update(3);
+  assert.equal(jet.scale.y, glidePlume, 'reduced motion keeps sustained lift legible without pulsation');
+  state.fuel = 0;
+  update(3.1);
+  assert.equal(jet.scale.y, shortPlume, 'fuel loss ends the gliding lift response');
+});

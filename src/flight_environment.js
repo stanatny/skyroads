@@ -3,11 +3,11 @@
 // 轨道枢纽是静态背景，建模时合并部件，运行时不增加逐帧对象或碰撞体。
 (function attachFlightEnvironment(scope) {
   const PALETTE = Object.freeze({
-    frame: 0x536a78,
-    edge: 0x92a2a6,
-    ceramic: 0xb4b5a6,
-    armor: 0x748a96,
-    shadow: 0x293f4e,
+    frame: 0x34485d,
+    edge: 0xa8b8c3,
+    ceramic: 0xc6cec9,
+    armor: 0x33598d,
+    shadow: 0x172b40,
     joint: 0x344c5a,
     copper: 0x9e815a,
     radiator: 0x334e64,

@@ -243,7 +243,7 @@ const STATE = {
   tripleWarnStage: 0,          // 超级形态到期预警 beep 已发档位（0..3，吃星/开局重置）
   superFx: 0,                  // 变身特效计时（秒，0.9→0：金色冲击波+大字+爆发粒子）
   magnetT: 0,                  // 磁铁剩余时间（秒，>0 期间 ±MAGNET_RANGE 车道燃料自动吸附）
-  magnetPulls: [],             // 磁铁吸附中的飞行燃料晶体 [{ x, y, t, dur }]（屏幕空间，朝船体收敛）
+  magnetPulls: [],             // 磁吸晶体：屏幕坐标供经典视图，lane/segment/height 保留三维起点
   // 滑翔（按住跳跃键 + 下落中 + 有燃料）
   gliding: false,
   fuelFlash: 0,                // 高耗油警示（秒）：二段跳扣燃料时置 0.6，HUD 燃料条变橙提示
@@ -4613,7 +4613,7 @@ function updatePhysics(dt) {
     // 磁铁吸附：magnetT > 0 期间，当前段与前方 MAGNET_SEG_AHEAD(2) 段
     // ±MAGNET_RANGE(3) 车道内的燃料自动飞来（无视高度）——
     // 燃料立即入账，同时生成飞行晶体动画实体（updateEffects 推进、renderEffects 绘制）
-    if (STATE.magnetT > 0) {
+    if (STATE.mode === 'PLAYING' && STATE.magnetT > 0) {
       const mBase = Math.floor(STATE.position);
       for (let mi = mBase; mi <= mBase + CONFIG.MAGNET_SEG_AHEAD && mi < STATE.track.length; mi++) {
         const mSeg = STATE.track[mi];
@@ -4624,9 +4624,14 @@ function updatePhysics(dt) {
           pickupFuel(mSeg, ml);
           const zRel = (mi - STATE.position) * CONFIG.SEGMENT_LENGTH + CONFIG.CAMERA_BACK;
           const fp = project(laneCenterX(ml), 300, Math.max(9, zRel));
-          if (fp.visible && currentCanvasMotionPolicy().decorativeMotion) {
-            STATE.magnetPulls.push({ x: fp.x, y: fp.y, t: 0, dur: 0.35 });
-          }
+          // 不能用经典相机可见性过滤三维动画；收集只入账一次，展示使用同一实体的世界起点。
+          const ground = STATE.terrainEnabled
+            ? globalThis.Skyroads.flightTerrain.heightAt(mi + 0.5, ml) : 0;
+          if (STATE.magnetPulls.length < 96) STATE.magnetPulls.push({
+            x: fp.x, y: fp.y, screenVisible: fp.visible, lane: ml, segment: mi + 0.5,
+            capturePosition: STATE.position,
+            height: ground + CONFIG.FUEL_BLOCK_HEIGHT, t: 0, dur: 0.68,
+          });
         }
       }
       STATE.magnetT = Math.max(0, STATE.magnetT - sdt);
@@ -5291,13 +5296,15 @@ function updateEffects(dt) {
   }
   STATE.trail = STATE.trail.filter(pt => pt.life > 0);
   // 磁铁飞行晶体：朝船体屏幕位置加速收敛（指数趋近 + 线性计时兜底）
-  if (STATE.magnetPulls.length > 0 && decorativeMotion) {
+  if (STATE.magnetPulls.length > 0) {
     const tp = project(playerWorldX(), STATE.playerY, CONFIG.CAMERA_BACK);
     for (const pl of STATE.magnetPulls) {
       pl.t += dt / pl.dur;
       const k = Math.min(1, pl.t);
-      pl.x += (tp.x - pl.x) * (0.12 + 0.5 * k);
-      pl.y += (tp.y - pl.y) * (0.12 + 0.5 * k);
+      if (decorativeMotion) {
+        pl.x += (tp.x - pl.x) * (0.12 + 0.5 * k);
+        pl.y += (tp.y - pl.y) * (0.12 + 0.5 * k);
+      }
     }
     STATE.magnetPulls = STATE.magnetPulls.filter(pl => pl.t < 1);
   }
@@ -5322,6 +5329,7 @@ function renderEffects(ctx) {
   ctx.globalAlpha = 1;
   // 磁铁吸附中的飞行燃料晶体（青色菱形 + 光晕，朝船体汇聚）
   for (const pl of STATE.magnetPulls) {
+    if (pl.screenVisible === false || STATE.reducedMotion) continue;
     ctx.globalAlpha = Math.max(0, 1 - pl.t * 0.3);
     const mg = ctx.createRadialGradient(pl.x, pl.y, 0, pl.x, pl.y, 14);
     mg.addColorStop(0, 'rgba(160,240,255,0.85)');
@@ -5697,6 +5705,7 @@ const AUDIO = {
   bgmStep: 0,
   nextNoteTime: 0,
   glideNodes: null, // 滑翔喷火轰鸣节点组 { src, rumbleFilter/gain, fireFilter/gain, lfo, lfo2, targetMode }
+  skyHero: null,    // 与画面阶段同步的背景掠过声，复用现有音效上下文与主增益
 };
 
 function audioInit() {
@@ -5990,6 +5999,28 @@ function propulsionAudioMode() {
   return 'off';
 }
 
+// 彩蛋只读取渲染器的轻量声音提示；音效所有权与推进声一致，静音或失焦立即停止。
+function syncSkyHeroAudio() {
+  try {
+    const runtime = STATE.cockpitRuntime;
+    const cue = runtime && runtime.getSkyAudioCue ? runtime.getSkyAudioCue() : null;
+    const active = STATE.mode === 'PLAYING' && !STATE.reducedMotion
+      && propulsionAudioHasOwnership() && !audioIsSfxMuted()
+      && cue && cue.active && cue.runId === STATE.runId;
+    if (!active) {
+      if (AUDIO.skyHero) AUDIO.skyHero.stop();
+      return;
+    }
+    const api = globalThis.Skyroads.flightSkyAudio;
+    if (!AUDIO.skyHero && AUDIO.ctx && AUDIO.master && api) {
+      AUDIO.skyHero = api.create({ context: AUDIO.ctx, destination: AUDIO.master });
+    }
+    if (AUDIO.skyHero) AUDIO.skyHero.update(cue);
+  } catch (_) {
+    try { if (AUDIO.skyHero) AUDIO.skyHero.stop(); } catch (_) {}
+  }
+}
+
 function propulsionAudioTargets(mode) {
   if (mode === 'boost') {
     return { rumbleFrequency: 820, rumbleGain: 0.175, fireFrequency: 2200, fireGain: 0.095 };
@@ -6003,6 +6034,7 @@ function propulsionAudioTargets(mode) {
 // ---- 持续推进轰鸣：一个宽带噪声源分流为低频轰鸣 + 中频喷气嘶声。
 //      BOOST > 超级滑翔 > 普通滑翔；同一图平滑变参，避免重叠状态重复起音。 ----
 function syncPropulsionAudio() {
+  syncSkyHeroAudio();
   try {
     const targetMode = propulsionAudioMode();
     const want = targetMode !== 'off';
@@ -6130,6 +6162,7 @@ function loop(now) {
   }
   syncAdaptiveAudio();
   if (!paused) render();
+  syncSkyHeroAudio();
   requestAnimationFrame(loop);
 }
 
@@ -6450,6 +6483,7 @@ function init() {
       // 暂停时主循环不重绘；GPU 丢失后补画一帧兼容画面，仍冻结物理。
       onFallback: () => {
         disableFlightTerrain();
+        if (AUDIO.skyHero) AUDIO.skyHero.stop();
         if (STATE.mode === 'PAUSED') render();
       },
     });

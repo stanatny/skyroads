@@ -16,7 +16,7 @@
     interfaceNode.dataset.mode = 'MENU';
     interfaceNode.setAttribute('aria-label', 'Flight instruments');
     const masthead = element('div', 'cockpit-masthead');
-    masthead.append(element('span', 'cockpit-wordmark', 'NC /'), element('span', 'cockpit-edition', 'FLIGHT TELEMETRY'));
+    masthead.append(element('span', 'cockpit-wordmark', 'NC'), element('span', 'cockpit-edition', 'NEBULA CRUISE'));
     refs.status = element('div', 'cockpit-flight-status');
     masthead.append(refs.status);
     // 飞行状态固定在屏幕信息区，不再放在远处场景或瞄准点上。
@@ -27,7 +27,12 @@
     interfaceNode.append(masthead);
 
     const briefing = element('aside', 'cockpit-briefing');
-    briefing.append(label('cockpit-overline', 'briefing'), element('strong', 'cockpit-sector', 'SECTOR 07'), label('cockpit-briefing-copy', 'mission'), label('cockpit-briefing-detail', 'missionDetail'));
+    const sector = element('div', 'cockpit-sector');
+    sector.append(element('span', 'cockpit-sector-label', 'SECTOR'), element('strong', '', '07'));
+    const missionMap = element('div', 'cockpit-mission-map');
+    missionMap.setAttribute('aria-hidden', 'true');
+    for (let lane = 0; lane < ROUTE_LANES; lane += 1) missionMap.append(element('i'));
+    briefing.append(label('cockpit-overline', 'briefing'), sector, missionMap, label('cockpit-briefing-copy', 'mission'), label('cockpit-briefing-detail', 'missionDetail'));
     const briefingFooter = element('div', 'cockpit-briefing-footer');
     briefingFooter.append(element('span', '', 'NC—07'), label('', 'chaseView'));
     briefing.append(briefingFooter);
@@ -37,14 +42,16 @@
     refs.warning.setAttribute('role', 'status');
     refs.warning.setAttribute('aria-live', 'polite');
     refs.warning.hidden = true;
-    interfaceNode.append(refs.warning);
 
     refs.tutorial = element('div', 'cockpit-tutorial');
     refs.tutorial.hidden = true;
     refs.tutorialPhase = element('span', 'cockpit-tutorial-phase');
     refs.tutorialText = element('span');
     refs.tutorial.append(refs.tutorialPhase, refs.tutorialText);
-    interfaceNode.append(refs.tutorial);
+    // 窄屏将教学、告警和限时状态按实际高度排列，避免同时出现时互相遮挡。
+    const contextNode = element('div', 'cockpit-context');
+    contextNode.append(refs.tutorial, refs.warning);
+    interfaceNode.append(contextNode);
 
     const consoleNode = element('section', 'cockpit-console');
     const systems = instrument('cockpit-systems', '01', 'reactor');
@@ -63,7 +70,11 @@
     const burstRow = element('div', 'cockpit-burst-row');
     burstRow.append(element('kbd', '', 'W / ↑'), refs.burstStatus);
     refs.burstBar = meter('cockpit-burst-bar', 'burst');
-    systems.append(fuelReadout, refs.fuelBar.track, jumpRow, burstRow, refs.burstBar.track);
+    const fuelModule = element('div', 'cockpit-fuel-module');
+    fuelModule.append(fuelReadout, refs.fuelBar.track);
+    const mobility = element('div', 'cockpit-mobility');
+    mobility.append(jumpRow, burstRow, refs.burstBar.track);
+    systems.append(fuelModule, mobility);
 
     const flight = instrument('cockpit-navigation', '02', 'navigation');
     const readings = element('div', 'cockpit-flight-readings');
@@ -89,7 +100,7 @@
     routeFooter.append(label('', 'route'));
     refs.routeRange = element('span');
     routeFooter.append(refs.routeRange);
-    systems.insertBefore(readings, fuelReadout);
+    systems.insertBefore(readings, fuelModule);
     flight.append(refs.route, routeFooter);
 
     const tactical = instrument('cockpit-tactical', '03', 'tactical');
@@ -116,7 +127,7 @@
       refs.effects.append(node);
       return { ...definition, node, time };
     });
-    interfaceNode.append(refs.effects);
+    contextNode.append(refs.effects);
 
     const controlRail = element('div', 'cockpit-control-rail');
     [['A / D', 'steer'], ['K / SPACE', 'jumpGlide'], ['J', 'fireCharge'], ['P', 'pause']].forEach(([key, id]) => {
@@ -330,7 +341,7 @@
   ]);
   const MESSAGES = Object.freeze({
     en: Object.freeze({
-      instruments: 'Flight telemetry', briefing: 'MISSION BRIEF / 001', mission: 'The void is calling.', missionDetail: 'Seven lanes. One pilot. No way back.', chaseView: 'CHASE CAMERA', flightState: 'FLIGHT MODE',
+      instruments: 'Flight telemetry', briefing: 'FLIGHT PLAN', mission: 'Read the road ahead.', missionDetail: 'Lift over breaks. Follow the high route. Charge your weapons to clear a path.', chaseView: '7-LANE FLIGHT', flightState: 'FLIGHT MODE',
       reactor: 'FLIGHT TELEMETRY', navigation: 'TERRAIN SCAN', tactical: 'TACTICAL', fuel: 'FUEL CELL', jumps: 'LIFT CHARGES', burst: 'FUEL BURST', burstReady: 'BURST READY', burstActive: 'BURST ACTIVE', burstMinimum: 'BURST ≥ 70%', charging: 'CHARGING',
       speed: 'VELOCITY', altitude: 'ALTITUDE', lane: 'LANE', route: 'TERRAIN SCAN', weapon: 'WEAPONS', weaponReady: 'PULSE CANNON ONLINE', missileReady: 'MISSILE READY', score: 'SCORE', distance: 'DISTANCE', time: 'FLIGHT TIME',
       steer: 'STEER', jumpGlide: 'LIFT / GLIDE', fireCharge: 'FIRE / CHARGE', pause: 'PAUSE', boost: 'OVERDRIVE', super: 'SUPER FORM', magnet: 'MAGNET', shield: 'INVULNERABLE',
@@ -338,7 +349,7 @@
       terrace: 'ELEVATED ROUTE', rampUp: 'ASCENDING RAMP', rampDown: 'DESCENDING RAMP',
     }),
     'zh-CN': Object.freeze({
-      instruments: '飞行遥测', briefing: '任务简报 / 001', mission: '驶入未知深空。', missionDetail: '七条航道，一名飞行员。向星云深处进发。', chaseView: '追尾视角', flightState: '飞行模式',
+      instruments: '飞行遥测', briefing: '航行计划', mission: '看清前路，掌握节奏。', missionDetail: '跃升越过断层，沿高架支路前进，蓄力清除前方障碍。', chaseView: '七航道飞行', flightState: '飞行模式',
       reactor: '飞行遥测', navigation: '前方地形', tactical: '战术系统', fuel: '燃料储量', jumps: '跃升次数', burst: '燃料爆发', burstReady: '爆发就绪', burstActive: '爆发推进中', burstMinimum: '爆发需要 ≥ 70%', charging: '蓄力中',
       speed: '航行速度', altitude: '相对高度', lane: '航道', route: '前方地形', weapon: '武器系统', weaponReady: '脉冲炮就绪', missileReady: '导弹就绪 · 松手发射', score: '任务得分', distance: '航行距离', time: '飞行时间',
       steer: '变道', jumpGlide: '跃升 / 滑翔', fireCharge: '射击 / 蓄力', pause: '暂停', boost: '超级加速', super: '超级形态', magnet: '磁力吸附', shield: '无敌保护',

@@ -309,3 +309,44 @@ test('shield follows the banked ship and contains the normal and expanded solid 
     assert.ok(outside <= 1.02, `airframe extends outside shield: ${outside}`);
   }
 });
+
+test('reducing motion mid-flight freezes shader scans, arc transforms and orbit nodes', () => {
+  const h = harness();
+  h.state.boostT = 5;
+  h.update();
+  const animated = snapshot(h.effect);
+  for (let frame = 0; frame < 8; frame += 1) h.update(0.05);
+  assert.notEqual(snapshot(h.effect), animated, 'Active energy pattern must advance while flying');
+  h.state.reducedMotion = true;
+  h.update();
+  const still = snapshot(h.effect);
+  for (let frame = 0; frame < 60; frame += 1) h.update(0.05);
+  assert.equal(snapshot(h.effect), still, 'Reduced motion freezes GPU uniforms and nested instances too');
+  assert.equal(h.diagnostics().shield.active, true);
+  assert.ok(h.diagnostics().shield.opacity > 0);
+});
+
+test('protection expiry removes shell strength and all pooled orbit nodes on the same frame', () => {
+  const h = harness();
+  h.state.fuelBurstGraceT = 0.0001;
+  h.update();
+  const shell = h.effect.group.getObjectByName('ship_grace_shield_shell');
+  const nodes = h.effect.group.getObjectByName('ship_shield_orbit_nodes');
+  assert.ok(shell.material.uniforms.strength.value > 0);
+  assert.ok(nodes.count > 0);
+  h.state.fuelBurstGraceT = 0;
+  h.update();
+  assert.equal(h.diagnostics().shield.active, false);
+  assert.equal(shell.material.uniforms.strength.value, 0);
+  assert.equal(nodes.count, 0);
+  h.state.boostT = 5;
+  h.update();
+  assert.equal(h.diagnostics().shield.active, true);
+  assert.ok(shell.material.uniforms.strength.value > 0);
+  assert.ok(nodes.count > 0);
+  h.state.runId += 1;
+  h.state.boostT = 0;
+  h.update();
+  assert.equal(shell.material.uniforms.strength.value, 0);
+  assert.equal(nodes.count, 0);
+});

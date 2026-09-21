@@ -73,6 +73,7 @@
     } catch (reason) { fallback(reason); }
 
     return Object.freeze({ render, resize, updateUi, dispose,
+      getSkyAudioCue: () => renderer && !disposed && renderer.getSkyAudioCue ? renderer.getSkyAudioCue() : null,
       getDiagnostics: () => Object.freeze({
         renderer: renderer ? 'cockpit' : 'classic',
         error,

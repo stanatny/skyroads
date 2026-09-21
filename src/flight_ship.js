@@ -63,12 +63,17 @@
     const wings = [];
     const extensions = [];
     const flames = [];
+    const dorsalFins = [];
+    const cannonShrouds = [];
+    const liftJets = [];
+    const deployment = { shoulders: 0, wings: 0, fins: 0, drive: 0 };
     let superBlend = 0;
     let lastTime = null;
     let lastChargeTime = null;
     let previousRun = null;
     let propulsionMode = 'cruise';
     let plumeLength = 0;
+    let motionTime = 0;
     const chargeEffect = createChargeEffect();
 
     const hull = makeBuilder(model);
@@ -170,7 +175,7 @@
       finBuilder.add(finPlate([[0.36, 0.20], [0.44, 0.29], [0.45, 0.48], [0.36, 0.42]], 0.094), 'ivory');
       finBuilder.finish();
 
-      // 超级形态为完整厚翼面展开，铰链根部始终与主肩相接。
+      // 超级翼面围绕内侧铰链展开；上反角和翼端立面增加垂直轮廓，不继续增加翼展。
       const deployment = new THREE.Group();
       deployment.name = side < 0 ? 'port_super_shoulder' : 'starboard_super_shoulder';
       deployment.position.set(side * 1.08, 0.83, 0.11);
@@ -187,10 +192,87 @@
       expanded.beam([side * 1.36, 0.17, 0.95], [side * 1.55, 0.17, 1.22], 0.015, 'cyan');
       expanded.add(wingPlate([[side * 0.43, 0.52], [side * 0.57, 0.58],
         [side * 1.15, 1.17], [side * 0.93, 1.22]], 0.028), 'edge', [0, 0.16, 0]);
+      expanded.cylinder([side * 0.075, 0.03, 0.02], 0.145, 0.145, 0.46, 'edge', 12);
+      expanded.cylinder([side * 0.075, 0.03, 0.26], 0.105, 0.105, 0.025, 'gold', 12);
+      expanded.beam([side * 0.16, 0.17, -0.32], [side * 0.88, 0.17, 0.53], 0.029, 'gold');
+      expanded.beam([side * 0.88, 0.17, 0.53], [side * 1.32, 0.17, 1.10], 0.018, 'amber');
+      // 外翼后缘的导流小翼具有厚度与白色前缘，在真实追尾视角仍能读出折面。
+      expanded.add(finPlate([[0, -0.22], [0.41, 0.13], [0.48, 0.46], [0.02, 0.34]], 0.075),
+        'titanium', [side * 1.20, 0.15, 0.74], [0, 0, -side * 0.16]);
+      expanded.add(finPlate([[0.09, -0.09], [0.34, 0.16], [0.37, 0.31], [0.10, 0.22]], 0.084),
+        'ivory', [side * 1.20, 0.15, 0.74], [0, 0, -side * 0.16]);
       expanded.finish();
       extensions.push({ group: deployment, side });
     }
     hull.finish();
+
+    // 背鳍、动力导流板与炮管护套只在超级形态解锁，常态机体保持原有轮廓。
+    const superSpine = new THREE.Group();
+    superSpine.name = 'super_power_spine';
+    model.add(superSpine);
+    const spine = makeBuilder(superSpine);
+    for (const side of [-1, 1]) {
+      spine.add(loft([[-1.77, 0.05, -0.035, 0.055, 1.25], [-0.84, 0.075, -0.04, 0.055, 1.51],
+        [-0.28, 0.12, -0.05, 0.07, 1.49], [0.18, 0.11, -0.04, 0.055, 1.49]], true),
+        'ivory', [side * 0.34, 0, 0]);
+      spine.beam([side * 0.34, 1.555, -0.86], [side * 0.34, 1.555, 0.18], 0.026, 'amber');
+      spine.add(loft([[0.89, 0.07, -0.04, 0.04, 1.47], [1.55, 0.13, -0.07, 0.055, 1.24]], true),
+        'gold', [side * 0.30, 0, 0]);
+      const dorsal = new THREE.Group();
+      dorsal.name = side < 0 ? 'port_super_dorsal_fin' : 'starboard_super_dorsal_fin';
+      dorsal.position.set(side * 0.43, 1.34, 0.30);
+      dorsal.scale.y = 1.34;
+      model.add(dorsal);
+      const fin = makeBuilder(dorsal);
+      fin.add(finPlate([[0, -0.34], [0.98, 0.19], [1.12, 0.82], [0.10, 1.19]], 0.115), 'titanium');
+      fin.add(finPlate([[0.08, -0.20], [0.88, 0.22], [0.96, 0.69], [0.15, 1.02]], 0.12), 'ceramic');
+      fin.add(finPlate([[0.56, 0.08], [0.89, 0.26], [0.96, 0.62], [0.68, 0.48]], 0.125), 'ivory');
+      fin.beam([0, 0.20, 0.93], [0, 0.85, 0.70], 0.024, 'amber');
+      fin.finish();
+      dorsalFins.push({ group: dorsal, side });
+
+      const shroud = new THREE.Group();
+      shroud.name = side < 0 ? 'port_super_cannon_shroud' : 'starboard_super_cannon_shroud';
+      shroud.position.set(side * 0.10, 1 / 3, -2.31);
+      model.add(shroud);
+      const cannon = makeBuilder(shroud);
+      cannon.add(loft([[-0.35, 0.038, -0.08, 0.08], [-0.23, 0.065, -0.12, 0.12],
+        [0.24, 0.085, -0.12, 0.15], [0.70, 0.05, -0.07, 0.09]], true), 'ivory');
+      cannon.add(loft([[-0.16, 0.066, -0.02, 0.025], [0.48, 0.07, -0.02, 0.025]], true),
+        'gold', [0, 0.123, 0]);
+      cannon.beam([0, 0.15, -0.10], [0, 0.15, 0.38], 0.021, 'amber');
+      cannon.finish();
+      cannonShrouds.push({ group: shroud, side });
+    }
+    spine.finish();
+
+    const liftAssembly = new THREE.Group();
+    liftAssembly.name = 'super_lift_vector_assembly';
+    model.add(liftAssembly);
+    const liftHousing = makeBuilder(liftAssembly);
+    const liftMaterial = plasmaMaterial(0xffc278);
+    for (const side of [-1, 1]) {
+      const nozzle = [side * 1.65, 0.56, 1.21];
+      liftHousing.add(loft([[0.76, 0.17, -0.11, 0.12, 0.73],
+        [1.27, 0.22, -0.14, 0.16, 0.68], [1.58, 0.13, -0.10, 0.11, 0.61]], true),
+        'ivory', [side * 1.65, 0, 0]);
+      liftHousing.beam([side * 1.15, 1.05, 0.90], [side * 1.65, 0.82, 1.04], 0.068, 'titanium');
+      liftHousing.beam([side * 1.20, 0.92, 1.42], [side * 1.65, 0.77, 1.43], 0.065, 'gold');
+      const skirt = new THREE.CylinderGeometry(0.16, 0.23, 0.16, 12, 1, true);
+      liftHousing.add(skirt, 'titanium', nozzle);
+      const rim = new THREE.TorusGeometry(0.20, 0.035, 6, 20);
+      liftHousing.add(rim, 'gold', [nozzle[0], nozzle[1] - 0.08, nozzle[2]], [Math.PI / 2, 0, 0]);
+      const jet = new THREE.Mesh(own(new THREE.ConeGeometry(0.18, 1, 16, 1, true)), liftMaterial);
+      jet.name = side < 0 ? 'port_super_lift_plume' : 'starboard_super_lift_plume';
+      // 锥尖沿向下向后的升力矢量延展，喷口固定在机体下方，不抬动真实玩家位置。
+      jet.geometry.rotateX(Math.PI);
+      jet.geometry.translate(0, -0.5, 0);
+      jet.position.set(nozzle[0], nozzle[1] - 0.08, nozzle[2]);
+      jet.rotation.x = -0.42;
+      liftAssembly.add(jet);
+      liftJets.push(jet);
+    }
+    liftHousing.finish();
 
     const powerDrive = new THREE.Group();
     powerDrive.name = 'super_annular_drive';
@@ -205,7 +287,7 @@
     drive.add(driveRim, 'gold', [0, 0, 0.078]);
     const driveLight = new THREE.TorusGeometry(0.737, 0.023, 6, 40);
     driveLight.scale(1.44, 1, 1);
-    drive.add(driveLight, 'cyan', [0, 0, 0.064]);
+    drive.add(driveLight, 'amber', [0, 0, 0.064]);
     // 四根承力臂把环形推进器连接到双发尾肩，不作为悬浮装饰圈。
     for (const side of [-1, 1]) {
       for (const upper of [-1, 1]) {
@@ -259,9 +341,11 @@
 
     function update(state, config, { time = 0, bank = 0 } = {}) {
       const changedRun = state.runId !== previousRun;
-      const dt = lastTime === null || changedRun ? 0 : Math.max(0, Math.min(0.05, time - lastTime));
+      const paused = state.mode === 'PAUSED';
+      const dt = lastTime === null || changedRun || paused ? 0 : Math.max(0, Math.min(0.05, time - lastTime));
       previousRun = state.runId;
       lastTime = time;
+      if (!paused || changedRun) motionTime = state.reducedMotion ? 0 : time;
       const target = state.tripleT > 0 ? 1 : 0;
       if (changedRun || state.reducedMotion) superBlend = target;
       else superBlend += (target - superBlend) * Math.min(1, dt * 5.5);
@@ -281,25 +365,52 @@
       group.rotation.z = state.reducedMotion ? 0 : Math.max(-0.26, Math.min(0.26, bank));
       group.rotation.x = state.reducedMotion ? 0 : Math.max(-0.10, Math.min(0.12, (state.playerVY || 0) / 22000));
       group.visible = state.mode !== 'GAMEOVER';
+      // 各机械模块错开发动：解锁肩甲、旋展厚翼、抬起背鳍和炮甲，最后接通升力环。
+      deployment.shoulders = stage(superBlend, 0.00, 0.34);
+      deployment.wings = stage(superBlend, 0.15, 0.79);
+      deployment.fins = stage(superBlend, 0.43, 0.93);
+      deployment.drive = stage(superBlend, 0.65, 1.00);
       for (const wing of wings) {
-        wing.group.rotation.z = wing.side * (-0.025 - superBlend * 0.055);
+        wing.group.rotation.z = wing.side * (-0.025 + deployment.shoulders * 0.08);
         wing.group.rotation.y = wing.side * superBlend * -0.025;
       }
       for (const extension of extensions) {
-        extension.group.visible = superBlend > 0.005;
-        extension.group.scale.x = 0.50 + superBlend * 0.50;
-        extension.group.rotation.z = extension.side * (-0.07 - (1 - superBlend) * 0.75);
-        extension.group.position.y = 0.83 + superBlend * 0.12;
+        extension.group.visible = deployment.shoulders > 0.025;
+        extension.group.scale.x = 1;
+        extension.group.rotation.z = extension.side * (1.24 - deployment.wings * 0.89);
+        extension.group.rotation.y = extension.side * (1 - deployment.wings) * -0.13;
+        extension.group.position.y = 0.83 + deployment.shoulders * 0.15;
       }
-      powerDrive.visible = superBlend > 0.005;
-      powerDrive.scale.setScalar(0.70 + superBlend * 0.30);
-      powerDrive.position.z = 1.70 + superBlend * 0.65;
+      for (const dorsal of dorsalFins) {
+        dorsal.group.visible = deployment.fins > 0.005;
+        dorsal.group.rotation.z = -dorsal.side * (1.38 - deployment.fins * 1.01);
+      }
+      for (const shroud of cannonShrouds) {
+        shroud.group.visible = deployment.fins > 0.005;
+        shroud.group.position.x = shroud.side * (0.10 + deployment.fins * 0.065);
+        shroud.group.rotation.y = shroud.side * (1 - deployment.fins) * -0.18;
+      }
+      superSpine.visible = deployment.shoulders > 0.025;
+      superSpine.position.y = deployment.shoulders * 0.04;
+      powerDrive.visible = deployment.drive > 0.005;
+      powerDrive.scale.setScalar(0.70 + deployment.drive * 0.30);
+      powerDrive.position.z = 1.70 + deployment.drive * 0.65;
+      liftAssembly.visible = deployment.drive > 0.005;
+      liftAssembly.position.y = deployment.shoulders * 0.13;
+      for (const jet of liftJets) {
+        // 跃升和长滑翔时喷口向下提供明显的升力反馈，落地巡航只保留短焰。
+        const lift = gliding ? 1.60 : state.playerVY > 0 ? 1.25 : 0.43;
+        const pulse = state.reducedMotion ? 1 : 1 + Math.sin(motionTime * 24) * 0.04;
+        jet.scale.y = lift * deployment.drive * pulse;
+        jet.scale.x = jet.scale.z = gliding ? 1.12 : 1;
+      }
+      liftMaterial.uniforms.phase.value = motionTime;
       // 滑翔持续消耗燃料，双发保持长焰并向下偏转；巡航、滑翔与超级加速具有不同推力轮廓。
       plumeLength = boost ? 4.4 : gliding ? 3.25 + superBlend * 0.45
         : 1.10 + throttle * 0.70 + superBlend * 0.35;
       annularPlume.scale.z = boost ? 2.1 : gliding ? 1.85 : 0.80 + throttle * 0.45;
       for (const flame of flames) {
-        const pulse = state.reducedMotion ? 1 : 1 + Math.sin(time * 31 + flame.phase) * 0.075;
+        const pulse = state.reducedMotion ? 1 : 1 + Math.sin(motionTime * 31 + flame.phase) * 0.075;
         flame.group.scale.z = plumeLength * pulse;
         flame.group.scale.x = flame.group.scale.y = boost ? 1.28 : gliding ? 1.20 : 1;
         flame.group.rotation.x = gliding && !boost ? 0.16 : 0;
@@ -311,7 +422,7 @@
       superFlameMaterial.uniforms.color.value.set(gliding && !boost ? 0xffca75 : 0x67cfff);
       exhaustGlow.color.set(gliding && !boost ? 0xffbd78 : 0x62d8ff);
       exhaustGlow.opacity = 0.90 + charge.fuelRatio * 0.10;
-      flameMaterial.uniforms.phase.value = superFlameMaterial.uniforms.phase.value = state.reducedMotion ? 0 : time;
+      flameMaterial.uniforms.phase.value = superFlameMaterial.uniforms.phase.value = motionTime;
       return superBlend;
     }
 
@@ -325,12 +436,18 @@
           : object.geometry.getAttribute('position').count) / 3;
       });
       return { design: 'NC-12 Manta R', superBlend, meshes, triangles, visualScale,
+        transformation: { ...deployment, liftJets: liftAssembly.visible ? liftJets.length : 0 },
         charge: chargeEffect.getDiagnostics(),
         propulsion: { mode: propulsionMode, plumeLength },
         attachments: { muzzle: [0, visualScale / 3 + hoverOffset, -2.69 * visualScale],
           chargeReactor: [0, 1.38 * visualScale + hoverOffset, 0.60 * visualScale] },
         position: { x: group.position.x, y: group.position.y, z: group.position.z },
         roll: group.rotation.z, visible: group.visible };
+    }
+
+    function stage(progress, start, end) {
+      const value = Math.max(0, Math.min(1, (progress - start) / (end - start)));
+      return value * value * (3 - 2 * value);
     }
 
     // 机体蓄能只读取真实蓄力状态；取消与发射不混为一谈，所有几何预先创建并复用。

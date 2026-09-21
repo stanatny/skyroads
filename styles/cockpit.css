@@ -1,291 +1,335 @@
-/* 追尾飞行 HUD：冷白遥测、青色能量、琥珀行动；中央和下中区域留给飞机。 */
+/* 轨道竞速界面：实体遥测模块留在两翼，中央航道和下方飞机保持通透。 */
 html[data-renderer="cockpit"] {
-  --space-0: #05090c;
-  --space-1: #101a20;
-  --cyan: #91d4d6;
-  --cyan-soft: #d0e7e9;
-  --gold: #f1a96c;
-  --danger: #ff756a;
-  --text: #f0f0e9;
-  --muted: #a2b4b8;
-  --border-dim: rgba(174, 200, 203, 0.24);
-  --cockpit-orange: #f6ad78;
-  --cockpit-line: rgba(156, 192, 206, 0.23);
-  --panel-glow: 0 24px 70px rgba(0, 0, 0, 0.48);
-  --hud-margin: clamp(18px, 2.4vw, 38px);
+  --space-0: #050b12;
+  --space-1: #10202d;
+  --cyan: #8cdbf3;
+  --cyan-soft: #d5edf5;
+  --gold: #edb16e;
+  --danger: #ff927c;
+  --text: #eef4f6;
+  --muted: #9caeba;
+  --border-dim: rgba(155, 188, 211, 0.26);
+  --cockpit-orange: #edb16e;
+  --cockpit-line: rgba(165, 200, 220, 0.18);
+  --panel-glow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  --hud-margin: clamp(20px, 2.5vw, 40px);
 }
 
-/* 仅在实时三维视图启用这些样式，兼容画面继续使用原有界面。 */
+/* 实时三维视图独立作用域，兼容画面使用原有界面。 */
 #cockpit-interface { display: none; }
 html[data-renderer="cockpit"] #flight-scene { position: fixed; inset: 0; z-index: 0; display: block; width: 100%; height: 100%; }
 html[data-renderer="cockpit"] #flight-scene[hidden] { display: none; }
 html[data-renderer="cockpit"] #game { position: relative; z-index: 1; background: transparent; }
 html[data-renderer="cockpit"] #command-frame { display: none; }
 #renderer-notice { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: max-content; max-width: 90vw; padding: 9px 14px; border: 1px solid #827052; background: #162029; color: #edcf9c; font-size: 12px; line-height: 1.5; text-align: center; }
-html[data-renderer="cockpit"] #cockpit-interface {
-  position: fixed;
-  inset: 0;
-  z-index: 5;
-  display: block;
-  pointer-events: none;
-  color: var(--cyan-soft);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-variant-numeric: tabular-nums;
-}
+html[data-renderer="cockpit"] #cockpit-interface { position: fixed; inset: 0; z-index: 5; display: block; pointer-events: none; color: var(--cyan-soft); font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-variant-numeric: tabular-nums; }
 html[data-renderer="cockpit"] #cockpit-interface[hidden],
 html[data-renderer="cockpit"] #cockpit-interface [hidden] { display: none !important; }
 
-html[data-renderer="cockpit"] .cockpit-masthead { position: absolute; top: 25px; left: var(--hud-margin); display: flex; flex-wrap: wrap; align-items: center; gap: 9px 15px; max-width: 520px; text-shadow: 0 1px 8px #020b12; }
-html[data-renderer="cockpit"] .cockpit-wordmark { color: #e4edef; font: 500 22px "Orbitron", sans-serif; letter-spacing: 0.02em; }
-html[data-renderer="cockpit"] .cockpit-edition { color: #8aabad; font-size: 9px; letter-spacing: 0.18em; }
-html[data-renderer="cockpit"] .cockpit-flight-status { padding-left: 14px; border-left: 1px solid #607277; color: #acc7bd; font-size: 9px; letter-spacing: 0.08em; }
-html[data-renderer="cockpit"] .cockpit-flight-status::before { content: ""; display: inline-block; width: 4px; height: 4px; margin: 0 7px 2px 0; background: currentColor; }
-html[data-renderer="cockpit"] .cockpit-mode-readout { flex-basis: 100%; display: flex; align-items: center; gap: 11px; margin-top: 1px; padding-left: 1px; font-size: 10px; }
-html[data-renderer="cockpit"] .cockpit-mode-label { color: #869fa8; font-size: 9px; letter-spacing: 0.12em; }
-html[data-renderer="cockpit"] .cockpit-flight-mode { color: #c2d9df; letter-spacing: 0.05em; }
+/* 顶部识别和状态不与数字读数争夺注意力。 */
+html[data-renderer="cockpit"] .cockpit-masthead { position: absolute; top: 27px; left: var(--hud-margin); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 13px; max-width: 530px; text-shadow: 0 2px 8px #02080d; }
+html[data-renderer="cockpit"] .cockpit-wordmark { display: grid; place-items: center; width: 39px; height: 30px; border: 1px solid #9dc0d3; color: #e9f4f8; font: 600 15px "Orbitron", sans-serif; letter-spacing: -0.06em; background: #112632; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%); }
+html[data-renderer="cockpit"] .cockpit-edition { color: #b8cbd8; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; }
+html[data-renderer="cockpit"] .cockpit-flight-status { padding-left: 14px; border-left: 1px solid #527080; color: #acccdb; font-size: 10px; }
+html[data-renderer="cockpit"] .cockpit-flight-status::before { content: ""; display: inline-block; width: 4px; height: 4px; margin: 0 7px 2px 0; background: #8cdbf3; }
+html[data-renderer="cockpit"] .cockpit-mode-readout { flex-basis: 100%; display: flex; align-items: center; gap: 10px; margin-top: 1px; font-size: 11px; }
+html[data-renderer="cockpit"] .cockpit-mode-label { color: #93aab9; font-size: 10px; }
+html[data-renderer="cockpit"] .cockpit-flight-mode { color: #e0edf2; }
+html[data-renderer="cockpit"] .cockpit-flight-mode::before { content: "/"; margin-right: 10px; color: #5c7d90; }
 html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-mode-readout,
 html[data-renderer="cockpit"] [data-mode="GAMEOVER"] .cockpit-mode-readout { display: none; }
 html[data-renderer="cockpit"] [data-mode="GAMEOVER"] .cockpit-flight-status { color: var(--danger); }
 
-html[data-renderer="cockpit"] .cockpit-briefing { position: absolute; top: 25%; right: 7.5%; width: 240px; padding-left: 18px; border-left: 1px solid rgba(246, 173, 120, 0.5); text-shadow: 0 2px 12px #000; }
-html[data-renderer="cockpit"] .cockpit-overline { display: block; color: var(--cockpit-orange); font-size: 10px; letter-spacing: 0.15em; }
-html[data-renderer="cockpit"] .cockpit-sector { display: block; margin: 18px 0 10px; font: 500 24px "Orbitron", sans-serif; letter-spacing: 0.03em; color: #f1eee5; }
-html[data-renderer="cockpit"] .cockpit-briefing-copy { display: block; margin-bottom: 8px; font-size: 14px; color: #ecede7; }
-html[data-renderer="cockpit"] .cockpit-briefing-detail { display: block; font-family: ui-sans-serif, sans-serif; color: #b8c7c7; font-size: 12px; line-height: 1.8; }
-html[data-renderer="cockpit"] .cockpit-briefing-footer { display: flex; justify-content: space-between; margin-top: 23px; padding-top: 10px; border-top: 1px solid #536267; font-size: 9px; color: #b7b5a8; }
+/* 主菜单航行图只说明航道结构，进入游戏后立即退场。 */
+html[data-renderer="cockpit"] .cockpit-briefing { position: absolute; top: 21%; right: 7%; width: 250px; padding: 19px 0 0; border-top: 1px solid #7896aa; text-shadow: 0 2px 10px #02070c; }
+html[data-renderer="cockpit"] .cockpit-overline { display: block; color: #abc6d7; font-size: 11px; letter-spacing: 0.08em; }
+html[data-renderer="cockpit"] .cockpit-sector { display: flex; align-items: baseline; justify-content: space-between; margin: 11px 0 0; color: #e1edf3; }
+html[data-renderer="cockpit"] .cockpit-sector-label { font-size: 13px; letter-spacing: 0.12em; }
+html[data-renderer="cockpit"] .cockpit-sector strong { font: 500 66px/1 "Orbitron", sans-serif; letter-spacing: -0.06em; color: #c7e1ee; }
+html[data-renderer="cockpit"] .cockpit-mission-map { display: flex; align-items: flex-end; gap: 8px; height: 82px; margin: 18px 0 21px; padding: 5px 15px 11px; overflow: hidden; border-bottom: 1px solid #355567; transform: skewY(-9deg); }
+html[data-renderer="cockpit"] .cockpit-mission-map i { position: relative; flex: 1; height: 100%; border: 1px solid #365565; background: linear-gradient(0deg, #2b506566, #1a354733); transform: skewY(9deg); }
+html[data-renderer="cockpit"] .cockpit-mission-map i:nth-child(2),
+html[data-renderer="cockpit"] .cockpit-mission-map i:nth-child(6) { height: 79%; }
+html[data-renderer="cockpit"] .cockpit-mission-map i:nth-child(3),
+html[data-renderer="cockpit"] .cockpit-mission-map i:nth-child(5) { height: 89%; }
+html[data-renderer="cockpit"] .cockpit-mission-map i:nth-child(4) { border-color: #91cde5; background: linear-gradient(0deg, #70b5d54d, #325a7733); }
+html[data-renderer="cockpit"] .cockpit-mission-map i:nth-child(4)::after { content: ""; position: absolute; left: 25%; right: 25%; bottom: 13px; height: 12px; background: #d6f0fb; clip-path: polygon(50% 0, 100% 100%, 50% 76%, 0 100%); }
+html[data-renderer="cockpit"] .cockpit-briefing-copy { display: block; margin-bottom: 10px; font-family: ui-sans-serif, sans-serif; font-size: 17px; font-weight: 600; color: #eef2f3; line-height: 1.5; }
+html[data-renderer="cockpit"] .cockpit-briefing-detail { display: block; color: #a9becb; font-family: ui-sans-serif, sans-serif; font-size: 12px; line-height: 1.85; }
+html[data-renderer="cockpit"] .cockpit-briefing-footer { display: flex; justify-content: space-between; margin-top: 23px; padding-top: 12px; border-top: 1px solid #3c5565; font-size: 10px; color: #88a6b9; }
 html[data-renderer="cockpit"] #cockpit-interface:not([data-mode="MENU"]) .cockpit-briefing { display: none; }
-html[data-renderer="cockpit"] .cockpit-warning { position: absolute; top: 97px; left: 50%; transform: translateX(-50%); max-width: 88vw; padding: 9px 15px; border-left: 2px solid #ff896e; color: #ffd1be; background: rgba(53, 21, 17, 0.9); font-size: 11px; line-height: 1.5; text-align: center; }
-html[data-renderer="cockpit"] .cockpit-tutorial { position: absolute; top: 99px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; max-width: min(76vw, 760px); padding: 10px 17px; border-left: 2px solid var(--cockpit-orange); background: rgba(7, 16, 25, 0.89); color: #e4ebe9; font-family: ui-sans-serif, sans-serif; font-size: 13px; line-height: 1.55; }
-html[data-renderer="cockpit"] .cockpit-tutorial-phase { flex: none; color: var(--cockpit-orange); font: 11px/1.85 ui-monospace, monospace; }
-html[data-renderer="cockpit"] [data-training="true"] .cockpit-warning { top: 153px; }
 
-/* 两侧轻量遥测，无实体面框、螺钉、透视或中部仪表台。 */
-html[data-renderer="cockpit"] .cockpit-console { position: absolute; left: var(--hud-margin); right: var(--hud-margin); bottom: 63px; display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
-html[data-renderer="cockpit"] .cockpit-instrument { min-width: 0; width: clamp(210px, 19vw, 274px); padding: 13px 16px 12px; border: 0; border-top: 1px solid rgba(169, 202, 213, 0.58); background: linear-gradient(105deg, rgba(5, 15, 25, 0.89), rgba(5, 15, 25, 0.53)); box-shadow: none; }
-html[data-renderer="cockpit"] .cockpit-tactical { background: linear-gradient(255deg, rgba(5, 15, 25, 0.89), rgba(5, 15, 25, 0.53)); }
-html[data-renderer="cockpit"] .cockpit-instrument-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 9px; margin-bottom: 10px; border-bottom: 1px solid var(--cockpit-line); color: #9eafb8; font-size: 9px; letter-spacing: 0.13em; }
-html[data-renderer="cockpit"] .cockpit-instrument-index { color: #697f8d; font-size: 8px; }
-html[data-renderer="cockpit"] .cockpit-label { display: block; color: #95abb7; font-size: 10px; line-height: 1.4; letter-spacing: 0.04em; }
-html[data-renderer="cockpit"] .cockpit-unit { margin-left: 5px; color: #8babb8; font-size: 9px; }
-html[data-renderer="cockpit"] .cockpit-flight-readings { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-html[data-renderer="cockpit"] .cockpit-speed-value { display: inline-block; margin-top: 3px; font: 500 32px/1 "Orbitron", sans-serif; color: #e1edf1; letter-spacing: 0.02em; }
+/* 主读数独立分区，外围切角框保留金属装配感。 */
+html[data-renderer="cockpit"] .cockpit-console { position: absolute; left: var(--hud-margin); right: var(--hud-margin); bottom: 77px; display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
+html[data-renderer="cockpit"] .cockpit-instrument { position: relative; min-width: 0; width: clamp(248px, 20vw, 290px); padding: 14px 18px 13px; border: 1px solid #4e697c; border-top-color: #9bb7c8; background: linear-gradient(135deg, rgba(22, 42, 57, 0.98), rgba(8, 21, 33, 0.96) 52%); box-shadow: inset 0 0 0 3px rgba(5, 13, 21, 0.6), inset 0 4px 0 rgba(207, 229, 240, 0.06); clip-path: polygon(0 0, calc(100% - 13px) 0, 100% 13px, 100% 100%, 13px 100%, 0 calc(100% - 13px)); }
+html[data-renderer="cockpit"] .cockpit-instrument::after { content: ""; position: absolute; right: -3px; top: 5px; width: 21px; height: 1px; background: #9bb7c8; transform: rotate(45deg); }
+html[data-renderer="cockpit"] .cockpit-instrument-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; color: #adbfcc; font-size: 10px; font-weight: 500; letter-spacing: 0.04em; }
+html[data-renderer="cockpit"] .cockpit-instrument-index { min-width: 24px; padding-left: 8px; border-left: 1px solid #49677b; color: #7397af; font-size: 10px; }
+html[data-renderer="cockpit"] .cockpit-label { display: block; color: #a3bac9; font-size: 11px; line-height: 1.4; }
+html[data-renderer="cockpit"] .cockpit-unit { margin-left: 5px; color: #9bb9cb; font-size: 10px; }
+html[data-renderer="cockpit"] .cockpit-flight-readings { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+html[data-renderer="cockpit"] .cockpit-speed-readout { min-width: 0; }
+html[data-renderer="cockpit"] .cockpit-speed-value { display: inline-block; margin-top: 4px; font: 500 46px/1 "Orbitron", ui-monospace, monospace; color: #f3f8fa; letter-spacing: -0.035em; }
+html[data-renderer="cockpit"] .cockpit-speed-readout .cockpit-unit { display: block; margin: 4px 0 0; }
 html[data-renderer="cockpit"] .cockpit-altitude-readout { padding-top: 1px; text-align: right; }
-html[data-renderer="cockpit"] .cockpit-altitude-value { display: inline-block; margin-top: 8px; color: #bdd7df; font-size: 18px; line-height: 1; }
-html[data-renderer="cockpit"] .cockpit-lane-id { display: block; margin-top: 6px; color: #86a2b0; font-size: 9px; }
-html[data-renderer="cockpit"] .cockpit-fuel-readout { display: flex; align-items: baseline; margin-bottom: 5px; }
+html[data-renderer="cockpit"] .cockpit-altitude-value { display: inline-block; margin-top: 11px; color: #d5e6ef; font-size: 25px; font-weight: 500; line-height: 1; }
+html[data-renderer="cockpit"] .cockpit-lane-id { display: block; margin-top: 8px; color: #8baabc; font-size: 10px; white-space: nowrap; }
+html[data-renderer="cockpit"] .cockpit-fuel-module { padding: 10px 0 12px; border-top: 1px solid var(--cockpit-line); border-bottom: 1px solid var(--cockpit-line); }
+html[data-renderer="cockpit"] .cockpit-fuel-readout { display: flex; align-items: baseline; margin-bottom: 8px; }
 html[data-renderer="cockpit"] .cockpit-fuel-readout .cockpit-label { flex: 1; }
-html[data-renderer="cockpit"] .cockpit-fuel-value { color: #b0dbcc; font-size: 19px; font-weight: 500; line-height: 1; }
-html[data-renderer="cockpit"] .cockpit-meter { height: 4px; overflow: hidden; background: #23333d; }
-html[data-renderer="cockpit"] .cockpit-meter > i { display: block; width: 100%; height: 100%; background: #9dcbbb; transform: scaleX(0); transform-origin: left center; }
+html[data-renderer="cockpit"] .cockpit-fuel-value { color: #a2e2f5; font-size: 25px; font-weight: 500; line-height: 1; }
+html[data-renderer="cockpit"] .cockpit-meter { height: 5px; overflow: hidden; background: #284256; }
+html[data-renderer="cockpit"] .cockpit-meter > i { display: block; width: 100%; height: 100%; background: #8ed1ec; transform: scaleX(0); transform-origin: left center; }
 html[data-renderer="cockpit"] .cockpit-fuel-bar { position: relative; }
-html[data-renderer="cockpit"] .cockpit-fuel-bar::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(to right, transparent 0, transparent calc(10% - 2px), #17252d calc(10% - 2px), #17252d 10%); }
-html[data-renderer="cockpit"] [data-fuel="low"] .cockpit-fuel-value { color: var(--cockpit-orange); }
-html[data-renderer="cockpit"] [data-fuel="critical"] .cockpit-fuel-value { color: #ffac99; }
-html[data-renderer="cockpit"] [data-fuel="critical"] .cockpit-fuel-bar > i { background: #ff896e; }
-html[data-renderer="cockpit"] .cockpit-jump-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 11px; }
+html[data-renderer="cockpit"] .cockpit-fuel-bar::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(to right, transparent 0, transparent calc(10% - 3px), #10202e calc(10% - 3px), #10202e 10%); }
+html[data-renderer="cockpit"] [data-fuel="low"] .cockpit-fuel-value,
+html[data-renderer="cockpit"] [data-fuel="low"] .cockpit-fuel-bar > i { color: var(--gold); background-color: var(--gold); }
+html[data-renderer="cockpit"] [data-fuel="low"] .cockpit-fuel-value { background: none; }
+html[data-renderer="cockpit"] [data-fuel="critical"] .cockpit-fuel-value { color: #ffad94; }
+html[data-renderer="cockpit"] [data-fuel="critical"] .cockpit-fuel-bar > i { background: #f39276; }
+html[data-renderer="cockpit"] [data-fuel="critical"] { border-left-color: #f39276; }
+html[data-renderer="cockpit"] .cockpit-mobility { padding-top: 10px; }
+html[data-renderer="cockpit"] .cockpit-jump-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 html[data-renderer="cockpit"] .cockpit-jump-values { display: flex; gap: 5px; }
-html[data-renderer="cockpit"] .cockpit-jump-values i { display: block; width: 17px; height: 5px; border: 1px solid #59777a; }
-html[data-renderer="cockpit"] .cockpit-jump-values i[data-available="true"] { background: #b3dce0; border-color: #b3dce0; }
-html[data-renderer="cockpit"] .cockpit-jump-values i:nth-child(3) { border-color: var(--cockpit-orange); }
-html[data-renderer="cockpit"] .cockpit-jump-values i:nth-child(3)[data-available="true"] { background: var(--cockpit-orange); }
-html[data-renderer="cockpit"] .cockpit-burst-row { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-top: 9px; font-size: 9px; }
-html[data-renderer="cockpit"] .cockpit-burst-status { color: #8aa2ae; font-size: 9px; }
-html[data-renderer="cockpit"] .cockpit-burst-status[data-ready="true"] { color: var(--cockpit-orange); }
-html[data-renderer="cockpit"] .cockpit-burst-bar { height: 2px; margin-top: 5px; }
-html[data-renderer="cockpit"] .cockpit-burst-bar > i { background: var(--cockpit-orange); }
+html[data-renderer="cockpit"] .cockpit-jump-values i { display: block; width: 20px; height: 6px; border: 1px solid #617e90; }
+html[data-renderer="cockpit"] .cockpit-jump-values i[data-available="true"] { background: #acdcef; border-color: #acdcef; }
+html[data-renderer="cockpit"] .cockpit-jump-values i:nth-child(3) { border-color: var(--gold); }
+html[data-renderer="cockpit"] .cockpit-jump-values i:nth-child(3)[data-available="true"] { background: var(--gold); }
+html[data-renderer="cockpit"] .cockpit-burst-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 9px; }
+html[data-renderer="cockpit"] .cockpit-burst-status { color: #8ba8bb; font-size: 10px; }
+html[data-renderer="cockpit"] .cockpit-burst-status[data-ready="true"] { color: #c4e8f6; }
+html[data-renderer="cockpit"] .cockpit-burst-bar { height: 2px; margin-top: 6px; }
+html[data-renderer="cockpit"] .cockpit-burst-bar > i { background: #b9e9fa; }
+html[data-renderer="cockpit"] .cockpit-tactical { width: clamp(236px, 18.8vw, 272px); }
 html[data-renderer="cockpit"] .cockpit-weapon-row { display: flex; justify-content: space-between; align-items: center; }
-html[data-renderer="cockpit"] .cockpit-weapon-state { display: block; margin: 9px 0 10px; min-height: 13px; color: #c0d8e1; font-size: 10px; font-weight: 500; letter-spacing: 0.025em; }
-html[data-renderer="cockpit"] .cockpit-weapon-bar { height: 3px; }
-html[data-renderer="cockpit"] .cockpit-weapon-bar > i { background: #95c4d9; }
-html[data-renderer="cockpit"] [data-charged="true"] .cockpit-weapon-state { color: var(--cockpit-orange); }
-html[data-renderer="cockpit"] [data-charged="true"] .cockpit-weapon-bar > i { background: var(--cockpit-orange); }
-html[data-renderer="cockpit"] .cockpit-navigation { width: auto; margin-top: 14px; padding: 0; border: 0; background: none; }
+html[data-renderer="cockpit"] .cockpit-weapon-state { display: block; margin: 9px 0 13px; min-height: 20px; color: #e3eef4; font-size: 15px; font-weight: 500; line-height: 1.5; }
+html[data-renderer="cockpit"] .cockpit-weapon-bar { height: 4px; }
+html[data-renderer="cockpit"] .cockpit-weapon-bar > i { background: #b3e5f6; }
+html[data-renderer="cockpit"] [data-charged="true"] .cockpit-weapon-state { color: #ffd3a0; }
+html[data-renderer="cockpit"] [data-charged="true"] .cockpit-weapon-bar > i { background: var(--gold); }
+html[data-renderer="cockpit"] .cockpit-navigation { width: auto; margin-top: 16px; padding: 14px 0 0; border: 0; border-top: 1px solid var(--cockpit-line); background: none; box-shadow: none; clip-path: none; }
+html[data-renderer="cockpit"] .cockpit-navigation::after,
 html[data-renderer="cockpit"] .cockpit-navigation .cockpit-instrument-heading { display: none; }
-html[data-renderer="cockpit"] .cockpit-route { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px 5px; height: 37px; }
-html[data-renderer="cockpit"] .cockpit-route-cell { position: relative; display: block; background: #41636c; }
-html[data-renderer="cockpit"] .cockpit-route-cell.is-empty { background: #243840; }
-html[data-renderer="cockpit"] .cockpit-route-cell.is-wall { background: #b17a5d; }
-html[data-renderer="cockpit"] .cockpit-route-cell.is-gap { background: #07111b; border-bottom: 1px solid #70828a; }
-html[data-renderer="cockpit"] .cockpit-route-cell.is-fuel { background: #b3d7a5; }
-html[data-renderer="cockpit"] .cockpit-route-cell.is-pickup { background: #e0aa66; }
-html[data-renderer="cockpit"] .cockpit-route-cell[data-elevation="raised"] { box-shadow: inset 0 1px #e7c994; }
-html[data-renderer="cockpit"] .cockpit-route-cell.is-player::after { content: ""; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%); border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid #edf4ec; }
-html[data-renderer="cockpit"] .cockpit-route-footer { display: flex; justify-content: space-between; color: #8aa5b0; font-size: 8px; margin-top: 5px; letter-spacing: 0.04em; }
+html[data-renderer="cockpit"] .cockpit-route { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px 5px; height: 50px; }
+html[data-renderer="cockpit"] .cockpit-route-cell { position: relative; display: block; background: #4d7188; }
+html[data-renderer="cockpit"] .cockpit-route-cell.is-empty { background: #233c4d; }
+html[data-renderer="cockpit"] .cockpit-route-cell.is-wall { background: #d99464; }
+html[data-renderer="cockpit"] .cockpit-route-cell.is-gap { background: #050d15; border-bottom: 1px solid #698697; }
+html[data-renderer="cockpit"] .cockpit-route-cell.is-fuel { background: #b3e3dc; }
+html[data-renderer="cockpit"] .cockpit-route-cell.is-pickup { background: #e7c385; }
+html[data-renderer="cockpit"] .cockpit-route-cell[data-elevation="raised"] { box-shadow: inset 0 1px #f4e2bc; }
+html[data-renderer="cockpit"] .cockpit-route-cell.is-player::after { content: ""; position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 8px solid #fff; }
+html[data-renderer="cockpit"] .cockpit-route-footer { display: flex; justify-content: space-between; gap: 5px; color: #a3bfce; font-size: 10px; margin-top: 8px; }
 
-/* 底部条只放结果与次级快捷键，不遮挡机身。 */
-html[data-renderer="cockpit"] .cockpit-status-rail { position: absolute; left: var(--hud-margin); right: var(--hud-margin); bottom: max(17px, env(safe-area-inset-bottom)); display: flex; justify-content: space-between; align-items: baseline; gap: 20px; padding-top: 11px; border-top: 1px solid rgba(149, 185, 203, 0.26); }
+/* 底部统计有独立底色，中央机身上方不布置准星和说明文字。 */
+html[data-renderer="cockpit"] .cockpit-status-rail { position: absolute; left: var(--hud-margin); right: var(--hud-margin); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; justify-content: space-between; align-items: center; gap: 20px; min-height: 39px; padding-top: 10px; border-top: 1px solid #546e81; text-shadow: 0 2px 6px #000; }
 html[data-renderer="cockpit"] .cockpit-stats { display: flex; align-items: baseline; gap: 27px; }
 html[data-renderer="cockpit"] .cockpit-stat { display: flex; align-items: baseline; gap: 10px; }
-html[data-renderer="cockpit"] .cockpit-stat .cockpit-label { font-size: 9px; letter-spacing: 0.09em; }
-html[data-renderer="cockpit"] .cockpit-stat strong { color: #cfdee2; font-size: 11px; font-weight: 500; }
-html[data-renderer="cockpit"] .cockpit-stat-score strong { font-size: 16px; letter-spacing: 0.07em; }
-html[data-renderer="cockpit"] .cockpit-control-rail { display: flex; gap: 21px; color: #8b9fab; font-size: 9px; }
-html[data-renderer="cockpit"] .cockpit-control-rail > span { display: flex; align-items: center; gap: 7px; }
-html[data-renderer="cockpit"] #cockpit-interface kbd { font-family: inherit; font-size: 8px; font-weight: 400; color: #b7cbd2; }
-html[data-renderer="cockpit"] .cockpit-effects { position: absolute; right: var(--hud-margin); top: 72px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 260px; }
-html[data-renderer="cockpit"] .cockpit-effect { display: flex; align-items: center; gap: 14px; padding: 6px 10px; border-right: 2px solid #9ad6e0; color: #b5dbe1; background: rgba(5, 17, 28, 0.83); font-size: 9px; white-space: nowrap; }
-html[data-renderer="cockpit"] .cockpit-effect strong { font-size: 11px; font-weight: 500; }
+html[data-renderer="cockpit"] .cockpit-stat .cockpit-label { font-size: 10px; color: #9cb3c4; }
+html[data-renderer="cockpit"] .cockpit-stat strong { color: #e4eef4; font-size: 14px; font-weight: 500; }
+html[data-renderer="cockpit"] .cockpit-stat-score strong { font-size: 20px; color: #f0f6f9; letter-spacing: 0.025em; }
+html[data-renderer="cockpit"] .cockpit-control-rail { display: flex; gap: 18px; color: #9aafbf; font-size: 10px; }
+html[data-renderer="cockpit"] .cockpit-control-rail > span { display: flex; align-items: center; gap: 8px; }
+html[data-renderer="cockpit"] #cockpit-interface kbd { padding: 2px 4px; border: 1px solid #446074; border-bottom-color: #708b9e; color: #bfd5e1; font-family: inherit; font-size: 9px; font-weight: 400; line-height: 1.3; background: #102331; }
+
+/* 特殊状态保持文字、剩余时间及到期反馈，避免只依赖颜色。 */
+html[data-renderer="cockpit"] .cockpit-context { display: contents; }
+html[data-renderer="cockpit"] .cockpit-effects { position: absolute; right: var(--hud-margin); top: 83px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 260px; }
+html[data-renderer="cockpit"] .cockpit-effect { display: flex; align-items: center; gap: 16px; padding: 8px 12px; border: 1px solid #395b70; border-right: 3px solid #89cfe8; color: #c5e5f0; background: rgba(9, 28, 42, 0.96); font-size: 11px; white-space: nowrap; }
+html[data-renderer="cockpit"] .cockpit-effect strong { font-size: 14px; font-weight: 500; }
 html[data-renderer="cockpit"] .cockpit-effect[data-effect="burst"],
-html[data-renderer="cockpit"] .cockpit-effect[data-effect="super"] { color: #edb882; border-color: #e2a269; }
-html[data-renderer="cockpit"] .cockpit-effect[data-warning="true"] { border-color: #ef8b71; color: #ffc4a9; }
-html[data-renderer="cockpit"] .cockpit-effect[data-effect="shield"] { position: relative; padding: 9px 12px; color: #a5f3ff; border-color: #69e1ff; background: rgba(7, 31, 48, 0.93); }
-html[data-renderer="cockpit"] .cockpit-effect[data-effect="shield"]::before { content: ""; width: 10px; height: 12px; border: 1px solid currentColor; border-radius: 2px 2px 6px 6px; }
+html[data-renderer="cockpit"] .cockpit-effect[data-effect="super"] { color: #f3c896; border-right-color: #e6b276; }
+html[data-renderer="cockpit"] .cockpit-effect[data-warning="true"] { border-color: #a96d47; color: #ffd2a3; }
+html[data-renderer="cockpit"] .cockpit-effect[data-effect="shield"] { position: relative; padding: 10px 13px; color: #bdedff; border-color: #75c7e6; background: rgba(11, 40, 59, 0.97); }
+html[data-renderer="cockpit"] .cockpit-effect[data-effect="shield"]::before { content: ""; width: 11px; height: 13px; border: 1px solid currentColor; border-radius: 1px 1px 6px 6px; }
 html[data-renderer="cockpit"] .cockpit-effect[data-effect="shield"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: currentColor; transform: scaleX(var(--protection-left, 1)); transform-origin: left; }
-html[data-renderer="cockpit"] .cockpit-effect[data-effect="shield"][data-warning="true"] { color: #ffd4a0; border-color: #ffc278; }
+html[data-renderer="cockpit"] .cockpit-effect[data-effect="shield"][data-warning="true"] { color: #ffdaad; border-color: #f2b775; }
+html[data-renderer="cockpit"] .cockpit-warning { position: absolute; top: 103px; left: 50%; transform: translateX(-50%); max-width: 88vw; padding: 10px 17px; border: 1px solid #906443; border-left: 3px solid #f0b176; color: #ffdbb7; background: rgba(43, 29, 23, 0.97); font-size: 12px; line-height: 1.5; text-align: center; }
+html[data-renderer="cockpit"] .cockpit-tutorial { position: absolute; top: 103px; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; width: max-content; max-width: min(72vw, 760px); padding: 11px 18px; border: 1px solid #496477; border-left: 3px solid #a4dced; background: rgba(10, 27, 40, 0.97); color: #e3edf2; font-family: ui-sans-serif, sans-serif; font-size: 13px; line-height: 1.55; }
+html[data-renderer="cockpit"] .cockpit-tutorial-phase { flex: none; color: #a4dced; font: 11px/1.85 ui-monospace, monospace; }
+html[data-renderer="cockpit"] [data-training="true"] .cockpit-warning { top: 163px; }
 html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-console,
-html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-status-rail { opacity: 0.72; }
+html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-status-rail,
 html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-effects,
 html[data-renderer="cockpit"] [data-mode="GAMEOVER"] .cockpit-effects { display: none; }
 html[data-renderer="cockpit"] [data-mode="PAUSED"] .cockpit-console,
-html[data-renderer="cockpit"] [data-mode="GAMEOVER"] .cockpit-console { opacity: 0.55; }
+html[data-renderer="cockpit"] [data-mode="GAMEOVER"] .cockpit-console { opacity: 0.65; }
 
-/* 菜单、对话框与原有焦点逻辑兼容，飞行中把场景留给飞机。 */
-html[data-renderer="cockpit"] #utility-controls { top: 22px; right: 30px; gap: 8px; }
-html[data-renderer="cockpit"] .utility-button { border: 1px solid rgba(171, 187, 186, 0.24); border-radius: 2px; background: rgba(7, 14, 18, 0.66); color: #c0ccca; font-size: 10px; min-height: 32px; padding: 6px 10px; backdrop-filter: none; -webkit-backdrop-filter: none; }
-html[data-renderer="cockpit"] .utility-button:hover { border-radius: 2px; background: #273330; }
+/* 菜单沿用原按钮、焦点和翻译来源，只改变视觉层级。 */
+html[data-renderer="cockpit"] #utility-controls { top: 25px; right: var(--hud-margin); gap: 8px; }
+html[data-renderer="cockpit"] .utility-button { border: 1px solid #496174; border-radius: 2px; background: rgba(12, 27, 39, 0.94); color: #c3d6e1; font-size: 11px; min-height: 34px; padding: 6px 11px; backdrop-filter: none; -webkit-backdrop-filter: none; }
+html[data-renderer="cockpit"] .utility-button:hover { background: #243e51; border-color: #9cbccc; }
 html[data-renderer="cockpit"] .screen-panel,
-html[data-renderer="cockpit"] .dialog-panel { border: 1px solid #485355; border-top: 2px solid var(--cockpit-orange); border-radius: 2px; clip-path: none; background: rgba(10, 18, 22, 0.97); box-shadow: var(--panel-glow); backdrop-filter: none; -webkit-backdrop-filter: none; }
+html[data-renderer="cockpit"] .dialog-panel { border: 1px solid #526c80; border-top-color: #b0c9d8; border-radius: 2px; clip-path: none; background: rgba(10, 23, 35, 0.98); box-shadow: var(--panel-glow), inset 0 0 0 3px #0a1520; backdrop-filter: none; -webkit-backdrop-filter: none; }
 html[data-renderer="cockpit"] .screen-panel::after,
 html[data-renderer="cockpit"] .dialog-panel::after { display: none; }
-html[data-renderer="cockpit"] #title-screen { top: 16%; left: 7.5%; transform: none; width: min(43vw, 560px); max-height: 57%; border: 0; background: linear-gradient(90deg, rgba(5, 12, 16, 0.92), rgba(5, 12, 16, 0.73)); box-shadow: none; border-left: 2px solid var(--cockpit-orange); padding: 12px 26px 15px; overflow: auto; scrollbar-width: thin; scrollbar-color: #6a6c5b transparent; }
-html[data-renderer="cockpit"] #title-screen .panel-kicker { color: var(--cockpit-orange); font-family: ui-monospace, monospace; font-size: 10px; font-weight: 500; letter-spacing: 0.2em; }
-html[data-renderer="cockpit"] .version-badge { padding: 0; border: 0; border-radius: 0; background: none; color: #839598; font: 9px ui-monospace, monospace; letter-spacing: 0.05em; animation: none; text-shadow: none; }
-html[data-renderer="cockpit"] h1 { margin: 19px 0 14px; color: #f2eee5; background: none; filter: none; text-shadow: none; letter-spacing: 0.07em; line-height: 1.1; font-size: clamp(38px, 4.2vw, 64px); font-weight: 500; }
-html[data-renderer="cockpit"] h2 { color: #f0eee7; text-shadow: none; letter-spacing: 0.04em; font-size: clamp(22px, 3vw, 34px); }
-html[data-renderer="cockpit"] .pilot-name { color: #b3c0bb; font-size: 12px; }
-html[data-renderer="cockpit"] .panel-actions { margin-top: 22px; gap: 8px; }
-html[data-renderer="cockpit"] button { border-radius: 2px; clip-path: none; letter-spacing: 0.03em; transition: background 140ms ease, border-color 140ms ease; }
+html[data-renderer="cockpit"] #title-screen { top: 15%; left: 7%; transform: none; width: min(43vw, 540px); max-height: 74%; padding: 25px 29px 24px; border: 1px solid #536d82; border-top-color: #acc5d5; background: linear-gradient(145deg, rgba(23, 43, 61, 0.97), rgba(7, 20, 33, 0.96) 57%); box-shadow: inset 0 0 0 4px rgba(6, 14, 22, 0.7), 0 25px 75px #02060b88; overflow: auto; scrollbar-width: thin; scrollbar-color: #52788e transparent; text-align: left; }
+html[data-renderer="cockpit"] #title-screen::before { content: ""; position: absolute; top: 0; left: 29px; width: 46px; height: 3px; background: #c2e7f5; }
+html[data-renderer="cockpit"] #title-screen .panel-kicker { color: #a4c9dd; font-family: ui-monospace, monospace; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; }
+html[data-renderer="cockpit"] .version-badge { padding: 4px 6px; border: 1px solid #3c576a; border-radius: 0; background: #0b1c29; color: #a0bbcc; font: 10px ui-monospace, monospace; letter-spacing: 0; animation: none; text-shadow: none; }
+html[data-renderer="cockpit"] h1 { margin: 26px 0 18px; color: #f1f5f7; background: none; filter: none; text-shadow: none; letter-spacing: 0.015em; line-height: 1.1; font-size: clamp(40px, 4.7vw, 67px); font-weight: 600; }
+html[data-renderer="cockpit"] h2 { color: #edf4f7; text-shadow: none; letter-spacing: 0.02em; font-size: clamp(24px, 3vw, 34px); }
+html[data-renderer="cockpit"] .pilot-name { color: #b3c6d4; font-size: 12px; }
+html[data-renderer="cockpit"] .panel-actions { margin-top: 26px; gap: 9px; }
+html[data-renderer="cockpit"] button { border-radius: 2px; clip-path: none; letter-spacing: 0.02em; transition: background 140ms ease, border-color 140ms ease; }
 html[data-renderer="cockpit"] button:hover { transform: none; box-shadow: none; }
-html[data-renderer="cockpit"] .mission-action { position: relative; flex-basis: 100%; width: 100%; min-height: 52px; padding: 13px 18px; color: #161b1b; background: var(--cockpit-orange); border: 1px solid var(--cockpit-orange); border-radius: 2px; clip-path: none; box-shadow: none; font-size: 14px; font-weight: 700; text-align: left; }
-html[data-renderer="cockpit"] .mission-action::after { content: "↗"; position: absolute; right: 18px; top: 12px; color: #35322c; font-size: 22px; font-weight: 400; }
-html[data-renderer="cockpit"] .mission-action:hover { color: #141b1b; background: #ffb77f; border-color: #ffd0aa; box-shadow: none; }
-html[data-renderer="cockpit"] .mission-action:disabled { color: #929690; background: #414841; border-color: #59615a; opacity: 0.8; }
-html[data-renderer="cockpit"] .mission-action .shortcut-hint { margin-left: 18px; color: #2b332f; font-size: 10px; opacity: 0.72; }
-html[data-renderer="cockpit"] .keycap { background: none; border-color: rgba(54, 59, 45, 0.55); border-radius: 2px; box-shadow: none; }
-html[data-renderer="cockpit"] .secondary-action { flex: 1; color: #b9c8c6; background: rgba(11, 24, 27, 0.65); border-color: #435351; min-height: 39px; font-size: 11px; }
-html[data-renderer="cockpit"] .secondary-action:hover { color: #f2ede1; background: #2d3630; border-color: #a89a7b; }
+html[data-renderer="cockpit"] .mission-action { position: relative; flex-basis: 100%; width: 100%; min-height: 57px; padding: 14px 18px; color: #102635; background: #c5e7f5; border: 1px solid #ecf8fd; border-radius: 1px; box-shadow: inset 0 -3px 0 #8eb4ca; font-size: 15px; font-weight: 700; text-align: left; }
+html[data-renderer="cockpit"] .mission-action::after { content: "→"; position: absolute; right: 18px; top: 11px; color: #25495f; font-size: 25px; font-weight: 400; }
+html[data-renderer="cockpit"] .mission-action:hover { color: #0a2333; background: #e7f6fc; border-color: #fff; box-shadow: inset 0 -3px 0 #b4d6e8; }
+html[data-renderer="cockpit"] .mission-action:disabled { color: #93a6b2; background: #344c5c; border-color: #617989; opacity: 0.8; }
+html[data-renderer="cockpit"] .mission-action .shortcut-hint { margin-left: 16px; color: #32556b; font-size: 10px; opacity: 1; }
+html[data-renderer="cockpit"] .keycap { background: #adcddd66; border-color: #83a9bd; border-radius: 2px; box-shadow: none; }
+html[data-renderer="cockpit"] .secondary-action { flex: 1; color: #c7dbe7; background: #102b3e; border-color: #496b83; min-height: 41px; font-size: 12px; }
+html[data-renderer="cockpit"] .secondary-action:hover { color: #fff; background: #24465e; border-color: #98bfda; }
 html[data-renderer="cockpit"] button:focus-visible,
-html[data-renderer="cockpit"] input:focus-visible { outline: 2px solid #f5e3b5; outline-offset: 3px; box-shadow: none; }
-html[data-renderer="cockpit"] .control-list { grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 20px; color: #b1c0bf; font-size: 10px; line-height: 1.65; }
-html[data-renderer="cockpit"] .control-list li { padding: 0 0 0 8px; border-left: 1px solid #50605e; background: none; }
-html[data-renderer="cockpit"] .control-list li:hover { background: none; border-color: #b6ab8a; }
-html[data-renderer="cockpit"] .route-guide { margin: 14px 0 0; color: #8caaa9; font-size: 9px; line-height: 1.7; text-align: left; }
-html[data-renderer="cockpit"] #pause-screen { top: 41%; width: min(86vw, 380px); border-top-color: #d3a373; text-align: left; padding: 27px 30px; background: rgba(10, 18, 22, 0.96); }
-html[data-renderer="cockpit"] .pause-hint { margin-top: 16px; color: var(--cockpit-orange); font-size: 12px; }
-html[data-renderer="cockpit"] #game-over-screen { top: 42%; width: min(88vw, 470px); max-height: 63%; padding: 25px 30px; }
-html[data-renderer="cockpit"] .result-primary { padding: 8px 0; margin-top: 13px; background: none; color: #efb384; font-size: 27px; }
-html[data-renderer="cockpit"] #game-over-screen > p:not(.result-primary) { margin-top: 7px; font-size: 12px; }
+html[data-renderer="cockpit"] input:focus-visible { outline: 2px solid #e5f6ff; outline-offset: 3px; box-shadow: none; }
+html[data-renderer="cockpit"] .control-list { grid-template-columns: 1fr 1fr; gap: 8px 17px; margin-top: 24px; padding-top: 18px; border-top: 1px solid #3b566c; color: #bed0dc; font-size: 11px; line-height: 1.65; }
+html[data-renderer="cockpit"] .control-list li { padding: 0 0 0 9px; border-left: 2px solid #47667c; background: none; }
+html[data-renderer="cockpit"] .control-list li:hover { background: none; border-color: #a8cddd; }
+html[data-renderer="cockpit"] .route-guide { margin: 17px 0 0; padding-top: 13px; border-top: 1px solid #284558; color: #9fb8ca; font-size: 10px; line-height: 1.8; text-align: left; }
+html[data-renderer="cockpit"] #pause-screen { top: 42%; width: min(86vw, 390px); text-align: left; padding: 28px 30px; }
+html[data-renderer="cockpit"] .pause-hint { margin-top: 18px; color: #bddfec; font-size: 12px; }
+html[data-renderer="cockpit"] #game-over-screen { top: 42%; width: min(88vw, 475px); max-height: 68%; padding: 27px 30px; }
+html[data-renderer="cockpit"] .result-primary { padding: 8px 0; margin-top: 15px; background: none; color: #f0c28d; font-size: 30px; }
+html[data-renderer="cockpit"] #game-over-screen > p:not(.result-primary) { margin-top: 8px; font-size: 12px; }
 html[data-renderer="cockpit"] .result-rank,
-html[data-renderer="cockpit"] .new-best { color: var(--cockpit-orange); }
+html[data-renderer="cockpit"] .new-best { color: var(--gold); }
 html[data-renderer="cockpit"] #leaderboard-dialog,
-html[data-renderer="cockpit"] #rename-dialog { background: rgba(3, 9, 12, 0.87); }
+html[data-renderer="cockpit"] #rename-dialog { background: rgba(3, 10, 17, 0.88); }
 html[data-renderer="cockpit"] .dialog-panel { max-height: 84vh; }
-html[data-renderer="cockpit"] th { color: #a8c7c4; }
+html[data-renderer="cockpit"] th { color: #afcadc; }
 html[data-renderer="cockpit"] th,
-html[data-renderer="cockpit"] td { border-color: #314342; }
-html[data-renderer="cockpit"] #persistence-warning { bottom: 24%; color: #edb488; background: #101b20; border-color: #886146; }
+html[data-renderer="cockpit"] td { border-color: #304e65; }
+html[data-renderer="cockpit"] #persistence-warning { bottom: 25%; color: #f1c99c; background: #172732; border-color: #8e7559; }
 
-/* 紧凑屏幕保留两侧遥测和底部统计，避免把三列仪表挤成细小字号。 */
 @media (max-width: 1100px) {
   html[data-renderer="cockpit"] .cockpit-control-rail { display: none; }
   html[data-renderer="cockpit"] .cockpit-status-rail { justify-content: center; }
-  html[data-renderer="cockpit"] .cockpit-instrument { width: 220px; padding: 12px 14px; }
-  html[data-renderer="cockpit"] .cockpit-navigation { width: auto; padding: 0; }
-  html[data-renderer="cockpit"] #title-screen { left: 5%; width: 48vw; top: 16%; }
-  html[data-renderer="cockpit"] .cockpit-briefing { right: 5%; width: 210px; }
+  html[data-renderer="cockpit"] .cockpit-instrument { width: 246px; padding: 13px 16px; }
+  html[data-renderer="cockpit"] .cockpit-navigation { width: auto; padding: 12px 0 0; }
+  html[data-renderer="cockpit"] #title-screen { left: 5%; width: 49vw; }
+  html[data-renderer="cockpit"] .cockpit-briefing { right: 5%; width: 220px; }
+  html[data-renderer="cockpit"] h1 { font-size: 49px; }
 }
 
+/* 窄屏压缩分组间距，读数仍然可辨；菜单保留所有按钮并可滚动。 */
 @media (max-width: 760px) {
   html[data-renderer="cockpit"] { --hud-margin: 16px; }
-  html[data-renderer="cockpit"] .cockpit-masthead { top: 18px; max-width: 76vw; gap: 9px 12px; }
+  html[data-renderer="cockpit"] .cockpit-masthead { top: 18px; max-width: 78vw; gap: 9px 10px; }
   html[data-renderer="cockpit"] .cockpit-edition { display: none; }
-  html[data-renderer="cockpit"] .cockpit-wordmark { font-size: 20px; }
-  html[data-renderer="cockpit"] .cockpit-flight-status { font-size: 8px; }
-  html[data-renderer="cockpit"] .cockpit-mode-readout { font-size: 10px; }
-  html[data-renderer="cockpit"] #utility-controls { top: 14px; right: 16px; gap: 5px; }
-  html[data-renderer="cockpit"] .utility-button { min-height: 29px; padding: 5px 7px; font-size: 9px; }
-  html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-flight-status { display: none; }
+  html[data-renderer="cockpit"] .cockpit-wordmark { width: 33px; height: 27px; font-size: 13px; }
+  html[data-renderer="cockpit"] .cockpit-flight-status { font-size: 10px; padding-left: 10px; }
+  html[data-renderer="cockpit"] .cockpit-mode-readout { font-size: 10px; gap: 7px; }
+  html[data-renderer="cockpit"] .cockpit-mode-label { font-size: 9px; }
+  html[data-renderer="cockpit"] #utility-controls { top: 16px; right: 16px; gap: 5px; }
+  html[data-renderer="cockpit"] .utility-button { min-height: 31px; padding: 5px 7px; font-size: 10px; }
+  html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-flight-status,
   html[data-renderer="cockpit"] .cockpit-briefing { display: none; }
-  html[data-renderer="cockpit"] .cockpit-console { bottom: 56px; gap: 24px; }
-  html[data-renderer="cockpit"] .cockpit-instrument { width: min(40vw, 220px); padding: 10px 12px; }
-  html[data-renderer="cockpit"] .cockpit-instrument-heading { font-size: 8px; letter-spacing: 0.08em; padding-bottom: 7px; margin-bottom: 8px; }
+  html[data-renderer="cockpit"] .cockpit-console { bottom: 67px; gap: 22px; }
+  html[data-renderer="cockpit"] .cockpit-instrument { width: min(42vw, 225px); padding: 11px 12px; }
+  html[data-renderer="cockpit"] .cockpit-instrument-heading { margin-bottom: 10px; font-size: 9px; }
   html[data-renderer="cockpit"] .cockpit-instrument-index { display: none; }
-  html[data-renderer="cockpit"] .cockpit-label { font-size: 9px; }
-  html[data-renderer="cockpit"] .cockpit-speed-value { font-size: 26px; }
-  html[data-renderer="cockpit"] .cockpit-altitude-value { font-size: 16px; }
-  html[data-renderer="cockpit"] .cockpit-unit { font-size: 8px; margin-left: 3px; }
+  html[data-renderer="cockpit"] .cockpit-label { font-size: 10px; }
+  html[data-renderer="cockpit"] .cockpit-speed-value { font-size: 35px; }
+  html[data-renderer="cockpit"] .cockpit-altitude-value { font-size: 21px; }
+  html[data-renderer="cockpit"] .cockpit-unit { font-size: 9px; margin-left: 3px; }
   html[data-renderer="cockpit"] .cockpit-flight-readings { gap: 8px; margin-bottom: 10px; }
-  html[data-renderer="cockpit"] .cockpit-lane-id { font-size: 8px; }
-  html[data-renderer="cockpit"] .cockpit-navigation { width: auto; padding: 0; }
-  html[data-renderer="cockpit"] .cockpit-route { gap: 3px; height: 33px; }
-  html[data-renderer="cockpit"] .cockpit-status-rail { bottom: max(15px, env(safe-area-inset-bottom)); padding-top: 9px; }
+  html[data-renderer="cockpit"] .cockpit-lane-id { font-size: 9px; }
+  html[data-renderer="cockpit"] .cockpit-fuel-module { padding: 8px 0; }
+  html[data-renderer="cockpit"] .cockpit-fuel-value { font-size: 21px; }
+  html[data-renderer="cockpit"] .cockpit-fuel-readout { margin-bottom: 6px; }
+  html[data-renderer="cockpit"] .cockpit-mobility { padding-top: 8px; }
+  html[data-renderer="cockpit"] .cockpit-burst-status { font-size: 9px; }
+  html[data-renderer="cockpit"] .cockpit-weapon-state { font-size: 12px; }
+  html[data-renderer="cockpit"] .cockpit-navigation { width: auto; padding: 11px 0 0; margin-top: 11px; }
+  html[data-renderer="cockpit"] .cockpit-route { gap: 3px; height: 41px; }
+  html[data-renderer="cockpit"] .cockpit-route-footer { font-size: 9px; }
+  html[data-renderer="cockpit"] .cockpit-status-rail { bottom: max(13px, env(safe-area-inset-bottom)); padding-top: 9px; }
   html[data-renderer="cockpit"] .cockpit-stats { width: 100%; justify-content: space-between; gap: 12px; }
-  html[data-renderer="cockpit"] .cockpit-stat { gap: 7px; }
-  html[data-renderer="cockpit"] .cockpit-stat .cockpit-label { font-size: 8px; letter-spacing: 0; }
-  html[data-renderer="cockpit"] .cockpit-stat-score strong { font-size: 14px; }
-  html[data-renderer="cockpit"] .cockpit-tutorial { top: 90px; width: max-content; max-width: 88vw; font-size: 12px; padding: 9px 12px; gap: 9px; }
+  html[data-renderer="cockpit"] .cockpit-stat { flex-direction: column; gap: 3px; }
+  html[data-renderer="cockpit"] .cockpit-stat .cockpit-label { font-size: 9px; }
+  html[data-renderer="cockpit"] .cockpit-stat strong { font-size: 13px; }
+  html[data-renderer="cockpit"] .cockpit-stat-score strong { font-size: 17px; }
+  html[data-renderer="cockpit"] .cockpit-context { position: absolute; top: 88px; left: var(--hud-margin); right: var(--hud-margin); display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  html[data-renderer="cockpit"] .cockpit-tutorial { position: relative; top: auto; left: auto; transform: none; width: auto; max-width: none; font-size: 12px; padding: 10px 12px; gap: 9px; }
   html[data-renderer="cockpit"] .cockpit-tutorial-phase { font-size: 10px; }
-  html[data-renderer="cockpit"] .cockpit-warning { top: 140px; font-size: 10px; }
-  html[data-renderer="cockpit"] .cockpit-effects { top: 74px; }
-  html[data-renderer="cockpit"] .cockpit-effect { padding: 5px 8px; font-size: 9px; }
-  html[data-renderer="cockpit"] [data-training="true"] .cockpit-effects { top: 162px; }
-  html[data-renderer="cockpit"] #title-screen { top: 13%; left: 7%; width: min(80vw, 480px); max-height: calc(87% - 245px); padding: 14px 19px; background: rgba(5, 13, 20, 0.9); }
-  html[data-renderer="cockpit"] h1 { font-size: 39px; margin-top: 16px; }
-  html[data-renderer="cockpit"] .control-list { font-size: 10px; }
+  html[data-renderer="cockpit"] .cockpit-warning,
+  html[data-renderer="cockpit"] [data-training="true"] .cockpit-warning { position: relative; top: auto; left: auto; transform: none; width: auto; max-width: none; font-size: 11px; }
+  html[data-renderer="cockpit"] .cockpit-effects,
+  html[data-renderer="cockpit"] [data-training="true"] .cockpit-effects { position: relative; top: auto; right: auto; align-self: flex-end; }
+  html[data-renderer="cockpit"] .cockpit-effect { padding: 6px 9px; font-size: 10px; }
+  html[data-renderer="cockpit"] #title-screen { top: 12%; left: 7%; width: min(86vw, 500px); max-height: 78%; padding: 23px; }
+  html[data-renderer="cockpit"] h1 { font-size: 47px; margin-top: 23px; }
+  html[data-renderer="cockpit"] .control-list { font-size: 11px; }
 }
 
 @media (max-width: 460px) {
   html[data-renderer="cockpit"] { --hud-margin: 12px; }
-  html[data-renderer="cockpit"] .cockpit-console { gap: 22px; bottom: 57px; }
-  html[data-renderer="cockpit"] .cockpit-instrument { width: 42vw; padding: 10px; }
+  html[data-renderer="cockpit"] .cockpit-console { bottom: 65px; gap: 22px; }
+  html[data-renderer="cockpit"] .cockpit-instrument { width: 43vw; padding: 10px; }
   html[data-renderer="cockpit"] .cockpit-instrument-heading { display: none; }
-  html[data-renderer="cockpit"] .cockpit-tactical { width: 40vw; }
-  html[data-renderer="cockpit"] .cockpit-navigation { width: auto; padding: 0; margin-top: 13px; }
-  html[data-renderer="cockpit"] .cockpit-flight-readings { gap: 5px; }
-  html[data-renderer="cockpit"] .cockpit-speed-value { font-size: 23px; }
-  html[data-renderer="cockpit"] .cockpit-speed-readout .cockpit-unit { display: block; margin: 3px 0 0; }
-  html[data-renderer="cockpit"] .cockpit-altitude-value { margin-top: 7px; font-size: 15px; }
-  html[data-renderer="cockpit"] .cockpit-altitude-readout .cockpit-unit { display: block; margin: 2px 0 0; }
-  html[data-renderer="cockpit"] .cockpit-lane-id { font-size: 8px; margin-top: 5px; white-space: nowrap; }
+  html[data-renderer="cockpit"] .cockpit-tactical { width: 41vw; }
+  html[data-renderer="cockpit"] .cockpit-flight-readings { gap: 4px; margin-bottom: 8px; }
+  html[data-renderer="cockpit"] .cockpit-speed-value { font-size: 30px; }
+  html[data-renderer="cockpit"] .cockpit-speed-readout .cockpit-unit { margin-top: 3px; }
+  html[data-renderer="cockpit"] .cockpit-altitude-value { margin-top: 8px; font-size: 18px; }
+  html[data-renderer="cockpit"] .cockpit-lane-id { margin-top: 7px; font-size: 8px; }
+  html[data-renderer="cockpit"] .cockpit-label { font-size: 9px; }
+  html[data-renderer="cockpit"] .cockpit-fuel-module { padding: 6px 0; }
+  html[data-renderer="cockpit"] .cockpit-fuel-value { font-size: 19px; }
+  html[data-renderer="cockpit"] .cockpit-fuel-readout { margin-bottom: 5px; }
+  html[data-renderer="cockpit"] .cockpit-mobility { padding-top: 7px; }
   html[data-renderer="cockpit"] .cockpit-jump-values { gap: 4px; }
-  html[data-renderer="cockpit"] .cockpit-jump-values i { width: 12px; }
-  html[data-renderer="cockpit"] .cockpit-burst-row { gap: 4px; font-size: 8px; }
-  html[data-renderer="cockpit"] .cockpit-burst-row kbd { font-size: 7px !important; }
+  html[data-renderer="cockpit"] .cockpit-jump-values i { width: 15px; height: 5px; }
+  html[data-renderer="cockpit"] .cockpit-burst-row { margin-top: 7px; gap: 4px; }
+  html[data-renderer="cockpit"] #cockpit-interface kbd { font-size: 8px; padding: 1px 3px; }
   html[data-renderer="cockpit"] .cockpit-burst-status { font-size: 8px; }
-  html[data-renderer="cockpit"] .cockpit-weapon-state { font-size: 9px; line-height: 1.5; min-height: 27px; margin: 8px 0; }
-  html[data-renderer="cockpit"] .cockpit-route-footer { font-size: 8px; letter-spacing: 0; }
-  html[data-renderer="cockpit"] .cockpit-stat { flex-direction: column; gap: 3px; }
-  html[data-renderer="cockpit"] .cockpit-stat strong { font-size: 11px; }
-  html[data-renderer="cockpit"] .cockpit-stat-score strong { font-size: 14px; }
-  html[data-renderer="cockpit"] .cockpit-status-rail { bottom: max(10px, env(safe-area-inset-bottom)); padding-top: 7px; }
-  html[data-renderer="cockpit"] .cockpit-tutorial { flex-direction: column; gap: 3px; top: 84px; }
-  html[data-renderer="cockpit"] #title-screen { top: 12%; left: 5%; width: 90vw; max-height: calc(88% - 265px); padding: 12px 16px; }
-  html[data-renderer="cockpit"] h1 { font-size: 35px; }
-  html[data-renderer="cockpit"] .panel-actions { margin-top: 17px; }
-  html[data-renderer="cockpit"] .control-list { gap: 6px 10px; margin-top: 15px; font-size: 9px; }
-  html[data-renderer="cockpit"] .route-guide { font-size: 9px; margin-top: 10px; }
+  html[data-renderer="cockpit"] .cockpit-weapon-state { font-size: 11px; min-height: 33px; margin: 8px 0; }
+  html[data-renderer="cockpit"] .cockpit-navigation { width: auto; padding: 9px 0 0; margin-top: 10px; }
+  html[data-renderer="cockpit"] .cockpit-route { height: 39px; }
+  html[data-renderer="cockpit"] .cockpit-route-footer { font-size: 8px; }
+  html[data-renderer="cockpit"] .cockpit-tutorial { flex-direction: column; gap: 4px; }
+  html[data-renderer="cockpit"] #title-screen { top: 11%; left: 5%; width: 90vw; max-height: 81%; padding: 20px; }
+  html[data-renderer="cockpit"] #title-screen .panel-kicker { font-size: 10px; }
+  html[data-renderer="cockpit"] h1 { font-size: 42px; margin-top: 23px; }
+  html[data-renderer="cockpit"] .panel-actions { margin-top: 22px; }
+  html[data-renderer="cockpit"] .mission-action { min-height: 55px; font-size: 14px; padding: 13px 14px; }
+  html[data-renderer="cockpit"] .mission-action .shortcut-hint { margin-left: 10px; font-size: 9px; }
+  html[data-renderer="cockpit"] .mission-action::after { right: 13px; }
+  html[data-renderer="cockpit"] #title-screen .control-list { position: fixed; left: 5%; right: 5%; bottom: 87px; gap: 7px 10px; margin: 0; padding: 13px 12px; border: 1px solid #3b566c; background: rgba(8, 23, 36, 0.97); font-size: 10px; line-height: 1.55; }
+  html[data-renderer="cockpit"] #title-screen .route-guide { position: fixed; left: 5%; right: 5%; bottom: 15px; margin: 0; padding: 0; border: 0; font-size: 9px; line-height: 1.6; }
 }
 
-/* 横屏低高度时信息移向边缘，仍然保持中央机身区域无覆盖。 */
-@media (max-height: 620px) {
-  html[data-renderer="cockpit"] .cockpit-console { bottom: 46px; }
-  html[data-renderer="cockpit"] .cockpit-instrument { padding-top: 9px; padding-bottom: 9px; }
+@media (max-width: 460px) and (max-height: 700px) {
+  html[data-renderer="cockpit"] #title-screen .control-list,
+  html[data-renderer="cockpit"] #title-screen .route-guide { position: static; margin-top: 15px; }
+}
+
+/* 横屏低高度优先前路；菜单可滚动，操作入口不被截断。 */
+@media (max-height: 620px) and (min-width: 761px) {
+  html[data-renderer="cockpit"] .cockpit-console { bottom: 56px; }
+  html[data-renderer="cockpit"] .cockpit-instrument { padding: 10px 13px; width: 230px; }
   html[data-renderer="cockpit"] .cockpit-instrument-heading { display: none; }
-  html[data-renderer="cockpit"] .cockpit-flight-readings { margin-bottom: 7px; }
-  html[data-renderer="cockpit"] .cockpit-speed-value { font-size: 25px; }
-  html[data-renderer="cockpit"] .cockpit-jump-row { margin-top: 8px; }
-  html[data-renderer="cockpit"] .cockpit-burst-row { margin-top: 7px; }
-  html[data-renderer="cockpit"] .cockpit-status-rail { bottom: 11px; padding-top: 8px; }
+  html[data-renderer="cockpit"] .cockpit-flight-readings { margin-bottom: 8px; }
+  html[data-renderer="cockpit"] .cockpit-speed-value { font-size: 32px; }
+  html[data-renderer="cockpit"] .cockpit-fuel-module { padding: 6px 0; }
+  html[data-renderer="cockpit"] .cockpit-mobility { padding-top: 6px; }
+  html[data-renderer="cockpit"] .cockpit-navigation { width: auto; padding: 8px 0 0; margin-top: 9px; }
+  html[data-renderer="cockpit"] .cockpit-route { height: 35px; }
+  html[data-renderer="cockpit"] .cockpit-status-rail { bottom: 12px; padding-top: 8px; }
   html[data-renderer="cockpit"] .cockpit-control-rail { display: none; }
   html[data-renderer="cockpit"] .cockpit-masthead { top: 16px; }
-  html[data-renderer="cockpit"] #utility-controls { top: 12px; }
-  html[data-renderer="cockpit"] #title-screen { top: 15%; max-height: 73%; width: min(63vw, 490px); }
-  html[data-renderer="cockpit"] [data-mode="MENU"] .cockpit-console { display: none; }
+  html[data-renderer="cockpit"] #utility-controls { top: 14px; }
+  html[data-renderer="cockpit"] #title-screen { top: 15%; max-height: 78%; width: min(63vw, 490px); }
   html[data-renderer="cockpit"] .cockpit-briefing { display: none; }
-  html[data-renderer="cockpit"] .cockpit-tutorial { top: 79px; padding: 7px 11px; }
-  html[data-renderer="cockpit"] #game-over-screen { top: 46%; max-height: 78%; }
+  html[data-renderer="cockpit"] .cockpit-tutorial { top: 86px; padding: 8px 12px; }
+  html[data-renderer="cockpit"] #game-over-screen { top: 49%; max-height: 83%; }
 }
 
+/* 系统与游戏内的减少动态设置都保留状态，不增加闪烁或装饰位移。 */
+html[data-renderer="cockpit"] [data-reduced-motion="true"] *,
+html[data-renderer="cockpit"] [data-reduced-motion="true"] *::before,
+html[data-renderer="cockpit"] [data-reduced-motion="true"] *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
   html[data-renderer="cockpit"] *,
   html[data-renderer="cockpit"] *::before,

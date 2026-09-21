@@ -52,7 +52,7 @@
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.34;
+    renderer.toneMappingExposure = 1.20;
     renderer.setClearColor(0x030710);
     const shadowsEnabled = Boolean(renderer.shadowMap);
     if (shadowsEnabled) {
@@ -66,8 +66,8 @@
     const cameraTarget = new THREE.Vector3();
     camera.rotation.order = 'YXZ';
     scene.add(camera);
-    scene.add(new THREE.HemisphereLight(0x98bed4, 0x090d15, 1.3));
-    const sunlight = new THREE.DirectionalLight(0xc4deee, 2.15);
+    scene.add(new THREE.HemisphereLight(0xb5cee8, 0x111321, 1.0));
+    const sunlight = new THREE.DirectionalLight(0xdeecff, 2.45);
     sunlight.position.set(-30, 45, -104);
     sunlight.target.position.set(0, 0, -24);
     sunlight.castShadow = shadowsEnabled;
@@ -83,7 +83,7 @@
     sunlight.shadow.autoUpdate = false;
     scene.add(sunlight);
     scene.add(sunlight.target);
-    const fillLight = new THREE.DirectionalLight(0xb8cedc, 1.40);
+    const fillLight = new THREE.DirectionalLight(0xb9d9ff, 1.10);
     fillLight.position.set(-14, 12, 25);
     scene.add(fillLight);
 
@@ -161,8 +161,66 @@
       return materials[name];
     }
 
-    metal('road', 0x17222d, 0.92, 0.15);
-    metal('roadInset', 0x0b151e, 0.87, 0.16);
+    metal('road', 0x0c1722, 0.85, 0.18);
+    metal('roadInset', 0x253746, 0.94, 0.28);
+    // 切角装甲板用颜色、微高度和粗糙度表达；远处由 mipmap 平滑退去，不加道路几何。
+    const deckSize = 256;
+    const deckPixels = new Uint8Array(deckSize * deckSize * 4);
+    const deckSurface = new Uint8Array(deckPixels.length);
+    for (let row = 0; row < deckSize; row += 1) {
+      for (let column = 0; column < deckSize; column += 1) {
+        const offset = (row * deckSize + column) * 4;
+        const u = column / (deckSize - 1);
+        const v = row / (deckSize - 1);
+        const x = Math.min(u, 1 - u);
+        const z = Math.min(v, 1 - v);
+        const edge = Math.min(x - 0.024, z - 0.022, (x + z - 0.09) * 0.707);
+        const noise = ((row * 97 + column * 73 + row * column * 13) % 17) / 17 - 0.5;
+        const brush = Math.sin(column * 1.71) * 1.4 + noise * 2;
+        let level = 216 + brush;
+        let height = 155 + noise * 2;
+        let roughness = 221 + noise * 6;
+        if (edge < 0) { level = 131 + brush; height = 88; roughness = 238; }
+        else if (edge < 0.010) { level = 228 + brush; height = 120 + edge * 3500; roughness = 190; }
+        else if (edge < 0.018) { level = 188 + brush; height = 134; roughness = 224; }
+        // 细长凹槽与浅银金属唇只沿板侧延伸，中央保持干净。
+        if (Math.abs(x - 0.105) < 0.008 && v > 0.20 && v < 0.80) {
+          level = x < 0.105 ? 150 : 228; height = x < 0.105 ? 100 : 163; roughness = 190;
+        }
+        // 埋入式锁扣和小检修口留在板角，避免重复的大符号占据航道。
+        const bolt = Math.hypot(x - 0.115, z - 0.108);
+        if (bolt < 0.014) {
+          level = bolt > 0.009 ? 230 : 119; height = bolt > 0.009 ? 158 : 109; roughness = 176;
+          if (Math.abs(u - (u < 0.5 ? 0.115 : 0.885)) < 0.003 && bolt < 0.008) level = 174;
+        }
+        if (u > 0.66 && u < 0.82 && v > 0.087 && v < 0.15) {
+          const lip = Math.min(u - 0.66, 0.82 - u, v - 0.087, 0.15 - v);
+          level = lip < 0.006 ? 175 : 201 + brush;
+          height = 123; roughness = 230;
+          if (u > 0.69 && u < 0.77 && Math.abs(v - 0.119) < 0.004) level = 218;
+        }
+        deckPixels[offset] = deckPixels[offset + 1] = deckPixels[offset + 2] = level;
+        deckPixels[offset + 3] = 255;
+        // 一张线性纹理复用 R 微高度、G 粗糙度，避免重复上传同尺寸图片。
+        deckSurface[offset] = height;
+        deckSurface[offset + 1] = roughness;
+        deckSurface[offset + 2] = 0;
+        deckSurface[offset + 3] = 255;
+      }
+    }
+    function deckTexture(pixels, colorSpace) {
+      const texture = own(new THREE.DataTexture(pixels, deckSize, deckSize));
+      texture.colorSpace = colorSpace;
+      texture.magFilter = THREE.LinearFilter;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.anisotropy = renderer.capabilities ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 1;
+      texture.generateMipmaps = true;
+      texture.needsUpdate = true;
+      return texture;
+    }
+    materials.roadInset.map = deckTexture(deckPixels, THREE.SRGBColorSpace);
+    materials.roadInset.bumpMap = materials.roadInset.roughnessMap = deckTexture(deckSurface, THREE.NoColorSpace);
+    materials.roadInset.bumpScale = 0.014;
     metal('structure', 0x1b2530, 0.52, 0.74);
     metal('retainingWall', 0x405563, 0.76, 0.24);
     materials.retainingWall.emissive.setHex(0x162631);
@@ -173,10 +231,11 @@
     metal('cockpit', 0x0d131b, 0.8, 0.22);
     metal('cockpitInset', 0x03070b, 0.92, 0.12);
     metal('brass', 0x89714f, 0.4, 0.75);
-    metal('enemyArmor', 0x687781, 0.47, 0.58);
+    metal('enemyArmor', 0x505f6b, 0.44, 0.62);
     glow('cyan', 0x71e4f2);
-    glow('cyanDim', 0x225b70);
+    glow('cyanDim', 0x233a48);
     glow('amber', 0xffbd5e);
+    glow('goldstar', 0xffe1a1);
     glow('red', 0xff5b49);
     glow('white', 0xd9f5f6);
     glow('violet', 0xbfa5ff);
@@ -239,8 +298,9 @@
     const amberBatch = makeBatch('warning_lights', box, materials.amber, 2200);
     const redBatch = makeBatch('hazard_lights', box, materials.red, 2200);
     const whiteBatch = makeBatch('weapon_tracers', box, materials.white, 160);
-    const jewelBatch = makeBatch('energy_crystals', octahedron, materials.white, 350);
-    const collarBatch = makeBatch('pickup_collars', torus, materials.white, 350);
+    const jewelBatch = makeBatch('energy_crystals', octahedron, materials.white, 500);
+    const collarBatch = makeBatch('pickup_collars', torus, materials.white, 800);
+    const beaconBatch = makeBatch('pickup_beacons', box, materials.white, 400);
     const engineBatch = makeBatch('engine_nozzles', cylinder, materials.structure, 350);
     const weapons = scope.Skyroads.flightWeapons
       ? scope.Skyroads.flightWeapons.create({ THREE, parent: scene, own, world: WORLD, config }) : null;
@@ -279,12 +339,16 @@
       [0, 0.94], [0.30, 0.64], [1.26, -0.44], [1.08, -0.96], [0.28, -0.52],
       [0, -0.88], [-0.28, -0.52], [-1.08, -0.96], [-1.26, -0.44], [-0.30, 0.64],
     ], 0.12, 0.019), materials.armor, 120);
+    // 传感眼独立批次：逐帧实例色闪烁不会污染共享红灯批次的其它实例。
+    const droneEyeBatch = makeBatch('drone_sensor_eyes', box, materials.red, 160);
     for (const batch of [enemyHullBatch, droneHullBatch, droneWingBatch, engineBatch]) batch.mesh.castShadow = true;
     const obstacleModels = scope.Skyroads.flightObstacles
       ? scope.Skyroads.flightObstacles.create({
         THREE, own, makeBatch, world: WORLD, config,
         hitbox: scope.Skyroads.input && scope.Skyroads.input.HITBOX,
       }) : null;
+    const flightObjects = scope.Skyroads.flightObjects
+      ? scope.Skyroads.flightObjects.create({ THREE, own, makeBatch, world: WORLD, config }) : null;
 
     function symbolGeometry(points) {
       const shape = new THREE.Shape();
@@ -301,22 +365,50 @@
       const radius = index % 2 === 0 ? 0.64 : 0.28;
       return [Math.cos(angle) * radius, Math.sin(angle) * radius];
     });
-    const symbolBatches = {
-      BOOST: makeBatch('boost_lightning', symbolGeometry([
+    const symbolGeometries = {
+      BOOST: symbolGeometry([
         [-0.06, 0.69], [-0.53, -0.06], [-0.06, -0.06], [-0.23, -0.69],
         [0.54, 0.17], [0.12, 0.17], [0.27, 0.69],
-      ]), materials.amber, 80),
-      SLOW: makeBatch('slow_hourglass', symbolGeometry([
+      ]),
+      SLOW: symbolGeometry([
         [-0.50, 0.57], [0.50, 0.57], [0.50, 0.39], [0.15, 0.02], [0.50, -0.37],
         [0.50, -0.57], [-0.50, -0.57], [-0.50, -0.37], [-0.15, 0.02], [-0.50, 0.39],
-      ]), materials.violet, 80),
-      TRIPLE: makeBatch('super_star', symbolGeometry(starPoints), materials.amber, 80),
-      MAGNET: makeBatch('magnet_horseshoe', symbolGeometry([
+      ]),
+      TRIPLE: symbolGeometry(starPoints),
+      MAGNET: symbolGeometry([
         [-0.55, 0.50], [-0.55, -0.23], [-0.36, -0.53], [0.36, -0.53], [0.55, -0.23],
         [0.55, 0.50], [0.28, 0.50], [0.28, -0.13], [0.17, -0.26], [-0.17, -0.26],
         [-0.28, -0.13], [-0.28, 0.50],
-      ]), materials.cyan, 80),
+      ]),
     };
+    const symbolMaterials = {
+      BOOST: materials.amber, SLOW: materials.violet, TRIPLE: materials.goldstar, MAGNET: materials.cyan,
+    };
+    const symbolBatches = {};
+    const symbolInlayBatches = {};
+    for (const [type, geometry] of Object.entries(symbolGeometries)) {
+      symbolBatches[type] = makeBatch(`${type.toLowerCase()}_sigil`, geometry, symbolMaterials[type], 80);
+      // 白色内嵌层在符号前方浮出，形成双色全息徽章。
+      symbolInlayBatches[type] = makeBatch(`${type.toLowerCase()}_sigil_inlay`, geometry, materials.white, 80);
+    }
+    // 道具徽章外圈：与符号同色的细环反向慢转，让奖励标记更像一枚悬浮徽章。
+    const symbolRingBatch = makeBatch('pickup_sigil_rings',
+      own(new THREE.TorusGeometry(0.98, 0.030, 4, 40)), materials.white, 160);
+    // 符号背后的程序径向柔光：远距离先看到一团同色光晕。
+    const haloPixels = new Uint8Array(64 * 64 * 4);
+    for (let py = 0; py < 64; py += 1) {
+      for (let px = 0; px < 64; px += 1) {
+        const distance = Math.hypot((px - 31.5) / 31.5, (py - 31.5) / 31.5);
+        const offset = (py * 64 + px) * 4;
+        haloPixels[offset] = haloPixels[offset + 1] = haloPixels[offset + 2] = 255;
+        haloPixels[offset + 3] = Math.round(Math.pow(Math.max(0, 1 - distance), 2.6) * 255);
+      }
+    }
+    const haloTexture = own(new THREE.DataTexture(haloPixels, 64, 64));
+    haloTexture.needsUpdate = true;
+    const haloBatch = makeBatch('pickup_halo_glow', own(new THREE.PlaneGeometry(2.6, 2.6)),
+      own(new THREE.MeshBasicMaterial({ map: haloTexture, transparent: true, toneMapped: false,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: false })), 200);
 
     function mesh(geometry, material, parent, position, scale, rotation) {
       const object = new THREE.Mesh(geometry, material);
@@ -342,6 +434,8 @@
     sky.name = 'orbital_environment';
     scene.add(sky);
     buildEnvironment();
+    const skyShow = scope.Skyroads.flightSkyShow
+      ? scope.Skyroads.flightSkyShow.create({ THREE, own, parent: scene }) : null;
     const dimensions = scope.Skyroads.flightDimensions;
     const ship = scope.Skyroads.flightShip ? scope.Skyroads.flightShip.create({ THREE, own, materials,
       visualScale: dimensions.modelScale, hoverOffset: dimensions.hoverOffset }) : null;
@@ -357,6 +451,9 @@
     const statusFx = scope.Skyroads.flightStatusFx
       ? scope.Skyroads.flightStatusFx.create({ THREE, own }) : null;
     if (statusFx) scene.add(statusFx.group);
+    const magnetFx = scope.Skyroads.flightMagnet
+      ? scope.Skyroads.flightMagnet.create({ THREE, own, makeBatch, world: WORLD, config,
+        addFuel: flightObjects ? (...args) => flightObjects.addFuel(...args) : null }) : null;
 
     let viewportWidth = 1;
     let viewportHeight = 1;
@@ -577,10 +674,8 @@
           if (tile.raised) raisedTileCount += 1;
           roadBatch.add(x, -0.40, z, laneWidth - 0.035, 0.80, WORLD.segmentDepth,
             0, 0, 0, tile.raised ? 0xcddce0 : 0xffffff);
-          insetBatch.add(x, 0.003, z, laneWidth * 0.90, 0.009, WORLD.segmentDepth * 0.84);
+          insetBatch.add(x, 0.003, z, laneWidth * 0.968, 0.009, WORLD.segmentDepth * 0.965);
           dimBatch.add(x - laneWidth / 2 + 0.05, 0.018, z, 0.025, 0.015, WORLD.segmentDepth - 0.11);
-          dimBatch.add(x, 0.018, z + WORLD.segmentDepth / 2 - 0.2, laneWidth * 0.86, 0.014, 0.025);
-          if (index % 3 === 0) edgeBatch.add(x, 0.023, z, 0.044, 0.02, 0.57);
           for (const side of [-1, 1]) {
             const neighbor = lane + side;
             const outside = neighbor < 0 || neighbor >= laneCount;
@@ -640,7 +735,7 @@
             }
           }
           if (type.startsWith('WALL_')) {
-            renderObstacle(type, x, z, index);
+            renderObstacle(type, x, z, index, time);
             frameEntities.set(`wall:${index}:${lane}`, {
               index, x, y: surfaceHeight + heightY(config[`${type}_HEIGHT`] || 600) / 2,
             });
@@ -654,9 +749,9 @@
       clearSurface();
     }
 
-    function renderObstacle(type, x, z, index) {
+    function renderObstacle(type, x, z, index, time = 0) {
       if (obstacleModels) {
-        obstacleModels.add(type, x, z, index);
+        obstacleModels.add(type, x, z, index, time);
         return;
       }
       const height = heightY(config[`${type}_HEIGHT`] || (type === 'WALL_HIGH' ? 2000 : type === 'WALL_MEDIUM' ? 1100 : 600));
@@ -688,16 +783,36 @@
     }
 
     function renderPickup(type, x, z, time, index) {
+      if (flightObjects) { flightObjects.addPickup(type, x, z, time, index); return; }
       const bob = Math.sin(time * 2.2 + index * 0.7) * 0.11;
       const y = heightY(config.FUEL_BLOCK_HEIGHT || 450) + bob;
       const colors = { FUEL: 0x8cf0c5, BOOST: 0xffc36b, SLOW: 0xbfa5ff, TRIPLE: 0xffecad, MAGNET: 0x70ddec };
       const color = colors[type] || 0x8cf0c5;
       const scale = type === 'FUEL' ? 0.41 : 0.55;
+      // 呼吸缩放只作用于装饰光效；拾取判定仍按车道中心规则，视觉不扩大判定。
+      const pulse = 1 + 0.07 * Math.sin(time * 3 + index * 1.3);
+      // 所有奖励背后都有一团同色柔光，远距离先看到光晕再分辨类型。
+      haloBatch.add(x, y, z - 0.06, pulse, pulse, 1, 0, 0, 0, color);
       if (symbolBatches[type]) {
-        symbolBatches[type].add(x, y, z, 1, 1, 1, 0, Math.sin(time * 0.8 + index) * 0.35);
+        // 符号保持面向玩家的摇摆以便辨认，白色内嵌与徽章外环增加层次。
+        const sway = Math.sin(time * 1.4 + index) * 0.5;
+        const sigil = 1.06 * pulse;
+        symbolBatches[type].add(x, y, z, sigil, sigil, sigil, 0, sway);
+        symbolInlayBatches[type].add(x, y, z + 0.11, sigil * 0.62, sigil * 0.62, sigil * 0.62, 0, sway);
+        symbolRingBatch.add(x, y, z, sigil, sigil, sigil, 0.2, 0, -time * 0.6 + index, color);
+        jewelBatch.add(x, y, z, scale * 0.40, scale * 0.40, scale * 0.40, 0, time * 1.1 + index, 0, color);
       } else {
         jewelBatch.add(x, y, z, scale, scale * 1.5, scale, 0, time * 0.7 + index, 0, color);
+        // 燃料晶体的白色内核与外壳分层，远看仍是一颗发光晶体。
+        jewelBatch.add(x, y, z, scale * 0.42, scale * 0.72, scale * 0.42, 0, -time * 1.3 + index, 0, 0xffffff);
+        symbolRingBatch.add(x, y, z, scale * 1.9 * pulse, scale * 1.9 * pulse, scale * 1.9 * pulse,
+          0.2, 0, -time * 0.6 + index, color);
       }
+      // 同色光柱信标与地面光环：奖励在真实游戏距离上先于细节被看见。
+      const beamHeight = 2.6 * pulse;
+      beaconBatch.add(x, y + beamHeight * 0.28, z, 0.05 * pulse, beamHeight, 0.05 * pulse, 0, 0, 0, color);
+      collarBatch.add(x, 0.055, z, scale * 2.1 * pulse, scale * 2.1 * pulse, scale * 2.1 * pulse,
+        -Math.PI / 2, 0, 0, color);
       collarBatch.add(x, y, z, scale * 1.7, scale * 1.7, scale * 1.7, 0.2, 0, 0, color);
       if (type !== 'FUEL') collarBatch.add(x, y, z, scale * 1.5, scale * 1.5, scale * 1.5, 0, Math.PI / 2, 0, color);
       dimBatch.add(x, 0.03, z, 0.80, 0.025, 0.80);
@@ -712,6 +827,7 @@
         index, x,
         y: surfaceHeight + heightY(enemy.type === 'turret' ? config.TURRET_HEIGHT / 2 : config.DRONE_HEIGHT),
       });
+      if (flightObjects) { flightObjects.addEnemy(enemy, x, z, time); return; }
       if (enemy.type === 'turret') {
         const height = heightY(config.TURRET_HEIGHT || 1900);
         const hullWidth = WORLD.laneWidth * 0.52;
@@ -731,6 +847,9 @@
               hullWidth * 0.13, 0.075, 0.16);
           }
         }
+        // 底部琥珀警戒环标出固定炮台的占地区域，低飞掠过时仍有危险提示。
+        collarBatch.add(x, 0.07, z, hullWidth * 0.82, hullWidth * 0.82, hullWidth * 0.82,
+          -Math.PI / 2, 0, 0, 0xffc36b);
       } else {
         // 机体最高点与 DRONE_HEIGHT 一致，漂浮和警告只作用于装饰灯。
         const top = heightY(config.DRONE_HEIGHT || 500);
@@ -739,7 +858,16 @@
         droneWingBatch.add(x, y - 0.10, z);
         enemyHullBatch.add(x, y + 0.26, z + 0.04, 0.54, 0.18, 1.05);
         redBatch.add(x, y + 0.30, z + 0.535, 0.31, 0.049, 0.021);
+        // 红色传感眼是敌机的远距离识别点；警告转向时加快闪烁。
+        const eyePulse = enemy.state === 'warn' ? 0.45 + 0.55 * Math.abs(Math.sin(time * 9)) : 1;
+        const eyeChannel = Math.round(255 * eyePulse);
+        droneEyeBatch.add(x, y + 0.30, z + 0.56, 0.15, 0.095, 0.024,
+          0, 0, 0, (eyeChannel << 16) | (eyeChannel << 8) | eyeChannel);
         edgeBatch.add(x, y + 0.26, z + 1.03, 0.09, 0.025, 0.41);
+        // 琥珀翼尖灯把翼展轮廓从深色星云背景里托出来。
+        for (const side of [-1, 1]) {
+          amberBatch.add(x + side * 1.24, y - 0.04, z - 0.50, 0.085, 0.05, 0.17);
+        }
         for (const side of [-1, 1]) {
           enemyHullBatch.add(x + side * 0.91, y - 0.08, z - 0.47, 0.31, 0.33, 1.22);
           engineBatch.add(x + side * 0.91, y - 0.12, z - 1.13, 0.14, 0.22, 0.14, Math.PI / 2);
@@ -894,10 +1022,14 @@
       frameEntities = new Map();
       renderRoad(state, time);
       renderShots(state);
+      clearSurface();
+      if (magnetFx) magnetFx.update(state, time, ship ? ship.group : null);
       if (weapons) weapons.update(state, { dt, time, shipGroup: ship ? ship.group : null, viewportHeight });
       if (statusFx) statusFx.update(state, config, { dt, shipGroup: ship ? ship.group : null });
       renderDebris(state, dt);
       renderBoost(state, time);
+      if (skyShow) skyShow.update(state, { dt, camera,
+        minimumWorldY: highestVisibleSurface + heightY(config.WALL_HIGH_HEIGHT || 2000) + 3 });
       clippedInstances = 0;
       for (const batch of batches) {
         batch.mesh.count = batch.count;
@@ -960,8 +1092,11 @@
         shadows: { enabled: shadowsEnabled, mapSize: 1024, type: 'PCFSoft', nearObstacleOnly: true },
         orbitalEnvironment: orbitalEnvironment ? orbitalEnvironment.getDiagnostics() : null,
         obstacleModels: obstacleModels ? obstacleModels.getDiagnostics() : null,
+        objectModels: flightObjects ? flightObjects.getDiagnostics() : null,
         weapons: weapons ? weapons.getDiagnostics() : null,
         statusFx: statusFx ? statusFx.getDiagnostics() : null,
+        magnetFx: magnetFx ? magnetFx.getDiagnostics() : null,
+        skyShow: skyShow ? skyShow.getDiagnostics() : null,
       };
     }
 
@@ -978,7 +1113,8 @@
       scene.clear();
     }
 
-    return { render, resize, dispose, getDiagnostics };
+    return { render, resize, dispose, getDiagnostics,
+      getSkyAudioCue: () => !disposed && !contextLost && skyShow ? skyShow.getAudioCue() : null };
   }
 
   scope.Skyroads = scope.Skyroads || {};

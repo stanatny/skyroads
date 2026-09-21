@@ -106,36 +106,76 @@
       explosion.add(puff);
       return { puff, phase: index * 2.39996, seed: 0.42 + (index % 3) * 0.22 };
     });
+    // 六边网格与扫描能量在片元阶段计算，护盾中心保持通透，不用厚实白球遮住机体。
     const shieldMaterial = keep(new THREE.ShaderMaterial({
-      uniforms: { strength: { value: 0 } },
-      vertexShader: `varying vec3 surfaceNormal; varying vec3 viewDirection;
+      uniforms: { strength: { value: 0 }, shieldTime: { value: 0 } },
+      vertexShader: `varying vec3 surfaceNormal; varying vec3 viewDirection; varying vec2 shieldUv;
         void main() { vec4 view = modelViewMatrix * vec4(position, 1.0);
-          surfaceNormal = normalize(normalMatrix * normal); viewDirection = -view.xyz;
+          surfaceNormal = normalize(normalMatrix * normal); viewDirection = -view.xyz; shieldUv = uv;
           gl_Position = projectionMatrix * view; }`,
-      fragmentShader: `uniform float strength; varying vec3 surfaceNormal; varying vec3 viewDirection;
-        void main() { float rim = pow(1.0 - abs(dot(normalize(surfaceNormal), normalize(viewDirection))), 2.4);
-          gl_FragColor = vec4(mix(vec3(0.12, 0.48, 1.0), vec3(0.46, 0.91, 1.0), rim),
-            strength * (0.018 + rim * 0.52)); }`,
+      fragmentShader: `uniform float strength; uniform float shieldTime;
+        varying vec3 surfaceNormal; varying vec3 viewDirection; varying vec2 shieldUv;
+        void main() {
+          float facing = abs(dot(normalize(surfaceNormal), normalize(viewDirection)));
+          float rim = pow(1.0 - facing, 2.35);
+          vec2 cellSize = vec2(1.0, 1.7320508);
+          vec2 p = shieldUv * vec2(32.0, 14.0);
+          vec2 cellA = mod(p, cellSize) - cellSize * 0.5;
+          vec2 cellB = mod(p - cellSize * 0.5, cellSize) - cellSize * 0.5;
+          vec2 cell = dot(cellA, cellA) < dot(cellB, cellB) ? cellA : cellB;
+          vec2 edgePoint = abs(cell);
+          float edgeDistance = max(edgePoint.x, dot(edgePoint, vec2(0.5, 0.8660254)));
+          float lineWidth = max(fwidth(edgeDistance) * 1.20, 0.026);
+          float grid = smoothstep(0.5 - lineWidth, 0.5, edgeDistance);
+          float scanPosition = abs(fract(shieldUv.y - shieldTime * 0.19) - 0.5);
+          float scan = pow(max(0.0, 1.0 - scanPosition * 24.0), 2.0);
+          float aurora = 0.5 + 0.5 * sin(shieldUv.x * 13.0 + shieldUv.y * 9.0 - shieldTime * 1.5);
+          vec3 edgeColor = mix(vec3(0.23, 0.43, 1.0), vec3(0.22, 0.98, 1.0), aurora);
+          vec3 color = mix(vec3(0.10, 0.35, 0.88), edgeColor, min(1.0, rim + grid * 0.38));
+          color = mix(color, vec3(0.63, 0.98, 1.0), scan * 0.64);
+          float opacity = 0.009 + rim * 0.36 + grid * (0.065 + rim * 0.18) + scan * 0.12;
+          gl_FragColor = vec4(color, strength * opacity);
+        }`,
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-      side: THREE.DoubleSide, toneMapped: false,
+      side: THREE.FrontSide, toneMapped: false,
     }));
-    const shell = mesh(keep(new THREE.SphereGeometry(1, 36, 24)), shieldMaterial, shield);
+    const shell = mesh(keep(new THREE.SphereGeometry(1, 48, 32)), shieldMaterial, shield);
     shell.name = 'ship_grace_shield_shell';
     shell.scale.set(1.46, 0.88, 1.62);
-    const latticeMaterial = additive(0x60cfff);
-    latticeMaterial.wireframe = true;
-    const lattice = mesh(sphere, latticeMaterial, shield);
-    lattice.name = 'ship_grace_shield_lattice';
-    lattice.scale.copy(shell.scale).multiplyScalar(1.002);
-    const shieldRimMaterial = additive(0x83e6ff);
-    const shieldRim = mesh(ring, shieldRimMaterial, shield);
+    // 分段轨道在原有包络上流动；留出明显缺口，避免完整亮环盖住道路与飞机。
+    const shieldRimMaterial = additive(0x6fddff);
+    const shieldVioletMaterial = additive(0x867fff);
+    const orbitGeometry = keep(new THREE.TorusGeometry(1, 0.012, 5, 28, Math.PI * 0.36));
+    const shieldRim = new THREE.Group();
     shieldRim.name = 'ship_grace_shield_equator';
     shieldRim.rotation.x = Math.PI / 2;
     shieldRim.scale.set(1.46, 1.62, 1);
-    const meridian = mesh(ring, shieldRimMaterial, shield);
+    shield.add(shieldRim);
+    const meridian = new THREE.Group();
     meridian.name = 'ship_grace_shield_meridian';
     meridian.rotation.y = Math.PI / 2;
     meridian.scale.set(1.62, 0.88, 1);
+    shield.add(meridian);
+    const shieldArcs = [];
+    for (let index = 0; index < 3; index += 1) {
+      const phase = index * Math.PI * 2 / 3;
+      const equatorial = mesh(orbitGeometry, shieldRimMaterial, shieldRim);
+      equatorial.name = 'ship_shield_equatorial_arc';
+      equatorial.rotation.z = phase;
+      shieldArcs.push({ object: equatorial, phase, speed: 0.42 });
+      const vertical = mesh(orbitGeometry, shieldVioletMaterial, meridian);
+      vertical.name = 'ship_shield_meridian_arc';
+      vertical.rotation.z = phase + 0.72;
+      shieldArcs.push({ object: vertical, phase: phase + 0.72, speed: -0.31 });
+    }
+    const shieldNodeMaterial = additive(0xb5faff);
+    const shieldNodes = keep(new THREE.InstancedMesh(
+      keep(new THREE.IcosahedronGeometry(0.042, 0)), shieldNodeMaterial, 6));
+    shieldNodes.name = 'ship_shield_orbit_nodes';
+    shieldNodes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    shieldNodes.frustumCulled = false;
+    shieldNodes.count = 0;
+    shield.add(shieldNodes);
     let previousRun = null;
     let deathHandled = false;
     let age = 0;
@@ -154,7 +194,9 @@
       shieldPhase = 0;
       shieldRemaining = shieldOpacity = visibleParticles = 0;
       explosion.visible = shield.visible = false;
-      fire.count = debris.count = embers.count = 0;
+      fire.count = debris.count = embers.count = shieldNodes.count = 0;
+      shieldMaterial.uniforms.strength.value = 0;
+      shieldMaterial.uniforms.shieldTime.value = 0;
     }
 
     function trigger(state, shipGroup) {
@@ -267,7 +309,11 @@
       shieldRemaining = protection(state, config).remaining;
       shield.visible = shieldRemaining > 0 && Boolean(shipGroup);
       shieldOpacity = 0;
-      if (!shield.visible) return;
+      if (!shield.visible) {
+        shieldNodes.count = 0;
+        shieldMaterial.uniforms.strength.value = 0;
+        return;
+      }
       shipGroup.updateWorldMatrix(true, false);
       shipGroup.localToWorld(point.set(0, 0.59, 0.06));
       shield.position.copy(point);
@@ -276,17 +322,38 @@
       const remainingRatio = Math.min(1, shieldRemaining / Math.max(0.001, config.FUEL_BURST_GRACE || 1));
       // 末段逐步收敛，但无敌计时仍为正时保留可辨识的壳体与边线。
       shieldOpacity = 0.38 + 0.62 * Math.min(1, remainingRatio / 0.32);
+      const effectTime = state.reducedMotion ? 0 : shieldPhase;
       shieldMaterial.uniforms.strength.value = shieldOpacity;
-      latticeMaterial.opacity = shieldOpacity * 0.09;
-      shieldRimMaterial.opacity = shieldOpacity * 0.61;
+      shieldMaterial.uniforms.shieldTime.value = effectTime;
+      shieldRimMaterial.opacity = shieldOpacity * 0.76;
+      shieldVioletMaterial.opacity = shieldOpacity * 0.58;
+      shieldNodeMaterial.opacity = shieldOpacity * 0.85;
       const size = 0.975 + 0.025 * Math.min(1, remainingRatio / 0.32);
       shield.scale.setScalar(size);
-      lattice.rotation.y = state.reducedMotion ? 0 : shieldPhase * 0.30;
+      for (const arc of shieldArcs) arc.object.rotation.z = arc.phase + effectTime * arc.speed;
+      shieldNodes.count = 6;
+      for (let index = 0; index < shieldNodes.count; index += 1) {
+        const phase = index % 3 * Math.PI * 2 / 3;
+        if (index < 3) {
+          const angle = phase + effectTime * 0.42 + Math.PI * 0.36;
+          transform.position.set(Math.cos(angle) * 1.46, 0, Math.sin(angle) * 1.62);
+        } else {
+          const angle = phase + 0.72 - effectTime * 0.31 + Math.PI * 0.36;
+          transform.position.set(0, Math.sin(angle) * 0.88, -Math.cos(angle) * 1.62);
+        }
+        transform.rotation.set(0, effectTime * 0.7, 0);
+        transform.scale.setScalar(1);
+        transform.updateMatrix();
+        shieldNodes.setMatrixAt(index, transform.matrix);
+      }
+      shieldNodes.instanceMatrix.needsUpdate = true;
     }
 
     function getDiagnostics() {
       return { explosion: { active, age, triggerCount, position: explosion.position.toArray(), particles: visibleParticles },
-        shield: { active: shield.visible, remaining: shieldRemaining, opacity: shieldOpacity }, resources: resources.size };
+        shield: { active: shield.visible, remaining: shieldRemaining, opacity: shieldOpacity,
+          phase: shieldMaterial.uniforms.shieldTime.value,
+          orbitSegments: shield.visible ? shieldArcs.length : 0, nodes: shieldNodes.count }, resources: resources.size };
     }
     return { group, update, getDiagnostics };
   }

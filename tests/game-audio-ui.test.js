@@ -2607,3 +2607,48 @@ test('firing a charged missile also counts toward the tutorial shoot phase', () 
   vm.runInContext('STATE.shots = []; fireMissile()', sandbox);
   assert.equal(vm.runInContext('STATE.tutorial && STATE.tutorial.shot', sandbox), true);
 });
+
+test('hero flyby audio shares SFX mute and focus ownership without replaying stale runs', () => {
+  const h = makeGameUiSandbox();
+  vm.runInContext(`
+    globalThis.heroSoundCalls = [];
+    Skyroads.flightSkyAudio = { create: ({ context, destination }) => ({
+      update: cue => heroSoundCalls.push({ ...cue, contextValid: !!context, destinationValid: !!destination }),
+      stop: () => heroSoundCalls.push({ active: false }),
+    }) };
+    startGame();
+    globalThis.heroCue = { active: true, runId: STATE.runId, eventId: 'pass-1', phase: 0.35, side: -1 };
+    STATE.cockpitRuntime = { getSkyAudioCue: () => heroCue, updateUi() {}, getDiagnostics: () => ({}) };
+    syncSkyHeroAudio();
+  `, h.sandbox);
+  const last = () => vm.runInContext('heroSoundCalls.at(-1)', h.sandbox);
+  assert.equal(last().active, true);
+  assert.equal(last().contextValid && last().destinationValid, true);
+  const set = (code) => vm.runInContext(code, h.sandbox);
+  set('STATE.audioController.setMusicMuted(true); syncSkyHeroAudio()');
+  assert.equal(last().active, true, 'music mute does not mute the flyby');
+  set('STATE.audioController.setSfxMuted(true); syncPropulsionAudio()');
+  assert.equal(last().active, false);
+  set('STATE.audioController.setSfxMuted(false); syncPropulsionAudio()');
+  assert.equal(last().active, true);
+  h.windowObject.dispatch('blur');
+  assert.equal(last().active, false);
+  h.windowObject.dispatch('focus');
+  assert.equal(last().active, true);
+  h.documentObject.hidden = true; h.documentObject.dispatch('visibilitychange');
+  assert.equal(last().active, false);
+  h.documentObject.hidden = false; h.documentObject.dispatch('visibilitychange');
+  assert.equal(last().active, true);
+  set('togglePause()');
+  assert.equal(last().active, false);
+  set('togglePause()');
+  assert.equal(last().active, true);
+  set('STATE.reducedMotion = true; syncSkyHeroAudio()');
+  assert.equal(last().active, false);
+  set('STATE.reducedMotion = false; STATE.runId += 1; syncSkyHeroAudio()');
+  assert.equal(last().active, false, 'old renderer cue cannot play in a restarted run');
+  set('heroCue.runId = STATE.runId; syncSkyHeroAudio()');
+  assert.equal(last().active, true);
+  set('STATE.cockpitRuntime = null; syncSkyHeroAudio()');
+  assert.equal(last().active, false, 'classic fallback stops the sound');
+});
