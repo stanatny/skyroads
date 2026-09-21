@@ -4,7 +4,7 @@
   const MOVEMENT_TUNING = Object.freeze({
     laneCount: 7,
     tapDurationMs: 145,
-    holdDelayMs: 220,
+    holdDelayMs: 0,           // 长按不再等待自动重复；跨道保持连续速度
     repeatDurationMs: 110,
   });
   const HITBOX = Object.freeze({
@@ -27,12 +27,15 @@
     return {
       lanePosition: initialLane,
       previousLanePosition: initialLane,
+      laneVelocity: 0,          // 车道/毫秒，与插值曲线使用同一真值
       segmentStart: initialLane,
       segmentSource: initialLane,
       segmentTarget: initialLane,
       segmentElapsedMs: 0,
       segmentDurationMs: 0,
       segmentLaneDurationMs: MOVEMENT_TUNING.tapDurationMs,
+      segmentStartVelocity: 0,
+      segmentEndVelocity: 0,
       heldLeft: false,
       heldRight: false,
       heldSinceLeftMs: null,
@@ -52,10 +55,6 @@
   function resetMovement(state, lanePosition = Math.floor(MOVEMENT_TUNING.laneCount / 2)) {
     Object.assign(state, createMovementState(lanePosition));
     return movementSnapshot(state);
-  }
-
-  function smoothstep01(t) {
-    return t * t * (3 - 2 * t);
   }
 
   function isDirection(dir) {
@@ -86,76 +85,93 @@
     state.repeatEligibleAt = dir === 0 ? Infinity : pressedAt + MOVEMENT_TUNING.holdDelayMs;
   }
 
-  function beginSegment(state, source, target, start, laneDurationMs) {
-    if (target < 0 || target >= MOVEMENT_TUNING.laneCount || target === start) return false;
+  // Hermite 插值保留两端速度：点按两端为零，长按跨道两端为巡航速度。
+  // 每段始终单调，因此游戏用子步首尾位置进行碰撞扫掠不会漏掉回折路径。
+  function beginSegment(state, source, target, start, laneDurationMs,
+    startVelocity = 0, endVelocity = 0, durationMs = Math.abs(target - start) * laneDurationMs) {
+    if (target < 0 || target >= MOVEMENT_TUNING.laneCount || target === start || durationMs <= 0) return false;
+    const direction = Math.sign(target - start);
+    const maximumSlope = 3 * Math.abs(target - start) / durationMs;
     state.segmentStart = start;
     state.segmentSource = source;
     state.segmentTarget = target;
     state.segmentElapsedMs = 0;
     state.segmentLaneDurationMs = laneDurationMs;
-    state.segmentDurationMs = Math.abs(target - start) * laneDurationMs;
-    state.segmentActive = state.segmentDurationMs > 0;
-    return state.segmentActive;
+    state.segmentDurationMs = durationMs;
+    state.segmentStartVelocity = direction * Math.min(maximumSlope, Math.max(0, direction * startVelocity));
+    state.segmentEndVelocity = direction * Math.min(maximumSlope, Math.max(0, direction * endVelocity));
+    state.laneVelocity = state.segmentStartVelocity;
+    state.segmentActive = true;
+    return true;
   }
 
-  function beginAdjacentSegment(state, dir, laneDurationMs) {
+  function heldVelocityAtTarget(state, target, dir) {
+    if (!isHeld(state, dir) || state.activeDirection !== dir
+      || target === 0 || target === MOVEMENT_TUNING.laneCount - 1) return 0;
+    return dir / MOVEMENT_TUNING.repeatDurationMs;
+  }
+
+  function beginAdjacentSegment(state, dir, laneDurationMs, allowHeld = false) {
     if (state.segmentActive || !isDirection(dir)) return false;
     const source = state.lanePosition;
-    const target = source + dir;
-    return beginSegment(state, source, target, source, laneDurationMs);
+    const target = dir > 0 ? Math.floor(source + 1e-9) + 1 : Math.ceil(source - 1e-9) - 1;
+    return beginSegment(state, source, target, source, laneDurationMs, state.laneVelocity,
+      allowHeld ? heldVelocityAtTarget(state, target, dir) : 0);
   }
 
   function segmentDirection(state) {
     return Math.sign(state.segmentTarget - state.segmentStart);
   }
 
-  function reverseActiveSegment(state) {
+  function retargetSegmentVelocity(state, endVelocity) {
+    if (!state.segmentActive) return;
+    const remainingMs = state.segmentDurationMs - state.segmentElapsedMs;
+    if (remainingMs <= 0) return;
+    beginSegment(state, state.segmentSource, state.segmentTarget, state.lanePosition,
+      state.segmentLaneDurationMs, state.laneVelocity, endVelocity, remainingMs);
+  }
+
+  function reverseActiveSegment(state, dir) {
     if (!state.segmentActive) return false;
-    const oldSource = state.segmentSource;
     const oldTarget = state.segmentTarget;
-    const laneDurationMs = state.segmentLaneDurationMs;
-    if (state.lanePosition === oldSource) {
-      state.segmentStart = state.lanePosition;
-      state.segmentSource = oldTarget;
-      state.segmentTarget = oldSource;
-      state.segmentElapsedMs = 0;
-      state.segmentDurationMs = 0;
-      state.segmentLaneDurationMs = laneDurationMs;
+    const target = dir > 0 ? Math.ceil(state.lanePosition) : Math.floor(state.lanePosition);
+    // 反向按键是主动调向：当前位置不变，取消原方向的惯性，避免一个子步来回折返。
+    state.laneVelocity = 0;
+    if (target === state.lanePosition) {
       state.segmentActive = false;
-      return true;
+      beginAdjacentSegment(state, dir, MOVEMENT_TUNING.tapDurationMs, true);
+    } else {
+      beginSegment(state, oldTarget, target, state.lanePosition, MOVEMENT_TUNING.tapDurationMs,
+        0, heldVelocityAtTarget(state, target, dir));
     }
-    return beginSegment(state, oldTarget, oldSource, state.lanePosition, laneDurationMs);
+    return true;
   }
 
   function pressDirection(state, dir) {
     if (!isDirection(dir) || isHeld(state, dir)) return { started: false, reversed: false };
-
     setHeld(state, dir, true);
     setActiveDirection(state, dir, state.clockMs);
-
     if (state.segmentActive && segmentDirection(state) === -dir) {
-      return { started: false, reversed: reverseActiveSegment(state) };
+      return { started: false, reversed: reverseActiveSegment(state, dir) };
     }
-
-    return {
-      started: beginAdjacentSegment(state, dir, MOVEMENT_TUNING.tapDurationMs),
-      reversed: false,
-    };
+    if (state.segmentActive) {
+      retargetSegmentVelocity(state, heldVelocityAtTarget(state, state.segmentTarget, dir));
+      return { started: false, reversed: false };
+    }
+    return { started: beginAdjacentSegment(state, dir, MOVEMENT_TUNING.tapDurationMs, true), reversed: false };
   }
 
   function releaseDirection(state, dir) {
     if (!isDirection(dir) || !isHeld(state, dir)) return { reversed: false };
-
     setHeld(state, dir, false);
     if (state.activeDirection !== dir) return { reversed: false };
-
     const restoredDirection = isHeld(state, -dir) ? -dir : 0;
-    const restoredPressedAt = restoredDirection === 0 ? null : heldSince(state, restoredDirection);
-    setActiveDirection(state, restoredDirection, restoredPressedAt);
-
+    setActiveDirection(state, restoredDirection, restoredDirection === 0 ? null : heldSince(state, restoredDirection));
     if (state.segmentActive && restoredDirection !== 0 && segmentDirection(state) === -restoredDirection) {
-      return { reversed: reverseActiveSegment(state) };
+      return { reversed: reverseActiveSegment(state, restoredDirection) };
     }
+    if (restoredDirection === 0) retargetSegmentVelocity(state, 0);
+    else if (!state.segmentActive) beginAdjacentSegment(state, restoredDirection, MOVEMENT_TUNING.tapDurationMs, true);
     return { reversed: false };
   }
 
@@ -173,13 +189,32 @@
     state.heldSinceLeftMs = null;
     state.heldSinceRightMs = null;
     setActiveDirection(state, 0, null);
+    retargetSegmentVelocity(state, 0);
+    return movementSnapshot(state);
+  }
+
+  // 台边或实体墙可以截断当前横移，保留按键意图以便起跳后继续或立即反向退出。
+  function stopMovementAt(state, lanePosition) {
+    const stoppedPosition = clampLanePosition(lanePosition);
+    Object.assign(state, {
+      lanePosition: stoppedPosition,
+      previousLanePosition: stoppedPosition,
+      laneVelocity: 0,
+      segmentStart: stoppedPosition,
+      segmentSource: stoppedPosition,
+      segmentTarget: stoppedPosition,
+      segmentElapsedMs: 0,
+      segmentDurationMs: 0,
+      segmentStartVelocity: 0,
+      segmentEndVelocity: 0,
+      segmentActive: false,
+    });
     return movementSnapshot(state);
   }
 
   function beginEligibleRepeat(state) {
-    if (state.segmentActive || state.activeDirection === 0) return false;
-    if (!isHeld(state, state.activeDirection) || state.clockMs < state.repeatEligibleAt) return false;
-    return beginAdjacentSegment(state, state.activeDirection, MOVEMENT_TUNING.repeatDurationMs);
+    if (state.segmentActive || state.activeDirection === 0 || !isHeld(state, state.activeDirection)) return false;
+    return beginAdjacentSegment(state, state.activeDirection, MOVEMENT_TUNING.repeatDurationMs, true);
   }
 
   function advanceMovement(state, deltaMs) {
@@ -187,48 +222,39 @@
     state.previousLanePosition = previousLanePosition;
     let remainingMs = Number.isFinite(deltaMs) && deltaMs > 0 ? deltaMs : 0;
     let segmentsStarted = 0;
-
     while (remainingMs > 0) {
       if (!state.segmentActive) {
         if (beginEligibleRepeat(state)) {
           segmentsStarted += 1;
           continue;
         }
-
-        const waitsForHeldRepeat = state.activeDirection !== 0
-          && isHeld(state, state.activeDirection)
-          && state.clockMs < state.repeatEligibleAt;
-        if (waitsForHeldRepeat) {
-          const waitMs = Math.min(remainingMs, state.repeatEligibleAt - state.clockMs);
-          state.clockMs += waitMs;
-          remainingMs -= waitMs;
-          continue;
-        }
-
+        state.laneVelocity = 0;
         state.clockMs += remainingMs;
-        remainingMs = 0;
-        continue;
+        break;
       }
-
-      const segmentRemainingMs = state.segmentDurationMs - state.segmentElapsedMs;
-      const consumedMs = Math.min(remainingMs, segmentRemainingMs);
+      const consumedMs = Math.min(remainingMs, state.segmentDurationMs - state.segmentElapsedMs);
       state.segmentElapsedMs += consumedMs;
       state.clockMs += consumedMs;
       remainingMs -= consumedMs;
-
-      const progress = state.segmentElapsedMs / state.segmentDurationMs;
-      const easedProgress = smoothstep01(Math.min(1, progress));
-      state.lanePosition = state.segmentStart
-        + (state.segmentTarget - state.segmentStart) * easedProgress;
-
+      const t = Math.min(1, state.segmentElapsedMs / state.segmentDurationMs);
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const distance = state.segmentTarget - state.segmentStart;
+      const startSlope = state.segmentStartVelocity * state.segmentDurationMs;
+      const endSlope = state.segmentEndVelocity * state.segmentDurationMs;
+      state.lanePosition = state.segmentStart + distance * (3 * t2 - 2 * t3)
+        + startSlope * (t3 - 2 * t2 + t) + endSlope * (t3 - t2);
+      state.laneVelocity = (distance * (6 * t - 6 * t2)
+        + startSlope * (3 * t2 - 4 * t + 1) + endSlope * (3 * t2 - 2 * t)) / state.segmentDurationMs;
       if (state.segmentElapsedMs >= state.segmentDurationMs) {
         state.lanePosition = state.segmentTarget;
+        state.laneVelocity = state.segmentEndVelocity;
         state.segmentElapsedMs = state.segmentDurationMs;
         state.segmentActive = false;
         if (beginEligibleRepeat(state)) segmentsStarted += 1;
+        else state.laneVelocity = 0;
       }
     }
-
     return { previousLanePosition, lanePosition: state.lanePosition, segmentsStarted };
   }
 
@@ -310,6 +336,7 @@
     requestDiscreteLaneChange,
     advanceMovement,
     clearHeldDirections,
+    stopMovementAt,
     movementSnapshot,
     directionForCode,
     shouldHandleGameInput,

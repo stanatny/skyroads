@@ -8,8 +8,10 @@
 <meta name="description" content="A fast sci-fi lane runner through an endless nebula.">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="./styles/game.css">
+<link rel="stylesheet" href="./styles/cockpit.css">
 </head>
 <body>
+<canvas id="flight-scene" aria-hidden="true" hidden></canvas>
 <canvas id="game" aria-label="Nebula Cruise game canvas"></canvas>
 <div id="app-ui">
   <div id="command-frame" aria-hidden="true"></div>
@@ -21,6 +23,7 @@
   <section id="rename-dialog" role="dialog" aria-modal="true" hidden></section>
   <p id="persistence-warning" role="status" hidden></p>
   <p id="aria-status" class="sr-only" aria-live="polite"></p>
+  <p id="renderer-notice" role="status" hidden></p>
 </div>
 <script defer src="./src/version.js"></script>
 <script defer src="./src/i18n.js"></script>
@@ -34,6 +37,17 @@
 <script defer src="./src/gap-regions.js"></script>
 <script defer src="./src/audio.js"></script>
 <script defer src="./src/tutorial.js"></script>
+<script defer src="./assets/vendor/three_r170.js"></script>
+<script defer src="./src/flight_dimensions.js"></script>
+<script defer src="./src/flight_terrain.js"></script>
+<script defer src="./src/flight_obstacles.js"></script>
+<script defer src="./src/flight_environment.js"></script>
+<script defer src="./src/flight_ship.js"></script>
+<script defer src="./src/flight_weapons.js"></script>
+<script defer src="./src/flight_status_fx.js"></script>
+<script defer src="./src/flight_renderer.js"></script>
+<script defer src="./src/cockpit_ui.js"></script>
+<script defer src="./src/cockpit_runtime.js"></script>
 <script defer src="./src/game.js"></script>
 </body>
 </html>

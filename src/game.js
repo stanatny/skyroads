@@ -8,6 +8,7 @@ const {
   resetMovement,
   pressDirection,
   releaseDirection,
+  stopMovementAt,
   requestDiscreteLaneChange,
   advanceMovement,
   clearHeldDirections,
@@ -193,6 +194,10 @@ const CONFIG = {
                                //   每子步 ≤0.5 段 ✓ 弹道不漏判
   MAX_BULLETS: 12,             // 同屏子弹上限
   MAX_MISSILE_SHOTS: 4,        // 同屏飞行中导弹上限
+  MISSILE_SPEED: 22,          // 导弹慢于直射弹，保留可见飞行和目标反馈时间
+  MISSILE_CLEARANCE: 160,     // 导弹的坡面净空；真实弹道与 3D 弹体共享高度
+  MISSILE_LOOKAHEAD: 2,       // 只预读前方两段地面，不锁定或穿越障碍
+  MISSILE_MAX_RISE: 150,      // 每前进一段最多爬升的世界高度；台边仍能拦截导弹
   ENEMY_MIN_INDEX: 80,         // segment ≥ 80 才出现敌人（热身与新手期无战斗压力）
   ENEMY_KILL_SCORE: 20,        // 击毁奖励 +20m（固定值，原连击倍率系统已废弃）
   DRONE_HEIGHT: 500,           // 无人机机体贴底高度：500 < 单跳顶点 879 ✓ 可跳过/可击落
@@ -222,7 +227,9 @@ const STATE = {
   position: 0,                 // 所在位置（segment 为单位，浮点）
   speed: 0,
   movement: createMovementState(midLane()), // 唯一横向真值：连续车道位置 + 按住/分段状态
-  playerY: 0,                  // 跳跃高度（世界单位）
+  terrainEnabled: false,       // 仅三维场景启用真实高程；兼容画面回到平面物理
+  groundHeight: 0,             // 当前支撑路面绝对高程（原世界单位）
+  playerY: 0,                  // 相对当前路面的跳跃高度（世界单位）
   playerVY: 0,
   jumpsUsed: 0,                // 已用跳跃段数（0..MAX_JUMPS，落地重置）
   jumpBurst: 0,                // 二段跳跃升推进器爆发剩余时间（秒，>0 时画蓝白焰团）
@@ -244,6 +251,8 @@ const STATE = {
   chargeT: 0,                  // J 蓄力进度（秒，0..CHARGE_TIME；松手时判子弹/导弹）
   chargeStage: 0,              // 蓄力提示音已发档位（0..3：1/3、2/3 进度 tick + 满蓄 ding）
   shots: [],                   // 飞行中的子弹/导弹 { kind, seg, lanePosition }（发射瞬间连续位置）
+  weaponEvents: [],            // 有界世界坐标事件，供三维导弹发射及命中效果读取
+  weaponEventSequence: 0,
   bulletCD: 0,                 // 子弹冷却剩余秒数
   boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
   // 燃料爆发（v1.2.0）
@@ -274,6 +283,7 @@ const STATE = {
   audioMixKey: null,
   visualAssets: null,
   visualAssetsReady: Promise.resolve(null),
+  cockpitRuntime: null,        // 独立三维画面，与本状态共享坐标和玩法
   // 赛道
   track: [],
   gen: null,                   // 生成器内部状态（见第 4 节）
@@ -518,6 +528,8 @@ window.addEventListener('keyup', (e) => {
   if (code) delete KEYS[code];
   const direction = directionForCode(code);
   if (direction !== 0) {
+    // 同一方向可以同时按住字母键和方向键，最后一个别名松开后才结束横移。
+    if (Object.keys(KEYS).some((key) => directionForCode(key) === direction)) return;
     const result = releaseDirection(STATE.movement, direction);
     if (STATE.mode === 'PLAYING' && result.reversed) sfxLane();
     return;
@@ -688,6 +700,23 @@ function jumpHeld() {
   return !!(KEYS.Space || KEYS.KeyK);
 }
 
+// 三维炮口随紧凑模型的实际尺寸和俯仰计算；兼容视图保留原来的弹道起点。
+function projectileLaunchPoint() {
+  if (!STATE.terrainEnabled) return { forward: 0.8, height: 0, pitch: 0 };
+  const terrain = globalThis.Skyroads.flightTerrain;
+  const dimensions = globalThis.Skyroads.flightDimensions;
+  const muzzle = dimensions.attachments.muzzle;
+  let pitch = STATE.reducedMotion ? 0 : Math.max(-0.10, Math.min(0.12, STATE.playerVY / 22000));
+  const tile = terrain.sampleTile(Math.floor(STATE.position), STATE.movement.lanePosition);
+  pitch += Math.atan2((tile.farHeight - tile.nearHeight) * dimensions.heightScale, dimensions.segmentDepth)
+    * Math.max(0, Math.min(1, 1 - STATE.playerY / 300));
+  return {
+    forward: (-muzzle[2] * Math.cos(pitch) - muzzle[1] * Math.sin(pitch)) / dimensions.segmentDepth,
+    height: (muzzle[1] * Math.cos(pitch) - muzzle[2] * Math.sin(pitch)) / dimensions.heightScale,
+    pitch,
+  };
+}
+
 // ---- 开火：J 点按子弹（无限，冷却 0.22s）/ 按住 1.5 秒蓄力导弹（松手发射）----
 // 弹体在 updatePhysics 子步扫掠内推进（与玩家同帧同子步），杜绝高速穿段漏判。
 function fireBullet() {
@@ -697,12 +726,14 @@ function fireBullet() {
   for (const s of STATE.shots) if (s.kind === 'bullet') n++;
   if (n >= CONFIG.MAX_BULLETS) return;              // 同屏上限
   STATE.bulletCD = CONFIG.BULLET_COOLDOWN;
-  // 弹道携带发射瞬间高度 y（地面 = 0，空中 = playerY）：跳得高打得远
+  // 炮口和发射高度来自同一个模型附件；普通弹离膛后保持该世界高度。
+  const launch = projectileLaunchPoint();
   STATE.shots.push({
     kind: 'bullet',
-    seg: STATE.position + 0.8,
+    seg: STATE.position + launch.forward,
     lanePosition: STATE.movement.lanePosition,
-    y: STATE.playerY,
+    y: STATE.playerY + launch.height,
+    groundY: STATE.terrainEnabled ? STATE.groundHeight : 0,
   });
   sfxShoot();
   if (STATE.tutorial) STATE.tutorial.shot = true;
@@ -714,14 +745,30 @@ function fireMissile() {
   let n = 0;
   for (const s of STATE.shots) if (s.kind === 'missile') n++;
   if (n >= CONFIG.MAX_MISSILE_SHOTS) return;
-  STATE.shots.push({
+  const launch = projectileLaunchPoint();
+  const shot = {
     kind: 'missile',
-    seg: STATE.position + 0.8,
+    seg: STATE.position + launch.forward,
     lanePosition: STATE.movement.lanePosition,
-    y: STATE.playerY,
-  });
+    y: STATE.playerY + launch.height,
+    groundY: STATE.terrainEnabled ? STATE.groundHeight : 0,
+    age: 0,
+    pitch: launch.pitch,
+  };
+  STATE.shots.push(shot);
+  recordMissileEvent('launch', shot);
   sfxMissile();
   if (STATE.tutorial) STATE.tutorial.shot = true;
+}
+
+// 发射与爆炸保存世界坐标而非屏幕粒子，暂停和相机移动不会错位。
+function recordMissileEvent(kind, shot) {
+  STATE.weaponEvents.push({
+    id: ++STATE.weaponEventSequence, kind,
+    seg: shot.seg, lanePosition: shot.lanePosition,
+    y: shot.y + (shot.groundY || 0), super: STATE.tripleT > 0,
+  });
+  if (STATE.weaponEvents.length > 16) STATE.weaponEvents.shift();
 }
 
 // ============================================================
@@ -854,6 +901,7 @@ function fillClusterLanes(lanes, gen, clusterLane, d) {
 }
 
 function finalizeGeneratedSegment(gen, segment) {
+  if (STATE.terrainEnabled) segment = globalThis.Skyroads.flightTerrain.decorateSegment(segment);
   const enemyLanes = new Set((segment.enemies || []).map((enemy) => Math.round(enemy.lane)));
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     const type = segment.lanes[lane];
@@ -4362,6 +4410,29 @@ function renderSideDecor(ctx) {
 // ============================================================
 // 7. 物理与碰撞 Physics —— 子步扫掠，杜绝高速穿段漏判
 // ============================================================
+// 三维高程只在渲染器成功启动后开启；保留 playerY 的原始离地语义。
+function enableFlightTerrain() {
+  const terrain = globalThis.Skyroads.flightTerrain;
+  if (!terrain) return false;
+  STATE.terrainEnabled = true;
+  STATE.groundHeight = terrain.heightAt(STATE.position, STATE.movement.lanePosition);
+  STATE.track = STATE.track.map((segment) => terrain.decorateSegment(segment));
+  return true;
+}
+
+// GPU 回退后相对跳高、当前进度与弹道保留，画面和碰撞共同退回平面。
+function disableFlightTerrain() {
+  STATE.terrainEnabled = false;
+  STATE.groundHeight = 0;
+  for (const shot of STATE.shots) shot.groundY = 0;
+}
+
+function heightAboveLane(position, lane) {
+  return STATE.playerY + (STATE.terrainEnabled
+    ? STATE.groundHeight - globalThis.Skyroads.flightTerrain.heightAt(position, lane)
+    : 0);
+}
+
 function updatePhysics(dt) {
   // J 蓄力累积：按住期间在 0.5s、1.0s 提示 tick，满 CHARGE_TIME(1.5)s 就绪 ding；
   // 松手判定在 keyup（满蓄导弹 / 未满子弹），这里只负责进度与提示
@@ -4435,8 +4506,10 @@ function updatePhysics(dt) {
   for (let i = 0; i < steps; i++) {
     const movementStep = advanceMovement(STATE.movement, sdt * 1000);
     const previousLanePosition = movementStep.previousLanePosition;
-    const currentLanePosition = movementStep.lanePosition;
+    let currentLanePosition = movementStep.lanePosition;
 
+    const previousPosition = STATE.position;
+    const wasGrounded = STATE.playerY <= 0.001 && STATE.playerVY <= 0;
     STATE.position += STATE.speed * sdt;
     STATE.distanceMeters += STATE.speed * sdt * CONFIG.DISTANCE_PER_SEGMENT;
 
@@ -4454,9 +4527,29 @@ function updatePhysics(dt) {
         // 滑翔额外耗油 GLIDE_DRAIN(9)/秒：滑翔 1s ≈ 9 燃料 = 2s 基础消耗
         STATE.fuel = Math.max(0, STATE.fuel - CONFIG.GLIDE_DRAIN * sdt);
       }
-      if (STATE.playerY <= 0) { STATE.playerY = 0; STATE.playerVY = 0; STATE.jumpsUsed = 0; STATE.gliding = false; }  // 落地重置
+      if (!STATE.terrainEnabled && STATE.playerY <= 0) { STATE.playerY = 0; STATE.playerVY = 0; STATE.jumpsUsed = 0; STATE.gliding = false; }  // 落地重置
     } else {
       STATE.gliding = false;
+    }
+
+    if (STATE.terrainEnabled) {
+      const terrainStep = globalThis.Skyroads.flightTerrain.transition({
+        previousPosition, position: STATE.position,
+        previousLane: previousLanePosition, lane: currentLanePosition,
+        groundHeight: STATE.groundHeight, playerY: STATE.playerY,
+        playerVY: STATE.playerVY, jumpsUsed: STATE.jumpsUsed, wasGrounded,
+        invincible: STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
+          || Boolean(STATE.tutorial && STATE.tutorial.active),
+      });
+      if (terrainStep.blocked) {
+        currentLanePosition = terrainStep.lane;
+        stopMovementAt(STATE.movement, currentLanePosition);
+      }
+      STATE.groundHeight = terrainStep.groundHeight;
+      STATE.playerY = terrainStep.playerY;
+      STATE.playerVY = terrainStep.playerVY;
+      STATE.jumpsUsed = terrainStep.jumpsUsed;
+      if (STATE.playerY === 0 && STATE.playerVY === 0) STATE.gliding = false;
     }
 
     // 燃料消耗与计时；道具效果倒计时
@@ -4574,6 +4667,15 @@ function updateEnemies(sdt) {
           // 选相邻目标车道（不出界；贴边时只能向内）
           let dir = Math.random() < 0.5 ? -1 : 1;
           if (e.fromLane + dir < 0 || e.fromLane + dir >= CONFIG.LANES) dir = -dir;
+          if (STATE.terrainEnabled) {
+            const patrolLanes = globalThis.Skyroads.flightTerrain.dronePatrolLanes(seg, e.fromLane);
+            if (!patrolLanes.includes(e.fromLane + dir)) dir = -dir;
+            if (!patrolLanes.includes(e.fromLane + dir)) {
+              // 两侧都不可巡逻时保持悬停，避免穿过安全通道、缺口、墙体或高台侧面。
+              e.restT = 1 + Math.random() * 2.5;
+              continue;
+            }
+          }
           e.toLane = e.fromLane + dir;
           e.warnT = CONFIG.DRONE_WARN_TIME;
           e.state = 'warn';
@@ -4594,25 +4696,51 @@ function updateEnemies(sdt) {
   }
 }
 
-// 弹道推进：子弹/导弹每子步前进 (玩家速度 + BULLET_SPEED) × sdt ≤ 0.5 段，
+// 弹道推进：子弹/导弹按各自附加速度前进；公共子步以更快的子弹限幅至 0.5 段，
 // 命中同车道前方最先遇到的实体：敌人 → 击毁；墙 → 子弹湮灭 / 导弹清除为 ROAD。
-// 命中判定（弹道 y = 发射瞬间 playerY，飞行中保持）：
+// 命中判定使用弹体真实世界高度；普通弹保持发射高度，导弹允许有限爬坡：
 //   敌人（无人机/炮塔）：近炸引信，任意高度命中 —— 伪 3D 透视下高度门会让
 //     地面子弹视觉上"命中却没反应"，故不按高度过滤；
 //   矮墙 600：子弹 y ≤ 600 撞墙湮灭；y > 600 越过矮墙继续飞（跳跃射击的战术价值）；
 //   高塔 2000：挡一切子弹；导弹照旧命中即清除一切（爆炸逻辑不变）。
 function advanceShots(sdt) {
   if (STATE.shots.length === 0) return;
-  const v = (STATE.speed + CONFIG.BULLET_SPEED) * sdt;
   for (let si = STATE.shots.length - 1; si >= 0; si--) {
     const sh = STATE.shots[si];
+    const v = (STATE.speed + (sh.kind === 'missile' ? CONFIG.MISSILE_SPEED : CONFIG.BULLET_SPEED)) * sdt;
+    const previousShotY = sh.y;
     sh.seg += v;
+    if (sh.kind === 'missile') sh.age = (sh.age || 0) + sdt;
     if (sh.seg > STATE.position + CONFIG.RENDER_DISTANCE) {   // 飞出视距回收
       STATE.shots.splice(si, 1);
       continue;
     }
     const seg = STATE.track[Math.floor(sh.seg)];
     if (!seg) continue;
+    // 普通弹高度在发射时冻结；导弹只有限爬升，不越过突兀台边或抬升普通弹。
+    if (STATE.terrainEnabled) {
+      const terrain = globalThis.Skyroads.flightTerrain;
+      if (sh.kind === 'missile') {
+        const ahead = terrain.heightAt(sh.seg + CONFIG.MISSILE_LOOKAHEAD, sh.lanePosition);
+        const targetY = ahead + CONFIG.MISSILE_CLEARANCE - (sh.groundY || 0);
+        sh.y += Math.min(Math.max(0, targetY - sh.y), CONFIG.MISSILE_MAX_RISE * v);
+        sh.pitch = Math.atan2((sh.y - previousShotY) / 300, Math.max(0.00001, v * 4));
+      }
+      const shotWorldY = sh.y + (sh.groundY || 0);
+      let pathGround = -Infinity;
+      for (const side of [-1, 0, 1]) {
+        const contactLane = sh.lanePosition + side * HITBOX.projectileHalfWidth;
+        // 高程仍描述缺口的参考路线，但缺口没有实体桥面，不能形成透明弹道屏障。
+        if (seg.lanes[laneTileContaining(contactLane)] === LANE_TYPE.GAP) continue;
+        pathGround = Math.max(pathGround, terrain.heightAt(sh.seg, contactLane));
+      }
+      if (shotWorldY < pathGround - 1) {
+        if (sh.kind === 'missile') recordMissileEvent('impact', sh);
+        STATE.shots.splice(si, 1);
+        continue;
+      }
+    }
+    const shotWorldY = sh.y + (sh.groundY || 0);
     let hit = false;
     if (seg.enemies && seg.enemies.length > 0) {
       for (let ei = seg.enemies.length - 1; ei >= 0; ei--) {
@@ -4623,6 +4751,8 @@ function advanceShots(sdt) {
           enemyLane(e),
           hitboxHalfWidthForEnemy(e.type),
         )) continue;
+        if (STATE.terrainEnabled && shotWorldY
+          < globalThis.Skyroads.flightTerrain.heightAt(sh.seg, enemyLane(e)) - 1) continue;
         // 无人机近炸引信：不按高度过滤 —— 伪 3D 透视下地面子弹视觉上"命中"无人机，
         // 高度门会造成"打中了却没反应"的困惑（高度规则只保留给墙体，见下方）
         seg.enemies.splice(ei, 1);
@@ -4651,7 +4781,9 @@ function advanceShots(sdt) {
           // 子弹高度规则：y 高于矮/中墙可越过；高塔挡一切子弹；导弹不清高度
           const bulletBlocked = sh.kind === 'missile'
             || t === LANE_TYPE.WALL_HIGH
-            || sh.y <= height;
+            || (STATE.terrainEnabled
+              ? shotWorldY - globalThis.Skyroads.flightTerrain.heightAt(sh.seg, wallLane)
+              : sh.y) <= height;
           if (bulletBlocked) {
             hit = true;
             if (sh.kind === 'missile') {
@@ -4665,7 +4797,10 @@ function advanceShots(sdt) {
         }
       }
     }
-    if (hit) STATE.shots.splice(si, 1);
+    if (hit) {
+      if (sh.kind === 'missile') recordMissileEvent('impact', sh);
+      STATE.shots.splice(si, 1);
+    }
   }
 }
 
@@ -4799,8 +4934,10 @@ function pickupFuel(seg, laneIdx) {
 }
 
 function collectPickup(seg, lane, type) {
+  if (STATE.terrainEnabled && heightAboveLane(STATE.position, lane) < -0.001) return false;
   if (type === LANE_TYPE.FUEL) {
-    if (STATE.playerY > CONFIG.FUEL_COLLECT_HEIGHT) return false;
+    const relativeHeight = heightAboveLane(STATE.position, lane);
+    if (relativeHeight < -0.001 || relativeHeight > CONFIG.FUEL_COLLECT_HEIGHT) return false;
     pickupFuel(seg, lane);
   } else if (type === LANE_TYPE.BOOST) {
     seg.lanes[lane] = LANE_TYPE.ROAD;
@@ -4855,11 +4992,13 @@ function checkCollisions(previousLanePosition, currentLanePosition) {
   const invincible = STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
     || Boolean(STATE.tutorial && STATE.tutorial.active);
 
+  const playerHalfWidth = STATE.terrainEnabled
+    ? globalThis.Skyroads.flightDimensions.playerHalfWidth : HITBOX.playerHalfWidth;
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     const type = seg.lanes[lane];
-    if (!sweptIntervalsOverlap(previousLanePosition, currentLanePosition, 0.14, lane, 0.42)) continue;
+    if (!sweptIntervalsOverlap(previousLanePosition, currentLanePosition, playerHalfWidth, lane, HITBOX.wallHalfWidth)) continue;
     const obstacleHeight = wallHeight(type);
-    if (obstacleHeight !== null && !invincible && STATE.playerY <= obstacleHeight) {
+    if (obstacleHeight !== null && !invincible && heightAboveLane(STATE.position, lane) <= obstacleHeight) {
       die('wall');
       return;
     }
@@ -4880,12 +5019,12 @@ function checkCollisions(previousLanePosition, currentLanePosition) {
       if (!sweptIntervalsOverlap(
         previousLanePosition,
         currentLanePosition,
-        0.14,
+        playerHalfWidth,
         enemyLane(e),
         hitboxHalfWidthForEnemy(e.type),
       )) continue;
       const h = e.type === 'drone' ? CONFIG.DRONE_HEIGHT : CONFIG.TURRET_HEIGHT;
-      if (STATE.playerY <= h) { die('enemy'); return; }
+      if (heightAboveLane(STATE.position, enemyLane(e)) <= h) { die('enemy'); return; }
     }
   }
 }
@@ -4904,6 +5043,7 @@ function currentLeaderboardSnapshot() {
 }
 
 function refreshPresentation() {
+  if (STATE.cockpitRuntime) STATE.cockpitRuntime.updateUi();
   const presentation = globalThis.Skyroads.presentation;
   if (!presentation || !STATE.ui || !STATE.translator) return;
   const audioState = adaptiveAudioState();
@@ -4981,6 +5121,7 @@ function resetGame() {
   STATE.position = 0;
   STATE.speed = CONFIG.INITIAL_SPEED;      // 起步即有速度感
   resetMovement(STATE.movement, midLane());
+  STATE.groundHeight = STATE.terrainEnabled ? globalThis.Skyroads.flightTerrain.heightAt(0, midLane()) : 0;
   STATE.playerY = 0;
   STATE.playerVY = 0;
   STATE.jumpsUsed = 0;
@@ -5005,6 +5146,8 @@ function resetGame() {
   STATE.chargeT = 0;
   STATE.chargeStage = 0;
   STATE.shots = [];
+  STATE.weaponEvents = [];
+  STATE.weaponEventSequence = 0;
   STATE.bulletCD = 0;
   STATE.boostWarnStage = 0;
   STATE.fuel = CONFIG.FUEL_MAX;
@@ -5992,6 +6135,9 @@ function loop(now) {
 
 function render() {
   const ctx = STATE.ctx;
+  if (STATE.cockpitRuntime && STATE.cockpitRuntime.render()) {
+    return;
+  }
   ctx.save();
   // 屏幕震动：强度二次方衰减（重击感强、收尾快），随机偏移仅限特效帧
   if (STATE.shake > 0 && !STATE.reducedMotion) {
@@ -6077,6 +6223,7 @@ function installDiagnostics() {
       }) : null,
       locale: STATE.translator ? STATE.translator.locale : null,
       mode: STATE.mode,
+      flight: STATE.cockpitRuntime ? STATE.cockpitRuntime.getDiagnostics() : null,
       canvas: Object.freeze({ width: STATE.width, height: STATE.height, dpr: STATE.dpr }),
       overlays: overlays ? Object.freeze({ ...overlays }) : null,
       leaderboard: Object.freeze({
@@ -6287,11 +6434,28 @@ function init() {
         metrics.cssHeight,
       );
     }
+    if (STATE.cockpitRuntime) {
+      STATE.cockpitRuntime.resize();
+      if (STATE.mode === 'PAUSED') render();
+    }
   }
   window.addEventListener('resize', resize);
   resize();
   STATE.gen = newGenState();
   STATE.track = buildTrack();
+  if (globalThis.Skyroads.cockpitRuntime) {
+    STATE.cockpitRuntime = globalThis.Skyroads.cockpitRuntime.create({
+      state: STATE,
+      config: CONFIG,
+      // 暂停时主循环不重绘；GPU 丢失后补画一帧兼容画面，仍冻结物理。
+      onFallback: () => {
+        disableFlightTerrain();
+        if (STATE.mode === 'PAUSED') render();
+      },
+    });
+    const rendererMode = STATE.cockpitRuntime.getDiagnostics().renderer;
+    if (rendererMode === 'webgl-chase' || rendererMode === 'cockpit') enableFlightTerrain();
+  }
   installDiagnostics();
   requestAnimationFrame(loop);
 }

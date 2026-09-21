@@ -1,1 +1,3 @@
 licenses/*.txt -whitespace
+# 保留第三方源码的原始缩进，与许可说明中的来源哈希及派生脚本一致。
+assets/vendor/three_r170.js -whitespace

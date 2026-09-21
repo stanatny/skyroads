@@ -1155,6 +1155,45 @@ for (const control of ['music', 'sfx']) {
   });
 }
 
+for (const [first, second, direction] of [
+  ['KeyA', 'ArrowLeft', -1], ['ArrowLeft', 'KeyA', -1],
+  ['KeyD', 'ArrowRight', 1], ['ArrowRight', 'KeyD', 1],
+]) {
+  test(`releasing ${first} keeps ${second} lateral input held until its own keyup`, () => {
+    const { sandbox, windowObject } = makeGameUiSandbox();
+    vm.runInContext('startGame()', sandbox);
+    windowObject.dispatch('keydown', { code: first });
+    windowObject.dispatch('keydown', { code: second });
+    vm.runInContext('advanceMovement(STATE.movement, 165)', sandbox);
+    windowObject.dispatch('keyup', { code: first });
+    const before = vm.runInContext('STATE.movement.lanePosition', sandbox);
+    assert.equal(vm.runInContext('STATE.movement.activeDirection', sandbox), direction);
+    assert.equal(vm.runInContext(`Boolean(KEYS.${first})`, sandbox), false);
+    assert.equal(vm.runInContext(`Boolean(KEYS.${second})`, sandbox), true);
+    vm.runInContext('advanceMovement(STATE.movement, 35)', sandbox);
+    const after = vm.runInContext('STATE.movement.lanePosition', sandbox);
+    assert.ok((after - before) * direction > 0);
+    windowObject.dispatch('keyup', { code: second });
+    const target = vm.runInContext('STATE.movement.segmentTarget', sandbox);
+    assert.equal(vm.runInContext('STATE.movement.activeDirection', sandbox), 0);
+    vm.runInContext('advanceMovement(STATE.movement, 500)', sandbox);
+    assert.equal(vm.runInContext('STATE.movement.lanePosition', sandbox), target);
+    assert.equal(vm.runInContext('STATE.movement.laneVelocity', sandbox), 0);
+  });
+}
+
+test('releasing one left alias preserves last-pressed right priority and restores the remaining left alias', () => {
+  const { sandbox, windowObject } = makeGameUiSandbox();
+  vm.runInContext('startGame()', sandbox);
+  for (const code of ['KeyA', 'ArrowLeft', 'KeyD']) windowObject.dispatch('keydown', { code });
+  windowObject.dispatch('keyup', { code: 'KeyA' });
+  assert.equal(vm.runInContext('STATE.movement.activeDirection', sandbox), 1);
+  windowObject.dispatch('keyup', { code: 'KeyD' });
+  assert.equal(vm.runInContext('STATE.movement.activeDirection', sandbox), -1);
+  windowObject.dispatch('keyup', { code: 'ArrowLeft' });
+  assert.equal(vm.runInContext('STATE.movement.activeDirection', sandbox), 0);
+});
+
 test('held gameplay actions use stable codes and ignore repeated keydown events', () => {
   const { sandbox, windowObject } = makeGameUiSandbox();
   vm.runInContext('startGame()', sandbox);

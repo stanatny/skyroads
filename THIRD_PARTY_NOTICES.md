@@ -1,5 +1,16 @@
 # Third-Party Notices
 
+## Three.js r170 — 3D flight renderer
+
+- Official source: https://github.com/mrdoob/three.js/tree/r170
+- Package: `three@0.170.0`, retrieved 2026-09-21 from https://registry.npmjs.org/three/-/three-0.170.0.tgz
+- License: MIT, retained in `licenses/three_mit.txt` and the bundled source header.
+- Archive SHA-256: `4a608a355dcaba72e0e5383cdc814303f5b6060b43c238cdf6932dceb699238d`.
+- Selected upstream file: `build/three.cjs`, SHA-256 `f41a071cca3809c22b09736cbddaa6898ae69be95aa9540c8b72def74925379c`.
+- Runtime file: `assets/vendor/three_r170.js`, SHA-256 `bbcbad34537731d4fd943e7a8804222bfa0c1d48408c0bbb675593009492dab7`.
+- Modification: a function wrapper supplies local `exports` and exposes `globalThis.THREE`. Reproduce with `node tools/vendor_three.js /path/to/extracted/three/package`. No runtime CDN or module fetch is used.
+- Ships, track, obstacles, pickups, and space structures in the `src/flight_*.js` modules are original procedural geometry. They are regenerated from the committed code, with no downloaded model dependency.
+
 Downloaded on **2026-08-02** and **2026-08-03**. Only the files listed below are shipped. Source packs and model files used during rendering are not committed.
 
 The repository's project license applies only to original project code and artwork. The third-party works below remain available under their respective licenses. Local semantic renaming, recoloring, raster rendering, compositing, and UI integration do not change those upstream licenses. "Upstream and committed" identifies byte-identical runtime copies; "upstream" alone identifies uncommitted render inputs. Derived output hashes are recorded separately in `docs/assets/ship-render.md` and `docs/assets/world-art.md`.

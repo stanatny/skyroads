@@ -117,19 +117,20 @@ test('tap completes exactly one lane in 145ms', () => {
   assert.equal(state.lanePosition, 4);
 });
 
-test('holding for 180ms still finishes only the first lane', () => {
+test('holding for 180ms flows into the next lane without waiting', () => {
   const state = createMovementState(1);
   pressDirection(state, 1);
   advanceMovement(state, 180);
-  assert.equal(state.lanePosition, 2);
-  assert.equal(state.segmentActive, false);
+  assert.ok(Math.abs(state.lanePosition - (2 + 35 / 110)) < 1e-9);
+  assert.equal(state.segmentActive, true);
+  assert.ok(state.laneVelocity > 0);
 });
 
-test('hold carries leftover time into a 110ms repeat segment after the deliberate delay', () => {
+test('hold carries leftover time through constant-speed lane crossings', () => {
   const state = createMovementState(1);
   pressDirection(state, 1);
   advanceMovement(state, 275);
-  assert.equal(state.lanePosition, 2.5);
+  assert.ok(Math.abs(state.lanePosition - (3 + 20 / 110)) < 1e-9);
 });
 
 test('opposite press reverses without a position jump', () => {
@@ -141,7 +142,7 @@ test('opposite press reverses without a position jump', () => {
   assert.equal(result.reversed, true);
   assert.equal(state.lanePosition, before);
   advanceMovement(state, 72.5);
-  assert.equal(state.lanePosition, 3);
+  assert.ok(state.lanePosition < 3);
 });
 
 test('zero-progress opposite press cancels the stale segment', () => {
@@ -151,7 +152,7 @@ test('zero-progress opposite press cancels the stale segment', () => {
   assert.equal(result.reversed, true);
   assert.equal(state.lanePosition, 3);
   advanceMovement(state, 72.5);
-  assert.equal(state.lanePosition, 3);
+  assert.ok(state.lanePosition < 3);
   assert.equal(state.activeDirection, -1);
 });
 
@@ -165,24 +166,27 @@ test('first segment completes at 145ms, not 144ms', () => {
   assert.equal(state.lanePosition, 4);
 });
 
-test('hold shorter than 220ms does not repeat', () => {
+test('release after crossing a center settles the current target and stops', () => {
   const state = createMovementState(3);
   pressDirection(state, 1);
   advanceMovement(state, 219);
+  const before = state.lanePosition;
   releaseDirection(state, 1);
-  assert.equal(state.lanePosition, 4);
+  assert.equal(state.lanePosition, before);
+  assert.ok(before > 4 && before < 5);
   advanceMovement(state, 500);
-  assert.equal(state.lanePosition, 4);
+  assert.equal(state.lanePosition, 5);
 });
 
-test('holding through the delay starts repeat at the first boundary', () => {
+test('holding crosses the first center with no stationary frame', () => {
   const state = createMovementState(3);
   pressDirection(state, 1);
-  advanceMovement(state, 220);
+  advanceMovement(state, 145);
   assert.equal(state.lanePosition, 4);
-  assert.equal(state.segmentActive, false);
-  advanceMovement(state, 1);
   assert.equal(state.segmentActive, true);
+  assert.ok(state.laneVelocity > 0);
+  advanceMovement(state, 1);
+  assert.ok(state.lanePosition > 4);
   assert.equal(state.segmentTarget, 5);
   assert.equal(state.segmentDurationMs, 110);
 });
@@ -200,10 +204,11 @@ test('same timeline is frame-rate independent', () => {
     return state.lanePosition;
   };
 
-  assert.ok(Math.abs(run(275) - 2.5) <= 1e-9);
-  assert.ok(Math.abs(run(1000 / 30) - 2.5) <= 1e-9);
-  assert.ok(Math.abs(run(1000 / 60) - 2.5) <= 1e-9);
-  assert.ok(Math.abs(run(1000 / 120) - 2.5) <= 1e-9);
+  const expected = 2 + (275 - 145) / 110;
+  assert.ok(Math.abs(run(275) - expected) <= 1e-9);
+  assert.ok(Math.abs(run(1000 / 30) - expected) <= 1e-9);
+  assert.ok(Math.abs(run(1000 / 60) - expected) <= 1e-9);
+  assert.ok(Math.abs(run(1000 / 120) - expected) <= 1e-9);
 });
 
 test('release during repeat finishes the current lane and discards future lanes', () => {

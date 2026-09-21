@@ -2,6 +2,8 @@
 
 # Nebula Cruise / 星云巡航
 
+The game now includes a **3D chase camera and layered tracks**: a camera that follows the craft, a mechanically unfolding super form, rolling ramps, elevated fuel routes, and physical drops. Run `npm run dev -- --port 7101` and open `http://localhost:7101` on the host, or open `index.html` directly. All runtime assets are bundled locally. If 3D becomes unavailable, rendering and elevation physics switch together to the playable flat-track compatibility mode. See [design notes and verification](docs/cockpit_exploration.md).
+
 Nebula Cruise is a fast, polished sci-fi lane runner for the browser. Pilot a detailed starship through an endless procedural nebula, read the track ahead, chain jumps and charged shots, collect power-ups, and push for a place in your reliable local Top 15.
 
 Play online: https://stanatny.github.io/skyroads/
@@ -23,11 +25,12 @@ Current version: [v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1
 | Action | Keyboard | Touch |
 | --- | --- | --- |
 | Move | Hold `A` / `D` or `←` / `→` | Swipe left or right |
-| Jump | `K`, `Space`, `W`, or `↑` | Tap |
+| Jump | `K` or `Space` | Tap |
 | Double jump | Press jump again in the air; costs 3 fuel | Tap again in the air |
 | Glide | Hold a jump key while falling; consumes fuel | Keyboard only |
 | Fire | Tap `J` | Keyboard only |
 | Charged missile | Hold `J` for 1.5 seconds, then release | Keyboard only |
+| Fuel burst | While grounded with at least 70% fuel, hold `W` / `↑` for 1 second | Keyboard only |
 | Start / fly again | `Space` or `Enter` | Use the on-screen button |
 | Pause / resume | `P` | Keyboard only |
 | Return to command center (mission over) | `Esc` | Use the Command Center button |
