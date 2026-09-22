@@ -10,12 +10,23 @@
     const boost = Math.max(0, state.boostT || 0);
     const burst = Math.max(0, state.fuelBurstT || 0);
     const grace = Math.max(0, state.fuelBurstGraceT || 0);
-    const graceDuration = Math.max(0, config.FUEL_BURST_GRACE ?? 1);
+    const graceDuration = Math.max(0, config.FUEL_BURST_GRACE ?? 2);
+    const boostGraceDuration = Math.max(0, config.BOOST_GRACE ?? 2);
+    const boostProtection = Math.max(state.boostGraceT || 0, boost > 0 ? boost + boostGraceDuration : 0);
     // 主动爆发到期会自动接续保护；把这段时间纳入同一次倒计时，交接时不闪断或重填进度条。
     const burstProtection = Math.max(grace, burst > 0 ? burst + graceDuration : 0);
-    const remaining = Math.max(boost, burstProtection);
-    const duration = remaining <= 0 ? 0 : boost >= burstProtection
-      ? (config.BOOST_DURATION || 5) : (config.FUEL_BURST_DURATION || 3) + graceDuration;
+    const warp = state.wormhole;
+    const warpTuning = scope.Skyroads && scope.Skyroads.wormhole && scope.Skyroads.wormhole.TUNING;
+    const warpDuration = warpTuning ? warpTuning.duration : 2.4;
+    const warpGraceDuration = warpTuning ? warpTuning.graceDuration : 2;
+    const warpProtection = warp ? Math.max(warp.graceT || 0,
+      // 既有保护倒计时被冻结，连续保护剩余时长应加上未走完的折跃，而不是取两者较大值。
+      warp.active ? Math.max(0, warpDuration - (warp.elapsed || 0)) + Math.max(warpGraceDuration, boostProtection, burstProtection) : 0) : 0;
+    const remaining = Math.max(boostProtection, burstProtection, warpProtection);
+    const duration = remaining <= 0 ? 0 : warpProtection >= Math.max(boostProtection, burstProtection)
+      ? warpDuration + Math.max(warpGraceDuration, boostProtection > 0 ? (config.BOOST_DURATION || 5) + boostGraceDuration : 0,
+        burstProtection > 0 ? (config.FUEL_BURST_DURATION || 3) + graceDuration : 0) : boostProtection >= burstProtection
+      ? (config.BOOST_DURATION || 5) + boostGraceDuration : (config.FUEL_BURST_DURATION || 3) + graceDuration;
     return { active: remaining > 0, remaining, duration };
   }
 

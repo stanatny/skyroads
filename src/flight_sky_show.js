@@ -72,6 +72,7 @@
     let previousRun = null;
     let heroMilestone = 0;
     let heroStartElapsed = null;
+    let pendingHero = false;
     let visibleMeteors = 0;
     let heroVisible = false;
     let audioCue = { active: false };
@@ -83,17 +84,24 @@
       if (changedRun) {
         elapsed = 0; previousRun = state.runId;
         heroMilestone = 0; heroStartElapsed = null;
+        pendingHero = false;
       }
-      if (state.mode === 'PLAYING' && !state.reducedMotion && !changedRun) elapsed += Math.max(0, Math.min(0.05, dt));
+      const inWarp = state.wormhole && (state.wormhole.active || state.wormhole.completedT > 2.45);
+      if (state.mode === 'PLAYING' && !inWarp && !state.reducedMotion && !changedRun) elapsed += Math.max(0, Math.min(0.05, dt));
       // 使用 HUD 的实际累计米数；每个五公里节点只消费一次，不因等待、重绘或距离回抖重复播放。
       const distance = Number(state.distanceMeters);
       const milestone = Number.isFinite(distance) ? Math.floor(Math.max(0, distance) / SCHEDULE.heroDistanceMeters) : 0;
       if (state.mode === 'PLAYING' && milestone > heroMilestone) {
         heroMilestone = milestone;
         // 减少动态时跳过已经经过的节点，恢复设置后不集中补播。
+        pendingHero = Boolean(inWarp) && !state.reducedMotion;
+        heroStartElapsed = state.reducedMotion || inWarp ? null : elapsed;
+      }
+      if (pendingHero && !inWarp && state.mode === 'PLAYING') {
+        pendingHero = false;
         heroStartElapsed = state.reducedMotion ? null : elapsed;
       }
-      group.visible = (state.mode === 'PLAYING' || state.mode === 'PAUSED') && !state.reducedMotion;
+      group.visible = (state.mode === 'PLAYING' || state.mode === 'PAUSED') && !inWarp && !state.reducedMotion;
       visibleMeteors = 0;
       heroVisible = false;
       audioCue = { active: false, runId: state.runId };

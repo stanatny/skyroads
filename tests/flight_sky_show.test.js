@@ -274,3 +274,26 @@ test('meteor frequency more than doubles over a minute without increasing the th
   assert.ok(h.show.getDiagnostics().visibleMeteors <= 3);
   assert.equal(h.show.getDiagnostics().heroVisible, false);
 });
+
+test('warp hides sky events and defers multiple crossed five-kilometer milestones to one exit flyby', () => {
+  const h = harness(); h.state.mode = 'PLAYING'; h.update();
+  h.state.distanceMeters = 4160;
+  h.state.wormhole = { active: true, completedT: 0 };
+  const before = h.show.getDiagnostics().elapsed;
+  h.advance(2.4);
+  assert.equal(h.show.group.visible, false);
+  assert.equal(h.show.getDiagnostics().elapsed, before);
+  h.state.distanceMeters = 10160;
+  h.state.wormhole = { active: false, completedT: 2.8 };
+  h.update();
+  assert.equal(h.show.getDiagnostics().heroMilestone, 2);
+  assert.equal(h.show.getDiagnostics().heroStartElapsed, null);
+  assert.equal(h.show.getAudioCue().active, false);
+  h.state.wormhole.completedT = 2.4;
+  h.update();
+  const started = h.show.getDiagnostics().heroStartElapsed;
+  assert.notEqual(started, null);
+  h.advance(4);
+  assert.equal(h.show.getDiagnostics().heroVisible, true);
+  assert.equal(h.show.getDiagnostics().heroStartElapsed, started);
+});

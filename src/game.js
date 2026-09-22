@@ -129,6 +129,7 @@ const CONFIG = {
 
   // ---- 奖励道具（需求 6；第四轮：无敌护盾 → 闪电超级加速）----
   BOOST_DURATION: 5,           // 超级加速秒数：期间无敌穿透（撞墙/过缺口不伤）+ 速度锁定
+  BOOST_GRACE: 2,              // 超级加速结束后继续无敌两秒，恢复航速时保持护罩
   BOOST_SPEED: 36,             // 超级加速速度 = 1.5 × MAX_SPEED 24
                                //   穿段校验：36 段/秒 × 最长帧 0.05s = 1.8 段/帧，
                                //   子步扫掠（≤0.5 段/子步，见第 7 节）逐段覆盖 ✓ 不漏判
@@ -175,7 +176,7 @@ const CONFIG = {
   FUEL_BURST_SPEED: 36,        // 燃料爆发速度（复用 BOOST_SPEED）
   FUEL_BURST_WARN_TIME: 1,     // 燃料爆发到期预警窗口（秒）
   FUEL_BURST_CHARGE_TIME: 1,   // 按住 W/↑ 蓄力触发燃料爆发所需秒数（松手取消）
-  FUEL_BURST_GRACE: 1,         // 燃料爆发结束后的无敌保护秒数（金色护盾环提示），
+  FUEL_BURST_GRACE: 2,         // 燃料爆发结束后的无敌保护秒数（金色护盾环提示），
                                //   防止速度骤降瞬间撞障 —— 视听上"爆发结束"，操作上给一拍缓冲
 
   // ---- 战斗系统（K 跳/按住滑翔 · J 点按子弹 / 按住 1.5 秒蓄力导弹）----
@@ -229,6 +230,7 @@ const STATE = {
   movement: createMovementState(midLane()), // 唯一横向真值：连续车道位置 + 按住/分段状态
   terrainEnabled: false,       // 仅三维场景启用真实高程；兼容画面回到平面物理
   groundHeight: 0,             // 当前支撑路面绝对高程（原世界单位）
+  wormhole: null,              // 高空入口、折跃演出与出口保护；与普通加速独立
   playerY: 0,                  // 相对当前路面的跳跃高度（世界单位）
   playerVY: 0,
   jumpsUsed: 0,                // 已用跳跃段数（0..MAX_JUMPS，落地重置）
@@ -238,6 +240,7 @@ const STATE = {
   recoil: 0,                   // 二段跳后坐动感 1→0（船体瞬间下沉再上冲）
   // 道具效果
   boostT: 0,                   // 超级加速剩余时间（秒，>0 期间无敌穿透 + 速度锁定 BOOST_SPEED）
+  boostGraceT: 0,              // 超级加速结束后的无敌保护；折跃中一同暂停
   boostPrevSpeed: 0,           // 吃闪电前的速度（>0 表示待恢复，BOOST 结束后恢复到此速度）
   tripleT: 0,                  // 超级形态剩余时间（秒，>0 期间三段跳+长滑翔+武器强化+船体变身）
   tripleWarnStage: 0,          // 超级形态到期预警 beep 已发档位（0..3，吃星/开局重置）
@@ -469,6 +472,10 @@ window.addEventListener('keydown', (e) => {
     if (!targetInsideAppUi(e.target) && isRecognized && typeof e.preventDefault === 'function') e.preventDefault();
     return;
   }
+  if (wormholeActive()) {
+    if (isRecognized && typeof e.preventDefault === 'function') e.preventDefault();
+    return;
+  }
   if (STATE.mode === 'GAMEOVER' && code === 'Escape') {
     if (typeof e.preventDefault === 'function') e.preventDefault();
     KEYS[code] = true;
@@ -553,6 +560,7 @@ window.addEventListener('keyup', (e) => {
 });
 window.addEventListener('blur', () => {
   propulsionWindowFocused = false;
+  if (wormholeActive() && STATE.mode === 'PLAYING') togglePause();
   clearAllInputState();
   releasePauseKey();
 });
@@ -564,6 +572,7 @@ window.addEventListener('focus', () => {
 if (typeof document.addEventListener === 'function') {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      if (wormholeActive() && STATE.mode === 'PLAYING') togglePause();
       clearAllInputState();
       releasePauseKey();
     } else {
@@ -613,6 +622,7 @@ window.addEventListener('touchend', (e) => {
 window.addEventListener('touchcancel', () => { touchStart = null; }, { passive: true });
 
 function trySwitchLane(dir) {
+  if (wormholeActive()) return;
   const result = requestDiscreteLaneChange(STATE.movement, dir);
   if (result.started) {
     sfxLane();           // 轻 whoosh
@@ -621,6 +631,7 @@ function trySwitchLane(dir) {
 }
 
 function tryJump() {
+  if (wormholeActive()) return;
   if (STATE.playerY <= 0 && STATE.playerVY <= 0 && STATE.jumpsUsed === 0) {
     // 第一段：离地起跳（免费）
     resetThrusterFeedback();
@@ -664,7 +675,7 @@ function tryJump() {
 // v1.3.0：燃料门槛只在"开始蓄力"这一刻检查 —— 蓄力一旦开始，即使燃料跌破 70% 也照常触发。
 // W/↑ 在此状态下蓄力燃料爆发而非跳跃；Space/K 永远是跳跃。
 function canFuelBurst() {
-  return STATE.mode === 'PLAYING'
+  return STATE.mode === 'PLAYING' && !wormholeActive()
     && STATE.playerY <= 0 && STATE.playerVY <= 0 && STATE.jumpsUsed === 0
     && STATE.fuel >= CONFIG.FUEL_BURST_MIN
     && STATE.boostT <= 0 && STATE.fuelBurstT <= 0;
@@ -673,7 +684,7 @@ function canFuelBurst() {
 // v1.3.0 蓄力中途取消条件（不含燃料门槛）：起跳 / 吃到 BOOST / 爆发已激活 / 离开 PLAYING。
 // 燃料在 1 秒蓄力期间跌破 70% 不再取消蓄力 —— 门槛只在 keydown 开始蓄力时检查一次。
 function fuelBurstChargeBroken() {
-  return STATE.mode !== 'PLAYING'
+  return STATE.mode !== 'PLAYING' || wormholeActive()
     || STATE.playerY > 0 || STATE.playerVY > 0 || STATE.jumpsUsed !== 0
     || STATE.boostT > 0 || STATE.fuelBurstT > 0;
 }
@@ -720,7 +731,7 @@ function projectileLaunchPoint() {
 // ---- 开火：J 点按子弹（无限，冷却 0.22s）/ 按住 1.5 秒蓄力导弹（松手发射）----
 // 弹体在 updatePhysics 子步扫掠内推进（与玩家同帧同子步），杜绝高速穿段漏判。
 function fireBullet() {
-  if (STATE.mode !== 'PLAYING') return;
+  if (STATE.mode !== 'PLAYING' || wormholeActive()) return;
   if (STATE.bulletCD > 0) return;
   let n = 0;
   for (const s of STATE.shots) if (s.kind === 'bullet') n++;
@@ -741,7 +752,7 @@ function fireBullet() {
 
 // 蓄力导弹（J 按住蓄满 CHARGE_TIME(1.5)s 松手发射）：无弹药概念，蓄力时间就是成本
 function fireMissile() {
-  if (STATE.mode !== 'PLAYING') return;
+  if (STATE.mode !== 'PLAYING' || wormholeActive()) return;
   let n = 0;
   for (const s of STATE.shots) if (s.kind === 'missile') n++;
   if (n >= CONFIG.MAX_MISSILE_SHOTS) return;
@@ -3432,12 +3443,12 @@ function drawJumpIgnitionBurst(ctx, geometry, feedback) {
   }
 }
 
-function renderPlayer(ctx) {
+function renderPlayer(ctx, warpPresentation = false) {
   if (STATE.mode === 'GAMEOVER') return;   // 死亡后由爆炸粒子替代
   const px = playerWorldX();
   // 阴影（贴地投影，随跳跃高度变淡变小）
   const sh = project(px, 0, CONFIG.CAMERA_BACK);
-  if (sh.visible) {
+  if (sh.visible && !warpPresentation) {
     const su = sh.scale * STATE.width / 2;
     const hRatio = Math.max(0.25, 1 - STATE.playerY / 1200);
     ctx.fillStyle = 'rgba(0,0,0,' + (0.45 * hRatio).toFixed(3) + ')';
@@ -3460,7 +3471,9 @@ function renderPlayer(ctx) {
 
   // 飞船本体：屏幕位置由 project() 计算（zRel = CAMERA_BACK，即玩家当前段）
   // —— 投影一致性是"所见即所判"的根基，此处调用方式不可更改
-  const p = project(px, STATE.playerY, CONFIG.CAMERA_BACK);
+  const p = warpPresentation
+    ? { visible: true, x: STATE.width * 0.5, y: STATE.height * 0.72 }
+    : project(px, STATE.playerY, CONFIG.CAMERA_BACK);
   if (!p.visible) return;
   const cx = p.x, cy = p.y;
   const shipLayout = globalThis.Skyroads.presentation.fallbackShipLayout(
@@ -3472,7 +3485,7 @@ function renderPlayer(ctx) {
 
   // ---- 船尾尾迹粒子：短寿命，允许随机；在渲染侧生成，updateEffects 推进 ----
   // 超级加速期间：额外喷出青白"速度线"残影（更长、更快、更亮）
-  if (STATE.mode === 'PLAYING' && decorativeMotion) {
+  if (STATE.mode === 'PLAYING' && decorativeMotion && !warpPresentation) {
     STATE.trail.push({
       x: cx + (Math.random() - 0.5) * 0.6 * W2,
       y: cy + (0.2 + Math.random() * 0.15) * H,
@@ -3623,10 +3636,15 @@ function renderPlayer(ctx) {
     }
   }
 
-  // v1.2.0 燃料爆发到期保护期：金色脉冲护盾环，明确提示"短暂无敌、即将恢复正常速度"
-  if (STATE.fuelBurstGraceT > 0) {
+  // 兼容画面的护罩与真实保护源保持一致；任何一项仍有效就不能提前消失。
+  const protectionApi = globalThis.Skyroads.flightStatusFx;
+  const shieldRemaining = protectionApi ? protectionApi.protection(STATE, CONFIG).remaining
+    : Math.max(STATE.boostT > 0 ? STATE.boostT + CONFIG.BOOST_GRACE : STATE.boostGraceT,
+      STATE.fuelBurstT > 0 ? STATE.fuelBurstT + CONFIG.FUEL_BURST_GRACE : STATE.fuelBurstGraceT,
+      wormholeActive() ? 2 : STATE.wormhole && STATE.wormhole.graceT || 0);
+  if (shieldRemaining > 0) {
     const gracePulse = canvasPulse(0.5, 0.5, 12);
-    const graceFade = Math.min(1, STATE.fuelBurstGraceT / (CONFIG.FUEL_BURST_GRACE * 0.4));  // 末尾 40% 渐隐
+    const graceFade = Math.min(1, shieldRemaining / 0.5);
     ctx.globalAlpha = (0.3 + 0.5 * gracePulse) * graceFade;
     ctx.strokeStyle = '#ffd76a';
     ctx.lineWidth = 2.5;
@@ -4417,6 +4435,7 @@ function enableFlightTerrain() {
   STATE.terrainEnabled = true;
   STATE.groundHeight = terrain.heightAt(STATE.position, STATE.movement.lanePosition);
   STATE.track = STATE.track.map((segment) => terrain.decorateSegment(segment));
+  if (!STATE.wormhole) resetWormhole();
   return true;
 }
 
@@ -4425,6 +4444,132 @@ function disableFlightTerrain() {
   STATE.terrainEnabled = false;
   STATE.groundHeight = 0;
   for (const shot of STATE.shots) shot.groundY = 0;
+  if (STATE.wormhole) STATE.wormhole.gate = null;
+}
+
+// 虫洞只在真实高程关卡出现；已进入的折跃即使 GPU 回退也必须完成一次安全结算。
+function resetWormhole() {
+  const api = globalThis.Skyroads.wormhole;
+  STATE.wormhole = api ? {
+    gate: STATE.terrainEnabled ? api.nextGate(STATE.position) : null,
+    active: false, elapsed: 0, eventId: 0, completedT: 0, graceT: 0,
+    completedCount: 0, lastRewardMeters: 0,
+  } : null;
+}
+
+function wormholeActive() {
+  return Boolean(STATE.wormhole && STATE.wormhole.active);
+}
+
+function wormholeProtected() {
+  return Boolean(STATE.wormhole && (STATE.wormhole.active || STATE.wormhole.graceT > 0));
+}
+
+function clearWormholeTransientEffects() {
+  clearAllInputState();
+  STATE.shots = [];
+  STATE.weaponEvents = [];
+  STATE.magnetPulls = [];
+  STATE.trail = [];
+  STATE.particles = [];
+  STATE.shockwave = null;
+  STATE.flash = 0;
+  STATE.shake = 0;
+  STATE.recoil = 0;
+  resetThrusterFeedback();
+}
+
+function beginWormhole() {
+  const warp = STATE.wormhole;
+  if (!warp || warp.active) return;
+  warp.active = true;
+  warp.elapsed = 0;
+  warp.eventId += 1;
+  warp.completedT = 0;
+  warp.graceT = 0;
+  warp.entryPosition = STATE.position;
+  warp.entryDistance = STATE.distanceMeters;
+  warp.entryHeight = STATE.groundHeight + STATE.playerY;
+  warp.entryLane = STATE.movement.lanePosition;
+  warp.consumedGateId = warp.gate.id;
+  warp.gate = null;
+  STATE.playerVY = 0;
+  clearWormholeTransientEffects();
+  stopMovementAt(STATE.movement, warp.entryLane);
+}
+
+function finishWormhole() {
+  const warp = STATE.wormhole;
+  if (!warp || !warp.active) return;
+  const tuning = globalThis.Skyroads.wormhole.TUNING;
+  const target = warp.entryPosition + tuning.distanceMeters / CONFIG.DISTANCE_PER_SEGMENT;
+  // 生成器有跨段状态，必须逐段扩展，不能凭空把数组跳到落点索引。
+  if (!STATE.gen) STATE.gen = newGenState();
+  while (STATE.track.length < target + CONFIG.TRACK_KEEP_AHEAD) {
+    STATE.track.push(generateSegment(STATE.track.length, STATE.gen));
+  }
+  const landingLane = midLane();
+  const first = Math.max(0, Math.floor(target));
+  const end = Math.ceil(target + tuning.safeExitMeters / CONFIG.DISTANCE_PER_SEGMENT);
+  for (let index = Math.max(0, first - 1); index <= end; index += 1) {
+    const segment = STATE.track[index];
+    if (!segment) continue;
+    for (let lane = landingLane - 1; lane <= landingLane + 1; lane += 1) segment.lanes[lane] = LANE_TYPE.ROAD;
+    // 清除落点附近巡逻实体，避免从邻道移入；被跳过的敌人不计击杀。
+    segment.enemies = [];
+    if (index >= first + 1 && (index - first - 1) % 18 === 0) segment.lanes[landingLane] = LANE_TYPE.FUEL;
+  }
+  STATE.position = target;
+  STATE.distanceMeters = warp.entryDistance + tuning.distanceMeters;
+  resetMovement(STATE.movement, landingLane);
+  STATE.groundHeight = STATE.terrainEnabled
+    ? globalThis.Skyroads.flightTerrain.heightAt(target, landingLane) : 0;
+  STATE.playerY = 0;
+  STATE.playerVY = 0;
+  STATE.jumpsUsed = 0;
+  clearWormholeTransientEffects();
+  warp.active = false;
+  warp.completedCount += 1;
+  warp.lastRewardMeters = tuning.distanceMeters;
+  warp.completedT = 2.8;
+  warp.graceT = tuning.graceDuration;
+  warp.gate = STATE.terrainEnabled ? globalThis.Skyroads.wormhole.nextGate(target) : null;
+}
+
+function advanceWormhole(dt) {
+  if (!wormholeActive() || STATE.mode !== 'PLAYING') return;
+  const warp = STATE.wormhole;
+  warp.elapsed = Math.min(globalThis.Skyroads.wormhole.TUNING.duration, warp.elapsed + Math.max(0, dt));
+  STATE.elapsedMs += Math.max(0, dt) * 1000;
+  if (warp.elapsed >= globalThis.Skyroads.wormhole.TUNING.duration) finishWormhole();
+}
+
+function enterWormholeOnSweep(from, sdt, remainingFrameTime, glideDrainRate) {
+  const warp = STATE.wormhole;
+  const api = globalThis.Skyroads.wormhole;
+  if (!warp || !warp.gate || !STATE.terrainEnabled || (STATE.tutorial && STATE.tutorial.active)) return false;
+  const to = { position: STATE.position, lane: STATE.movement.lanePosition,
+    height: STATE.groundHeight + STATE.playerY };
+  if (!api.intersectsGate(warp.gate, from, to)) {
+    if (to.position >= warp.gate.segment) warp.gate = api.nextGate(to.position);
+    return false;
+  }
+  const fraction = (warp.gate.segment - from.position) / (to.position - from.position);
+  const beforeEntry = sdt * fraction;
+  const fuelCost = wormholeProtected() ? 0 : (CONFIG.FUEL_DRAIN_RATE + glideDrainRate) * beforeEntry;
+  // 起跳和入洞前的航行仍有成本；穿入之后不再运行任何耗能路径。
+  if (STATE.fuel <= fuelCost) return false;
+  STATE.fuel -= fuelCost;
+  STATE.elapsedMs += beforeEntry * 1000;
+  STATE.position = warp.gate.segment;
+  STATE.distanceMeters -= STATE.speed * (sdt - beforeEntry) * CONFIG.DISTANCE_PER_SEGMENT;
+  const lane = from.lane + (to.lane - from.lane) * fraction;
+  stopMovementAt(STATE.movement, lane);
+  STATE.groundHeight = globalThis.Skyroads.flightTerrain.heightAt(STATE.position, lane);
+  STATE.playerY = Math.max(0, from.height + (to.height - from.height) * fraction - STATE.groundHeight);
+  beginWormhole();
+  advanceWormhole(remainingFrameTime - beforeEntry);
+  return true;
 }
 
 function heightAboveLane(position, lane) {
@@ -4434,6 +4579,8 @@ function heightAboveLane(position, lane) {
 }
 
 function updatePhysics(dt) {
+  if (STATE.mode !== 'PLAYING') return;
+  if (wormholeActive()) { advanceWormhole(dt); return; }
   // J 蓄力累积：按住期间在 0.5s、1.0s 提示 tick，满 CHARGE_TIME(1.5)s 就绪 ding；
   // 松手判定在 keyup（满蓄导弹 / 未满子弹），这里只负责进度与提示
   if (KEYS.KeyJ) {
@@ -4504,6 +4651,9 @@ function updatePhysics(dt) {
   const steps = Math.max(1, Math.ceil((maxV * dt) / 0.5));
   const sdt = dt / steps;
   for (let i = 0; i < steps; i++) {
+    const warpFrom = { position: STATE.position, lane: STATE.movement.lanePosition,
+      height: STATE.groundHeight + STATE.playerY };
+    let glideDrainRate = 0;
     const movementStep = advanceMovement(STATE.movement, sdt * 1000);
     const previousLanePosition = movementStep.previousLanePosition;
     let currentLanePosition = movementStep.lanePosition;
@@ -4525,7 +4675,7 @@ function updatePhysics(dt) {
       STATE.playerY += STATE.playerVY * sdt;
       if (STATE.gliding) {
         // 滑翔额外耗油 GLIDE_DRAIN(9)/秒：滑翔 1s ≈ 9 燃料 = 2s 基础消耗
-        STATE.fuel = Math.max(0, STATE.fuel - CONFIG.GLIDE_DRAIN * sdt);
+        glideDrainRate = CONFIG.GLIDE_DRAIN;
       }
       if (!STATE.terrainEnabled && STATE.playerY <= 0) { STATE.playerY = 0; STATE.playerVY = 0; STATE.jumpsUsed = 0; STATE.gliding = false; }  // 落地重置
     } else {
@@ -4538,7 +4688,7 @@ function updatePhysics(dt) {
         previousLane: previousLanePosition, lane: currentLanePosition,
         groundHeight: STATE.groundHeight, playerY: STATE.playerY,
         playerVY: STATE.playerVY, jumpsUsed: STATE.jumpsUsed, wasGrounded,
-        invincible: STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
+        invincible: wormholeProtected() || STATE.boostT > 0 || STATE.boostGraceT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
           || Boolean(STATE.tutorial && STATE.tutorial.active),
       });
       if (terrainStep.blocked) {
@@ -4552,16 +4702,29 @@ function updatePhysics(dt) {
       if (STATE.playerY === 0 && STATE.playerVY === 0) STATE.gliding = false;
     }
 
-    // 燃料消耗与计时；道具效果倒计时
-    STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_DRAIN_RATE * sdt);
+    if (enterWormholeOnSweep(warpFrom, sdt, dt - i * sdt, glideDrainRate)) return;
+
+    // 出口保护也覆盖耗油，让极低能量玩家有时间拾取安全航道上的补给。
+    if (!wormholeProtected()) STATE.fuel = Math.max(0, STATE.fuel - (CONFIG.FUEL_DRAIN_RATE + glideDrainRate) * sdt);
     if (STATE.tutorial && STATE.tutorial.active) STATE.fuel = CONFIG.FUEL_MAX;   // 练习场：燃料锁定满格，随时可练燃料爆发
     STATE.elapsedMs += sdt * 1000;
-    if (STATE.boostT > 0) STATE.boostT = Math.max(0, STATE.boostT - sdt);
-    if (STATE.fuelBurstT > 0) {
-      STATE.fuelBurstT = Math.max(0, STATE.fuelBurstT - sdt);
-      if (STATE.fuelBurstT === 0) fuelBurstEndFx();   // 自然到期：熄火特效 + 下行音 + 短暂无敌保护
+    // 保护从真实到期时刻开始，只扣子步跨过到期点后的部分，避免交接少算或重复扣时。
+    STATE.boostGraceT = Math.max(0, STATE.boostGraceT - sdt);
+    if (STATE.boostT > 0) {
+      const before = STATE.boostT;
+      STATE.boostT = Math.max(0, before - sdt);
+      if (STATE.boostT === 0) STATE.boostGraceT = Math.max(STATE.boostGraceT,
+        CONFIG.BOOST_GRACE - Math.max(0, sdt - before));
     }
-    if (STATE.fuelBurstGraceT > 0) STATE.fuelBurstGraceT = Math.max(0, STATE.fuelBurstGraceT - sdt);
+    STATE.fuelBurstGraceT = Math.max(0, STATE.fuelBurstGraceT - sdt);
+    if (STATE.fuelBurstT > 0) {
+      const before = STATE.fuelBurstT;
+      STATE.fuelBurstT = Math.max(0, before - sdt);
+      if (STATE.fuelBurstT === 0) {
+        fuelBurstEndFx();
+        STATE.fuelBurstGraceT = Math.max(0, STATE.fuelBurstGraceT - Math.max(0, sdt - before));
+      }
+    }
     if (STATE.tripleT > 0) {
       STATE.tripleT = Math.max(0, STATE.tripleT - sdt);
       if (STATE.tripleT === 0) superPowerDownFx();   // 自然到期：熄火特效 + 下行音
@@ -4637,6 +4800,10 @@ function updatePhysics(dt) {
       STATE.magnetT = Math.max(0, STATE.magnetT - sdt);
     }
     if (STATE.mode !== 'PLAYING') return;   // 已死亡，中止本帧
+    if (STATE.wormhole) {
+      STATE.wormhole.completedT = Math.max(0, STATE.wormhole.completedT - sdt);
+      STATE.wormhole.graceT = Math.max(0, STATE.wormhole.graceT - sdt);
+    }
   }
 }
 
@@ -4910,7 +5077,7 @@ function superPowerDownFx() {
 }
 
 // 燃料爆发自然到期：金白爆闪 + 金色冲击波环自船体扩散 + 12 颗金白余烬 + 下行熄火音，
-// 并进入 FUEL_BURST_GRACE(1)s 无敌保护期（金色护盾环提示）——
+// 并进入 FUEL_BURST_GRACE(2)s 无敌保护期（金色护盾环提示）——
 // 解决"速度骤降瞬间撞上障碍物"的挫败感：视听上明确"爆发结束"，操作上给一拍缓冲
 function fuelBurstEndFx() {
   STATE.fuelBurstGraceT = CONFIG.FUEL_BURST_GRACE;
@@ -4948,6 +5115,7 @@ function collectPickup(seg, lane, type) {
     seg.lanes[lane] = LANE_TYPE.ROAD;
     if (STATE.boostT <= 0) STATE.boostPrevSpeed = STATE.speed;
     STATE.boostT = CONFIG.BOOST_DURATION;
+    STATE.boostGraceT = 0;
     STATE.boostWarnStage = 0;
     sfxBoost();
     syncPropulsionAudio();
@@ -4990,11 +5158,12 @@ function collectPickup(seg, lane, type) {
 
 // 每个子步的碰撞检测（高度判定与渲染共用同一组 CONFIG 高度值）
 function checkCollisions(previousLanePosition, currentLanePosition) {
-  if (STATE.fuel <= 0) { die('fuel'); return; }
+  if (wormholeActive()) return;
+  if (STATE.fuel <= 0 && !wormholeProtected()) { die('fuel'); return; }
   const seg = STATE.track[Math.floor(STATE.position)];
   if (!seg) return;
   // 教学模式（练习场）：撞墙/掉坑/撞敌机均不致死，零压力熟悉操作
-  const invincible = STATE.boostT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
+  const invincible = wormholeProtected() || STATE.boostT > 0 || STATE.boostGraceT > 0 || STATE.fuelBurstT > 0 || STATE.fuelBurstGraceT > 0
     || Boolean(STATE.tutorial && STATE.tutorial.active);
 
   const playerHalfWidth = STATE.terrainEnabled
@@ -5124,6 +5293,7 @@ function resetThrusterFeedback() {
 function resetGame() {
   clearAllInputState();
   STATE.position = 0;
+  resetWormhole();
   STATE.speed = CONFIG.INITIAL_SPEED;      // 起步即有速度感
   resetMovement(STATE.movement, midLane());
   STATE.groundHeight = STATE.terrainEnabled ? globalThis.Skyroads.flightTerrain.heightAt(0, midLane()) : 0;
@@ -5134,6 +5304,7 @@ function resetGame() {
   STATE.trail = [];
   STATE.recoil = 0;
   STATE.boostT = 0;
+  STATE.boostGraceT = 0;
   STATE.boostPrevSpeed = 0;
   STATE.fuelBurstT = 0;
   STATE.fuelBurstPrevSpeed = 0;
@@ -5220,7 +5391,7 @@ function gotoMenu() {
 }
 
 function die(reason) {
-  if (STATE.mode !== 'PLAYING') return;
+  if (STATE.mode !== 'PLAYING' || wormholeActive()) return;
   clearAllInputState();
   resetThrusterFeedback();
   STATE.mode = 'GAMEOVER';
@@ -5670,6 +5841,53 @@ function renderHUD(ctx) {
   }
 }
 
+// GPU 在折跃中丢失时，兼容画面仍显示同一计时与奖励，不中断物理结算。
+function renderWormholeFallback(ctx) {
+  const warp = STATE.wormhole;
+  if (!warp || (STATE.mode !== 'PLAYING' && STATE.mode !== 'PAUSED')
+    || (!warp.active && warp.completedT <= 0)) return;
+  const api = globalThis.Skyroads.wormhole;
+  const stage = api.stage(warp.elapsed);
+  const progress = warp.active ? stage.progress : 1;
+  ctx.save();
+  if (warp.active) {
+    ctx.fillStyle = '#040718';
+    ctx.fillRect(0, 0, STATE.width, STATE.height);
+    if (!STATE.reducedMotion) {
+      ctx.strokeStyle = 'rgba(119,175,255,0.4)';
+      ctx.lineWidth = 2;
+      for (let ring = 0; ring < 12; ring += 1) {
+        const radius = ((ring / 12 + warp.elapsed * 0.8) % 1) ** 2 * STATE.width;
+        ctx.beginPath(); ctx.ellipse(STATE.width / 2, STATE.height * 0.43,
+          radius, radius * 0.62, 0, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+  }
+  const x = STATE.width / 2;
+  const y = STATE.height * (warp.active ? 0.38 : 0.24);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#d7eaff';
+  ctx.font = '600 20px sans-serif';
+  ctx.fillText(uiText(`wormhole.${warp.active ? stage.phase : 'complete'}`), x, y, STATE.width - 40);
+  // 兼容画面的收益也随游戏时钟放大；暂停时保持同一帧，减少动态时直接给出稳定大字。
+  const reward = warp.active ? api.TUNING.distanceMeters : warp.lastRewardMeters;
+  const meters = Math.floor(Math.max(0, Number(reward) || 0) * progress);
+  const age = Math.max(0, 2.8 - warp.completedT);
+  const burst = STATE.reducedMotion ? 0 : Math.sin(Math.min(1, age / 0.46) * Math.PI) * 0.18;
+  const fontSize = warp.active ? 34 : Math.min(60, STATE.width * 0.13) * (1 + burst);
+  ctx.font = `700 ${fontSize}px sans-serif`;
+  ctx.fillStyle = warp.active ? '#d7eaff' : '#f5e1a7';
+  ctx.shadowColor = '#64cfff';
+  ctx.shadowBlur = warp.active || STATE.reducedMotion ? 0 : 16;
+  ctx.fillText(`${warp.active ? '' : '+'}${uiNumber(meters)} m`, x, y + 46, STATE.width - 40);
+  ctx.shadowBlur = 0;
+  if (warp.active) {
+    ctx.font = '12px sans-serif'; ctx.fillStyle = '#b6c7e5';
+    ctx.fillText(uiText('wormhole.noDrain'), x, y + 77, STATE.width - 40);
+  }
+  ctx.restore();
+}
+
 function renderMenu(ctx) {
   // v1.3.0 写实主菜单背景（assets/ui/menu-backdrop.jpg）：cover 适配铺满画布，加载失败时保持原压暗场景
   const backdrop = hudAsset('menuBackdrop');
@@ -5706,6 +5924,7 @@ const AUDIO = {
   nextNoteTime: 0,
   glideNodes: null, // 滑翔喷火轰鸣节点组 { src, rumbleFilter/gain, fireFilter/gain, lfo, lfo2, targetMode }
   skyHero: null,    // 与画面阶段同步的背景掠过声，复用现有音效上下文与主增益
+  wormhole: null,   // 折跃声音共享现有上下文和静音设置，禁止独立自动播放
 };
 
 function audioInit() {
@@ -5768,7 +5987,7 @@ function setLegacyAudioPaused(paused) {
 function syncAdaptiveAudio(force = false) {
   if (!STATE.audioController) return;
   const speedRatio = CONFIG.MAX_SPEED > 0 ? STATE.speed / CONFIG.MAX_SPEED : 0;
-  const danger = STATE.mode === 'PLAYING' && STATE.fuel <= CONFIG.FUEL_MAX * 0.2;
+  const danger = STATE.mode === 'PLAYING' && !wormholeProtected() && STATE.fuel <= CONFIG.FUEL_MAX * 0.2;
   const boost = STATE.mode === 'PLAYING' && STATE.boostT > 0;
   const key = `${STATE.mode}|${speedRatio >= 0.75}|${danger}|${boost}`;
   if (!force && key === STATE.audioMixKey) return;
@@ -5990,7 +6209,7 @@ function sfxTripleWarn(st){ const f = [780, 780, 940, 1180][st] || 780;         
                            sfxSweep(f, f, 0.09, 'square', 0.14); }
 
 function propulsionAudioMode() {
-  if (STATE.mode !== 'PLAYING'
+  if (STATE.mode !== 'PLAYING' || wormholeActive()
     || !propulsionAudioHasOwnership()
     || audioIsSfxMuted()) return 'off';
   if (STATE.boostT > 0) return 'boost';
@@ -6004,7 +6223,7 @@ function syncSkyHeroAudio() {
   try {
     const runtime = STATE.cockpitRuntime;
     const cue = runtime && runtime.getSkyAudioCue ? runtime.getSkyAudioCue() : null;
-    const active = STATE.mode === 'PLAYING' && !STATE.reducedMotion
+    const active = STATE.mode === 'PLAYING' && !wormholeActive() && !STATE.reducedMotion
       && propulsionAudioHasOwnership() && !audioIsSfxMuted()
       && cue && cue.active && cue.runId === STATE.runId;
     if (!active) {
@@ -6018,6 +6237,20 @@ function syncSkyHeroAudio() {
     if (AUDIO.skyHero) AUDIO.skyHero.update(cue);
   } catch (_) {
     try { if (AUDIO.skyHero) AUDIO.skyHero.stop(); } catch (_) {}
+  }
+}
+
+function syncWormholeAudio() {
+  try {
+    const api = globalThis.Skyroads.flightWormholeAudio;
+    if (!AUDIO.wormhole && wormholeActive() && api && AUDIO.ctx && AUDIO.master) {
+      AUDIO.wormhole = api.create({ context: AUDIO.ctx, destination: AUDIO.master });
+    }
+    if (AUDIO.wormhole) AUDIO.wormhole.update(STATE, {
+      enabled: propulsionAudioHasOwnership() && !audioIsSfxMuted(),
+    });
+  } catch (_) {
+    try { if (AUDIO.wormhole) AUDIO.wormhole.stop(); } catch (_) {}
   }
 }
 
@@ -6035,6 +6268,7 @@ function propulsionAudioTargets(mode) {
 //      BOOST > 超级滑翔 > 普通滑翔；同一图平滑变参，避免重叠状态重复起音。 ----
 function syncPropulsionAudio() {
   syncSkyHeroAudio();
+  syncWormholeAudio();
   try {
     const targetMode = propulsionAudioMode();
     const want = targetMode !== 'off';
@@ -6171,6 +6405,12 @@ function render() {
   if (STATE.cockpitRuntime && STATE.cockpitRuntime.render()) {
     return;
   }
+  if (wormholeActive() && (STATE.mode === 'PLAYING' || STATE.mode === 'PAUSED')) {
+    // GPU 降级的穿梭也保留居中的机体与保护罩；只改投影，不改真实位置或跳跃状态。
+    renderWormholeFallback(ctx);
+    renderPlayer(ctx, true);
+    return;
+  }
   ctx.save();
   // 屏幕震动：强度二次方衰减（重击感强、收尾快），随机偏移仅限特效帧
   if (STATE.shake > 0 && !STATE.reducedMotion) {
@@ -6185,6 +6425,7 @@ function render() {
   renderEffects(ctx);
   ctx.restore();
   if (STATE.mode === 'PLAYING') renderHUD(ctx);
+  renderWormholeFallback(ctx);
   // v1.2.0 绘制新手引导提示
   if (STATE.tutorial && globalThis.Skyroads && globalThis.Skyroads.tutorial) {
     globalThis.Skyroads.tutorial.renderTutorial(ctx, STATE.tutorial, STATE);
@@ -6256,6 +6497,12 @@ function installDiagnostics() {
       }) : null,
       locale: STATE.translator ? STATE.translator.locale : null,
       mode: STATE.mode,
+      wormhole: STATE.wormhole ? Object.freeze({
+        active: STATE.wormhole.active, elapsed: STATE.wormhole.elapsed,
+        completedCount: STATE.wormhole.completedCount, lastRewardMeters: STATE.wormhole.lastRewardMeters,
+        fuelProtected: wormholeProtected(), timersPaused: wormholeActive(),
+        gate: STATE.wormhole.gate ? Object.freeze({ ...STATE.wormhole.gate }) : null,
+      }) : null,
       flight: STATE.cockpitRuntime ? STATE.cockpitRuntime.getDiagnostics() : null,
       canvas: Object.freeze({ width: STATE.width, height: STATE.height, dpr: STATE.dpr }),
       overlays: overlays ? Object.freeze({ ...overlays }) : null,

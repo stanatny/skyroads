@@ -134,6 +134,27 @@ html[data-renderer="cockpit"] #cockpit-interface kbd { padding: 2px 4px; border:
 
 /* 特殊状态保持文字、剩余时间及到期反馈，避免只依赖颜色。 */
 html[data-renderer="cockpit"] .cockpit-context { display: contents; }
+/* 穿梭读数留在左上；结算沿顶部短程展开，飞机与近处落点保持可见。 */
+html[data-renderer="cockpit"] .cockpit-wormhole { position: absolute; top: 106px; left: var(--hud-margin); z-index: 1; box-sizing: border-box; width: var(--warp-panel-width, 272px); padding: 12px 14px; border: 1px solid #526b93; border-left: 3px solid #a7a6f0; background: rgba(12, 23, 43, 0.95); box-shadow: inset 0 1px 0 #c4deff14; transform: translate3d(var(--warp-settle-x, 0px), var(--warp-settle-y, 0px), 0); opacity: var(--warp-settle-opacity, 1); }
+html[data-renderer="cockpit"] .cockpit-wormhole-heading { display: block; color: #9baed1; font-size: 9px; letter-spacing: 0.06em; }
+html[data-renderer="cockpit"] .cockpit-wormhole-title { display: block; margin-top: 7px; color: #e3eaff; font-size: 12px; font-weight: 500; line-height: 1.4; }
+html[data-renderer="cockpit"] .cockpit-wormhole-value { display: block; margin-top: 6px; color: #cce7ff; font-family: "Orbitron", ui-sans-serif, sans-serif, ui-monospace, monospace; font-weight: 500; font-size: var(--warp-value-size, 21px); line-height: 1.15; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+html[data-renderer="cockpit"] .cockpit-wormhole-detail { display: block; margin-top: 8px; color: #b8cbe5; font-size: 10px; line-height: 1.5; }
+html[data-renderer="cockpit"] .cockpit-wormhole-meter { margin-top: 10px; height: 3px; background: #304469; }
+html[data-renderer="cockpit"] .cockpit-wormhole-meter > i { background: linear-gradient(90deg, #a7a7ed, #a1e9fc); }
+/* 结算只使用物理计时写入的变量，无自主关键帧；暂停和减少动态不会继续播放。 */
+html[data-renderer="cockpit"] .cockpit-wormhole[data-phase="complete"] { border-color: #82b1c3; border-left-color: #edc38b; background: linear-gradient(125deg, #142e40f7, #0a182af7); box-shadow: inset 0 1px 0 #e0faff24, 0 8px 25px #030b1740; }
+html[data-renderer="cockpit"] .cockpit-wormhole[data-phase="complete"]::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: 6px; height: 1px; background: linear-gradient(90deg, #e9bd83, #a5ddec70 76%, transparent); opacity: var(--warp-settle-strength, 0); transform: scaleX(var(--warp-settle-strength, 0)); transform-origin: left; }
+html[data-renderer="cockpit"] .cockpit-wormhole[data-phase="complete"] .cockpit-wormhole-heading { color: #ebc79a; }
+html[data-renderer="cockpit"] .cockpit-wormhole[data-phase="complete"] .cockpit-wormhole-value { color: #e9f7ff; text-shadow: 0 2px 0 #03121c, 0 0 22px #91dfff24; }
+html[data-renderer="cockpit"] .cockpit-wormhole[data-phase="complete"] .cockpit-wormhole-detail { padding-bottom: 4px; }
+@media (min-width: 761px) {
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-warning,
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-tutorial { top: 278px; }
+  html[data-renderer="cockpit"] [data-warp-settling="true"][data-training="true"] .cockpit-warning { top: 338px; }
+}
+html[data-renderer="cockpit"] [data-fuel="protected"] .cockpit-fuel-value { color: #c5d8ff; }
+html[data-renderer="cockpit"] [data-fuel="protected"] .cockpit-fuel-bar > i { background: #a5bced; }
 html[data-renderer="cockpit"] .cockpit-effects { position: absolute; right: var(--hud-margin); top: 83px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 260px; }
 html[data-renderer="cockpit"] .cockpit-effect { display: flex; align-items: center; gap: 16px; padding: 8px 12px; border: 1px solid #395b70; border-right: 3px solid #89cfe8; color: #c5e5f0; background: rgba(9, 28, 42, 0.96); font-size: 11px; white-space: nowrap; }
 html[data-renderer="cockpit"] .cockpit-effect strong { font-size: 14px; font-weight: 500; }
@@ -251,6 +272,11 @@ html[data-renderer="cockpit"] #persistence-warning { bottom: 25%; color: #f1c99c
   html[data-renderer="cockpit"] .cockpit-stat strong { font-size: 13px; }
   html[data-renderer="cockpit"] .cockpit-stat-score strong { font-size: 17px; }
   html[data-renderer="cockpit"] .cockpit-context { position: absolute; top: 88px; left: var(--hud-margin); right: var(--hud-margin); display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  html[data-renderer="cockpit"] .cockpit-wormhole { position: relative; top: auto; left: auto; width: var(--warp-panel-width, auto); padding: 10px 12px; }
+  html[data-renderer="cockpit"] .cockpit-wormhole-heading { font-size: 8px; }
+  html[data-renderer="cockpit"] .cockpit-wormhole-title { margin-top: 5px; font-size: 11px; }
+  html[data-renderer="cockpit"] .cockpit-wormhole-value { font-size: var(--warp-value-size, 19px); }
+  html[data-renderer="cockpit"] .cockpit-wormhole-detail { margin-top: 7px; font-size: 9px; }
   html[data-renderer="cockpit"] .cockpit-tutorial { position: relative; top: auto; left: auto; transform: none; width: auto; max-width: none; font-size: 12px; padding: 10px 12px; gap: 9px; }
   html[data-renderer="cockpit"] .cockpit-tutorial-phase { font-size: 10px; }
   html[data-renderer="cockpit"] .cockpit-warning,
@@ -306,6 +332,16 @@ html[data-renderer="cockpit"] #persistence-warning { bottom: 25%; color: #f1c99c
 }
 
 /* 横屏低高度优先前路；菜单可滚动，操作入口不被截断。 */
+@media (max-height: 620px) and (max-width: 760px) {
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-context { gap: 6px; }
+  html[data-renderer="cockpit"] .cockpit-wormhole[data-phase="complete"] { padding-top: 8px; padding-bottom: 8px; }
+  html[data-renderer="cockpit"] .cockpit-wormhole[data-phase="complete"] .cockpit-wormhole-heading { display: none; }
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-warning { padding: 5px 9px; font-size: 9px; }
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-effects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-self: stretch; max-width: none; gap: 4px; }
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-effect { min-width: 0; justify-content: space-between; gap: 4px; padding: 4px 6px; font-size: 8px; }
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-effect strong { font-size: 11px; }
+  html[data-renderer="cockpit"] [data-warp-settling="true"] .cockpit-effect[data-effect="shield"]::before { width: 8px; height: 10px; }
+}
 @media (max-height: 620px) and (min-width: 761px) {
   html[data-renderer="cockpit"] .cockpit-console { bottom: 56px; }
   html[data-renderer="cockpit"] .cockpit-instrument { padding: 10px 13px; width: 230px; }

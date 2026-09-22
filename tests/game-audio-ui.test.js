@@ -2372,11 +2372,11 @@ test('fuel burst natural expiry fires end FX and a grace of invincibility, then 
       mode: STATE.mode,
       speedDuringExpiryFrame: STATE.speed,   // 跨零帧仍锁定 36（下一帧才恢复）
     };
-    updatePhysics(0.5);              // 保护期内（剩约 0.5s）：穿墙不死；速度已恢复
+    updatePhysics(1.5);              // 保护期内（剩约 0.5s）：穿墙不死；速度已恢复
     const midGrace = {
       mode: STATE.mode,
       graceT: STATE.fuelBurstGraceT,
-      speedRestored: Math.abs(STATE.speed - (20 + CONFIG.ACCEL * 0.6)) < 0.5,
+      speedRestored: Math.abs(STATE.speed - (20 + CONFIG.ACCEL * 1.6)) < 0.5,
     };
     updatePhysics(1.0);              // 保护期耗尽 → 撞墙死亡
     const afterGrace = { mode: STATE.mode, graceT: STATE.fuelBurstGraceT };
@@ -2384,7 +2384,7 @@ test('fuel burst natural expiry fires end FX and a grace of invincibility, then 
   })()`, sandbox));
 
   assert.equal(result.atExpiry.burstT, 0);
-  assert.ok(result.atExpiry.graceT > 0.8, `grace should start near FUEL_BURST_GRACE(1), got ${result.atExpiry.graceT}`);
+  assert.ok(result.atExpiry.graceT > 1.8, `grace should start near FUEL_BURST_GRACE(2), got ${result.atExpiry.graceT}`);
   assert.equal(result.atExpiry.shockwave, true, 'expiry must emit the gold shockwave ring');
   assert.equal(result.atExpiry.flash, true, 'expiry must flash the screen');
   assert.equal(result.atExpiry.mode, 'PLAYING', 'walls must not kill during the expiry frame');

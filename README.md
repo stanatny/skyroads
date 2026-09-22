@@ -12,6 +12,7 @@ Current version: [v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1
 
 ## Highlights
 
+- Rare high-altitude wormholes reward a well-timed double or triple jump from an elevated route with a **6,000 m warp**. The first opportunity is at 11.36 km; after a successful warp, another 8.4–10.8 km of ordinary flight separates the next opportunity. Fuel and all active power-up timers pause during transit, then resume at a protected exit. See the [wormhole design and validation](docs/wormhole_reward_design.md).
 - Responsive held movement crosses multiple lanes smoothly and reverses immediately; `Space` / `Enter` starts or restarts a mission, and `P` pauses or resumes play.
 - A bilingual interstellar command center follows Chinese system languages and otherwise starts in English, with a remembered manual language switch and a compact `V1.1` identity.
 - The original 144 BPM, three-stem adaptive **Nebula Cruise** soundtrack keeps its cinematic electronic palette while adding a faster, joyful, slightly tense pulse.

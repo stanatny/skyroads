@@ -24,8 +24,8 @@ function harness() {
   const shipGroup = new THREE.Group();
   shipGroup.position.set(3.4, 2.5, -0.8);
   scene.add(shipGroup);
-  const state = { mode: 'PLAYING', runId: 1, boostT: 0, fuelBurstT: 0, fuelBurstGraceT: 0, reducedMotion: false };
-  const config = { BOOST_DURATION: 5, FUEL_BURST_DURATION: 3, FUEL_BURST_GRACE: 1 };
+  const state = { mode: 'PLAYING', runId: 1, boostT: 0, boostGraceT: 0, fuelBurstT: 0, fuelBurstGraceT: 0, reducedMotion: false };
+  const config = { BOOST_DURATION: 5, BOOST_GRACE: 2, FUEL_BURST_DURATION: 3, FUEL_BURST_GRACE: 2 };
   return { sandbox, THREE, own, resources, effect, scene, shipGroup, state, config,
     update(dt = 1 / 60) { effect.update(state, config, { dt, shipGroup }); },
     protection() { return sandbox.Skyroads.flightStatusFx.protection(state, config); },
@@ -102,12 +102,17 @@ test('BOOST shield starts immediately and remains legible until its exact expiry
     h.state.boostT = remaining;
     h.update();
     assert.equal(h.protection().active, true);
-    assert.equal(h.protection().duration, 5);
-    close(h.diagnostics().shield.remaining, remaining);
+    assert.equal(h.protection().duration, 7);
+    close(h.diagnostics().shield.remaining, remaining + 2);
     assert.equal(h.diagnostics().shield.active, true);
     assert.ok(h.diagnostics().shield.opacity >= 0.38);
   }
   h.state.boostT = 0;
+  h.state.boostGraceT = 2;
+  h.update();
+  close(h.diagnostics().shield.remaining, 2);
+  assert.equal(h.diagnostics().shield.active, true);
+  h.state.boostGraceT = 0;
   h.update();
   assert.equal(h.diagnostics().shield.active, false);
   assert.equal(h.diagnostics().shield.opacity, 0);
@@ -119,19 +124,19 @@ test('fuel burst and its grace period have one uninterrupted shield and countdow
   h.state.fuelBurstT = 3;
   h.update();
   assert.equal(h.diagnostics().shield.active, true);
-  close(h.diagnostics().shield.remaining, 4);
-  assert.equal(h.protection().duration, 4);
+  close(h.diagnostics().shield.remaining, 5);
+  assert.equal(h.protection().duration, 5);
   const fullOpacity = h.diagnostics().shield.opacity;
   h.state.fuelBurstT = 0.0001;
   h.update();
-  close(h.diagnostics().shield.remaining, 1.0001);
+  close(h.diagnostics().shield.remaining, 2.0001);
   assert.equal(h.diagnostics().shield.opacity, fullOpacity);
   h.state.fuelBurstT = 0;
   h.state.fuelBurstGraceT = 1;
   h.update();
   assert.equal(h.diagnostics().shield.active, true);
   close(h.diagnostics().shield.remaining, 1);
-  assert.equal(h.protection().duration, 4);
+  assert.equal(h.protection().duration, 5);
   assert.equal(h.diagnostics().shield.opacity, fullOpacity);
   h.state.fuelBurstGraceT = 0.0001;
   h.update();
@@ -152,11 +157,11 @@ test('overlapping protection sources keep the shield until the last source expir
   const h = harness();
   // 先让 BOOST 覆盖燃料爆发，再让更长的爆发保护接管；倒计时只呈现仍然有效的保护。
   for (const [boostT, fuelBurstT, fuelBurstGraceT, remaining, duration] of [
-    [5, 3, 0, 5, 5],
-    [0.7, 1, 0, 2, 4],
-    [0, 0, 1, 1, 4],
-    [0.8, 0, 0.2, 0.8, 5],
-    [0.1, 0, 0, 0.1, 5],
+    [5, 3, 0, 7, 7],
+    [0.7, 1, 0, 3, 5],
+    [0, 0, 1, 1, 5],
+    [0.8, 0, 0.2, 2.8, 7],
+    [0.1, 0, 0, 2.1, 7],
   ]) {
     Object.assign(h.state, { boostT, fuelBurstT, fuelBurstGraceT });
     h.update();
@@ -349,4 +354,28 @@ test('protection expiry removes shell strength and all pooled orbit nodes on the
   h.update();
   assert.equal(shell.material.uniforms.strength.value, 0);
   assert.equal(nodes.count, 0);
+});
+
+test('warp and exit grace share a continuous protection signal with preserved boost', () => {
+  const h = harness();
+  h.state.wormhole = { active: true, elapsed: 2.3, graceT: 0 };
+  h.update();
+  assert.equal(h.protection().active, true);
+  close(h.protection().remaining, 2.1);
+  assert.equal(h.diagnostics().shield.active, true);
+  h.state.boostT = 3;
+  close(h.protection().remaining, 5.1);
+  h.state.boostT = 0;
+  h.state.wormhole = { active: false, elapsed: 2.4, graceT: 2 };
+  close(h.protection().remaining, 2);
+  h.update();
+  assert.equal(h.protection().active, true);
+  h.state.boostT = 3;
+  close(h.protection().remaining, 5);
+  h.state.boostT = 0; h.state.wormhole.graceT = 0.001;
+  h.update();
+  assert.equal(h.diagnostics().shield.active, true);
+  h.state.wormhole.graceT = 0;
+  h.update();
+  assert.equal(h.protection().active, false);
 });

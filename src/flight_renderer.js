@@ -437,6 +437,9 @@
     buildEnvironment();
     const skyShow = scope.Skyroads.flightSkyShow
       ? scope.Skyroads.flightSkyShow.create({ THREE, own, parent: scene }) : null;
+    const wormholeFx = scope.Skyroads.flightWormhole
+      ? scope.Skyroads.flightWormhole.create({ THREE, parent: scene, own, world: WORLD, config }) : null;
+    const warpShipState = {};
     const dimensions = scope.Skyroads.flightDimensions;
     const ship = scope.Skyroads.flightShip ? scope.Skyroads.flightShip.create({ THREE, own, materials,
       visualScale: dimensions.modelScale, hoverOffset: dimensions.hoverOffset }) : null;
@@ -1008,6 +1011,8 @@
       const playerX = laneX(lane, config.LANES);
       const playerHeight = playerWorldY(state);
       const groundY = state.terrainEnabled ? heightY(state.groundHeight || 0) : 0;
+      const warp = wormholeFx ? wormholeFx.update(state, { time, playerX, playerHeight }) : null;
+      const warping = Boolean(warp && warp.active);
       sunlight.position.x = playerX - 30;
       sunlight.position.y = groundY + 45;
       sunlight.target.position.x = playerX;
@@ -1021,14 +1026,23 @@
       camera.position.set(playerX, Math.max(WORLD.eyeHeight + playerHeight, behindGroundY + 1.2), WORLD.cameraBack);
       cameraTarget.set(playerX, playerHeight + 0.8, -WORLD.cameraLookAhead);
       camera.lookAt(cameraTarget);
+      const nextFov = (camera.aspect < 1 ? 74 : 64) + (warp ? warp.fovOffset : 0);
+      if (camera.fov !== nextFov) { camera.fov = nextFov; camera.updateProjectionMatrix(); }
+      sky.visible = !(warp && warp.hideScenery);
       sky.position.set(camera.position.x * 0.06, camera.position.y * 0.06, 0);
       if (orbitalEnvironment && typeof orbitalEnvironment.update === 'function') {
         orbitalEnvironment.update(state.position, state.terrainEnabled,
           { time, reducedMotion: state.reducedMotion, runId: state.runId, mode: state.mode });
       }
       if (ship) {
-        ship.update(state, config, { time, bank: bank * 6 });
-        ship.group.position.set(playerX, playerHeight, 0);
+        // 折跃只驱动机体展开与喷流，不把视觉变身写回奖励或物理状态。
+        if (warping) {
+          Object.assign(warpShipState, state);
+          warpShipState.tripleT = Math.max(1, state.tripleT || 0);
+          warpShipState.boostT = Math.max(1, state.boostT || 0);
+        }
+        ship.update(warping ? warpShipState : state, config, { time, bank: warping ? 0 : bank * 6 });
+        ship.group.position.set(playerX, playerHeight, warp ? warp.shipOffsetZ : 0);
         const tile = terrainTile(state, Math.floor(state.position), lane);
         const pitch = Math.atan2(heightY(tile.farHeight - tile.nearHeight), WORLD.segmentDepth);
         const groundedBlend = Math.max(0, Math.min(1, 1 - (state.playerY || 0) / 300));
@@ -1044,11 +1058,16 @@
       if (weapons) weapons.update(state, { dt, time, shipGroup: ship ? ship.group : null, viewportHeight });
       if (statusFx) statusFx.update(state, config, { dt, shipGroup: ship ? ship.group : null });
       renderDebris(state, dt);
-      renderBoost(state, time);
-      if (skyShow) skyShow.update(state, { dt, camera,
-        minimumWorldY: highestVisibleSurface + heightY(config.WALL_HIGH_HEIGHT || 2000) + 3 });
+      if (!warping) renderBoost(state, time);
+      if (skyShow) {
+        if (!warping) skyShow.update(state, { dt, camera,
+          minimumWorldY: highestVisibleSurface + heightY(config.WALL_HIGH_HEIGHT || 2000) + 3 });
+        if (warping || warp && warp.hideScenery) skyShow.group.visible = false;
+      }
+      if (weapons) weapons.group.visible = !(warp && warp.hideScenery);
       clippedInstances = 0;
       for (const batch of batches) {
+        batch.mesh.visible = !(warp && warp.hideScenery);
         batch.mesh.count = batch.count;
         batch.mesh.instanceMatrix.needsUpdate = true;
         if (batch.mesh.instanceColor) batch.mesh.instanceColor.needsUpdate = true;
@@ -1092,7 +1111,7 @@
         visibleSegments,
         clippedInstances,
         frameCpuMs: Number(lastFrameMs.toFixed(2)),
-        camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+        camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov },
         cameraTarget: { x: cameraTarget.x, y: cameraTarget.y, z: cameraTarget.z },
         ship: ship ? ship.getDiagnostics() : null,
         shipScreen,
@@ -1116,6 +1135,7 @@
         statusFx: statusFx ? statusFx.getDiagnostics() : null,
         magnetFx: magnetFx ? magnetFx.getDiagnostics() : null,
         skyShow: skyShow ? skyShow.getDiagnostics() : null,
+        wormhole: wormholeFx ? wormholeFx.getDiagnostics() : null,
       };
     }
 
@@ -1125,6 +1145,7 @@
       disposed = true;
       canvas.removeEventListener('webglcontextlost', loseContext, false);
       if (weapons) weapons.dispose();
+      if (wormholeFx) wormholeFx.dispose();
       scene.environment = null;
       for (const batch of batches) batch.mesh.dispose();
       for (const resource of resources) resource.dispose();
@@ -1133,7 +1154,8 @@
     }
 
     return { render, resize, dispose, getDiagnostics,
-      getSkyAudioCue: () => !disposed && !contextLost && skyShow ? skyShow.getAudioCue() : null };
+      getSkyAudioCue: () => !disposed && !contextLost && skyShow
+        && !(currentState && currentState.wormhole && currentState.wormhole.active) ? skyShow.getAudioCue() : null };
   }
 
   scope.Skyroads = scope.Skyroads || {};

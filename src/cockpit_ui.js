@@ -50,7 +50,18 @@
     refs.tutorial.append(refs.tutorialPhase, refs.tutorialText);
     // 窄屏将教学、告警和限时状态按实际高度排列，避免同时出现时互相遮挡。
     const contextNode = element('div', 'cockpit-context');
-    contextNode.append(refs.tutorial, refs.warning);
+    refs.wormhole = element('section', 'cockpit-wormhole');
+    refs.wormhole.hidden = true;
+    refs.wormholeHeading = element('span', 'cockpit-wormhole-heading');
+    refs.wormholeTitle = element('strong', 'cockpit-wormhole-title');
+    refs.wormholeTitle.setAttribute('role', 'status');
+    refs.wormholeTitle.setAttribute('aria-live', 'polite');
+    refs.wormholeValue = element('span', 'cockpit-wormhole-value');
+    refs.wormholeDetail = element('span', 'cockpit-wormhole-detail');
+    refs.wormholeMeter = meter('cockpit-wormhole-meter');
+    refs.wormhole.append(refs.wormholeHeading, refs.wormholeTitle, refs.wormholeValue,
+      refs.wormholeMeter.track, refs.wormholeDetail);
+    contextNode.append(refs.wormhole, refs.tutorial, refs.warning);
     interfaceNode.append(contextNode);
 
     const consoleNode = element('section', 'cockpit-console');
@@ -146,6 +157,10 @@
     let lastUpdate = -Infinity;
     let previousProtection = false;
     let previousChargeStage = 0;
+    let previousWormholeStage = '';
+    let settlementKey = '';
+    let settlementAge = 0;
+    let lastSettlementFrame = '';
 
     // update 从 STATE / CONFIG 读取仪表真值；不改变游戏状态或输入，返回 undefined。
     function update(state = {}, config = {}) {
@@ -159,13 +174,27 @@
       const chargeRatio = clamp(numeric(state.chargeT) / positive(config.CHARGE_TIME, 1.5));
       const revealCharge = numeric(state.chargeT) >= positive(config.CHARGE_HUD_DELAY, 0.5);
       const chargeStage = chargeRatio >= 1 ? 2 : revealCharge ? 1 : 0;
-      // 保护切换和蓄力出现／就绪／归零立即同步，避免节流残留上一发的进度条。
+      const warp = state.wormhole || {};
+      const missionActive = mode === 'PLAYING' || mode === 'PAUSED';
+      const warping = missionActive && Boolean(warp.active);
+      const warpElapsed = Math.max(0, numeric(warp.elapsed));
+      const gateDistance = warp.gate ? (numeric(warp.gate.segment) - numeric(state.position))
+        * positive(config.DISTANCE_PER_SEGMENT, 10) : -1;
+      const warpPhase = !missionActive ? 'off' : warping ? (warpElapsed < 0.25 ? 'capture'
+        : warpElapsed < 0.45 ? 'tear' : warpElapsed < 2.05 ? 'tunnel' : 'exit')
+        : numeric(warp.completedT) > 0 ? 'complete' : warp.gate && gateDistance >= 0 && gateDistance <= 1000 ? 'preview' : 'off';
+      const warpStage = `${warpPhase}:${warp.eventId || ''}:${warp.gate && warp.gate.id || ''}`;
+      const messages = MESSAGES[locale];
+      // 里程累计和结算跟随物理帧；其余仪表仍按原频率更新，暂停时没有独立动画时钟。
+      updateWormhole(state, config, warp, warpPhase, warpElapsed, warping, gateDistance, messages, locale);
+      // 保护、蓄力与折跃阶段切换立即同步，避免节流显示上一阶段的能量警告或提示。
       if (mode === previousMode && locale === previousLocale && protectedNow === previousProtection
-        && chargeStage === previousChargeStage && now >= lastUpdate && now - lastUpdate < 70) return;
+        && chargeStage === previousChargeStage && warpStage === previousWormholeStage
+        && now >= lastUpdate && now - lastUpdate < 70) return;
       previousProtection = protectedNow;
       previousChargeStage = chargeStage;
+      previousWormholeStage = warpStage;
       lastUpdate = now;
-      const messages = MESSAGES[locale];
       if (locale !== previousLocale) {
         labels.forEach(({ node, id }) => setText(node, messages[id] || id));
         interfaceNode.setAttribute('aria-label', messages.instruments);
@@ -175,12 +204,13 @@
       previousMode = mode;
       interfaceNode.dataset.mode = mode;
       interfaceNode.dataset.reducedMotion = state.reducedMotion ? 'true' : 'false';
+      interfaceNode.dataset.warping = warping ? 'true' : 'false';
       setText(refs.status, messages[mode] || mode);
       const fuel = Math.max(0, numeric(state.fuel));
       const fuelRatio = clamp(fuel / positive(config.FUEL_MAX, 100));
       setText(refs.fuel, String(Math.ceil(fuelRatio * 100)).padStart(2, '0'));
       setMeter(refs.fuelBar, fuelRatio, messages.fuel);
-      systems.dataset.fuel = fuelRatio <= 0.15 ? 'critical' : fuelRatio <= 0.3 ? 'low' : 'normal';
+      systems.dataset.fuel = warping ? 'protected' : fuelRatio <= 0.15 ? 'critical' : fuelRatio <= 0.3 ? 'low' : 'normal';
       const maxJumps = state.tripleT > 0 ? 3 : positive(config.MAX_JUMPS, 2);
       const jumpsRemaining = Math.max(0, maxJumps - numeric(state.jumpsUsed));
       jumpIndicators.forEach((indicator, index) => {
@@ -206,7 +236,8 @@
       const groundMode = surface && surface.raised ? messages.terrace
         : surface && surface.kind === 'ramp_up' ? messages.rampUp
           : surface && surface.kind === 'ramp_down' ? messages.rampDown : messages.ground;
-      setText(refs.flightMode, state.gliding ? messages.gliding : numeric(state.playerY) > 0 ? messages.airborne : groundMode);
+      setText(refs.flightMode, warping ? messages[`wormhole_${warpPhase}`]
+        : state.gliding ? messages.gliding : numeric(state.playerY) > 0 ? messages.airborne : groundMode);
       setText(refs.routeRange, `+${ROUTE_ROWS * ROUTE_STEP * positive(config.DISTANCE_PER_SEGMENT, 10)} M`);
       updateRoute(state, currentLane);
       refs.route.setAttribute('aria-label', `${messages.route}, ${messages.lane} ${currentLane + 1}/7`);
@@ -231,7 +262,7 @@
           node.style.setProperty('--protection-left', clamp(remaining / positive(protection.duration, 1)));
         }
       });
-      const warningText = mode === 'PLAYING' && fuelRatio <= 0.15 ? messages.fuelCritical : '';
+      const warningText = mode === 'PLAYING' && !warping && fuelRatio <= 0.15 ? messages.fuelCritical : '';
       refs.warning.hidden = !warningText;
       setText(refs.warning, warningText);
       const tutorial = state.tutorial;
@@ -241,6 +272,77 @@
       if (phase && state.translator) {
         setText(refs.tutorialPhase, `${messages.training} ${tutorial.phaseIndex + 1}/${tutorial.phases.length}`);
         setText(refs.tutorialText, state.translator.t(phase.hintKey));
+      }
+    }
+
+    // 同一数字节点先累计，再随卡片移到上方中央结算；只读取计时，禁止重启 CSS 动画。
+    function updateWormhole(state, config, warp, phase, elapsed, active, gateDistance, messages, locale) {
+      const complete = phase === 'complete';
+      const tuning = root.Skyroads && root.Skyroads.wormhole && root.Skyroads.wormhole.TUNING;
+      const targetReward = positive(tuning && tuning.distanceMeters, 6000);
+      const reward = complete ? positive(warp.lastRewardMeters, targetReward) : targetReward;
+      const progress = clamp(elapsed / positive(tuning && tuning.duration, 2.4));
+      const number = value => Math.round(value).toLocaleString(locale);
+      refs.wormhole.hidden = phase === 'off';
+      refs.wormhole.dataset.phase = phase;
+      refs.wormholeValue.setAttribute('aria-live', complete ? 'polite' : 'off');
+      refs.wormholeMeter.track.hidden = !active;
+      interfaceNode.dataset.warpSettling = complete ? 'true' : 'false';
+      if (phase !== 'off') {
+        setText(refs.wormholeHeading, complete ? messages.wormhole_reward : messages.wormhole_heading);
+        setText(refs.wormholeTitle, messages[`wormhole_${phase}`]);
+        if (phase === 'preview') {
+          setText(refs.wormholeValue, `${number(Math.ceil(gateDistance / 10) * 10)} M`);
+          const side = numeric(warp.gate.lane, 3) < 3 ? messages.wormhole_left : messages.wormhole_right;
+          setText(refs.wormholeDetail, `${side} · ${messages.wormhole_jump}`);
+        } else if (complete) {
+          setText(refs.wormholeValue, `+${number(reward)} M`);
+          const protection = numeric(warp.graceT) > 0
+            ? ` · ${messages.wormhole_protection} ${numeric(warp.graceT).toFixed(1)}s` : '';
+          setText(refs.wormholeDetail, `${messages.wormhole_credited}${protection}`);
+        } else {
+          setText(refs.wormholeValue, `${number(Math.floor(reward * progress / 10) * 10)} / ${number(reward)} M`);
+          setText(refs.wormholeDetail, messages.wormhole_noDrain);
+          setMeter(refs.wormholeMeter, progress, messages.wormhole_progress);
+        }
+      }
+      const key = `${state.runId == null ? '' : state.runId}:${warp.eventId == null ? '' : warp.eventId}`;
+      const changedEvent = key !== settlementKey;
+      if (changedEvent) { settlementKey = key; settlementAge = 0; }
+      if (complete && (state.mode !== 'PAUSED' || changedEvent)) {
+        // 同一事件的完成计时只能前进；切换语言、恢复画面或重复状态不能重新放大一次。
+        settlementAge = Math.max(settlementAge, Math.max(0, 2.8 - numeric(warp.completedT)));
+      }
+      const width = positive(state.width, positive(root.innerWidth, 1440));
+      const height = positive(state.height, positive(root.innerHeight, 900));
+      const narrow = width <= 760;
+      const margin = width <= 460 ? 12 : narrow ? 16 : Math.max(20, Math.min(40, width * 0.025));
+      const baseWidth = narrow ? width - margin * 2 : 272;
+      const targetWidth = narrow ? baseWidth : Math.min(430, width - margin * 2);
+      const baseSize = narrow ? 19 : 21;
+      const targetSize = narrow ? (height < 600 ? 38 : Math.min(48, (baseWidth - 32) / 5.5)) : 60;
+      const reduced = Boolean(state.reducedMotion);
+      const age = settlementAge;
+      const entrance = 1 - Math.pow(1 - clamp(age / 0.46), 3);
+      const pop = clamp(age / 0.56) - 1;
+      const sizeEntrance = 1 + 2.15 * pop * pop * pop + 1.15 * pop * pop;
+      const returnT = clamp((age - 2.05) / 0.55);
+      const returning = returnT * returnT * (3 - 2 * returnT);
+      const travel = complete ? reduced ? 1 : entrance * (1 - returning) : 0;
+      const size = complete ? reduced ? 1 : sizeEntrance * (1 - returning) : 0;
+      const opacity = complete && !reduced ? 1 - clamp((age - 2.62) / 0.18) : 1;
+      refs.wormhole.dataset.settlement = !complete ? 'off' : reduced ? 'static'
+        : age < 0.56 ? 'lifting' : age < 2.05 ? 'hold' : age < 2.62 ? 'returning' : 'fade';
+      const frame = `${width}:${height}:${travel}:${size}:${opacity}`;
+      if (frame !== lastSettlementFrame) {
+        lastSettlementFrame = frame;
+        const style = refs.wormhole.style;
+        style.setProperty('--warp-panel-width', `${(baseWidth + (targetWidth - baseWidth) * travel).toFixed(3)}px`);
+        style.setProperty('--warp-value-size', `${(baseSize + (targetSize - baseSize) * size).toFixed(3)}px`);
+        style.setProperty('--warp-settle-x', `${(narrow ? 0 : ((width - targetWidth) / 2 - margin) * travel).toFixed(3)}px`);
+        style.setProperty('--warp-settle-y', `${(narrow ? 0 : -18 * travel).toFixed(3)}px`);
+        style.setProperty('--warp-settle-strength', travel.toFixed(4));
+        style.setProperty('--warp-settle-opacity', opacity.toFixed(4));
       }
     }
 
@@ -350,6 +452,12 @@
       steer: 'STEER', jumpGlide: 'LIFT / GLIDE', fireCharge: 'FIRE / CHARGE', pause: 'PAUSE', boost: 'OVERDRIVE', super: 'SUPER FORM', magnet: 'MAGNET', shield: 'INVULNERABLE',
       MENU: 'SYSTEMS READY', PLAYING: 'FLIGHT ACTIVE', PAUSED: 'FLIGHT HOLD', GAMEOVER: 'SIGNAL LOST', gliding: 'GLIDE', airborne: 'LIFT', ground: 'TERRAIN FOLLOW', fuelCritical: 'LOW FUEL — COLLECT ENERGY CELLS', training: 'TRAINING',
       terrace: 'ELEVATED ROUTE', rampUp: 'ASCENDING RAMP', rampDown: 'DESCENDING RAMP',
+      wormhole_heading: 'ROUTE ANOMALY', wormhole_preview: 'HIGH-ALTITUDE WORMHOLE',
+      wormhole_left: 'LEFT HIGH ROUTE', wormhole_right: 'RIGHT HIGH ROUTE', wormhole_jump: 'LIFT · JUMP AGAIN NEAR APEX',
+      wormhole_capture: 'CAPTURE', wormhole_tear: 'SPACE TEAR', wormhole_tunnel: 'IN TRANSIT',
+      wormhole_exit: 'RE-ENTRY', wormhole_complete: 'WARP COMPLETE', wormhole_noDrain: 'NO DRAIN · POWER-UP TIMERS PAUSED',
+      wormhole_reward: 'DISTANCE GAIN', wormhole_credited: 'ADDED TO TOTAL DISTANCE',
+      wormhole_progress: 'WARP PROGRESS', wormhole_protection: 'EXIT PROTECTION', wormhole_arrived: 'NEW SECTOR REACHED',
     }),
     'zh-CN': Object.freeze({
       instruments: '飞行遥测', briefing: '航行计划', mission: '看清前路，掌握节奏。', missionDetail: '跃升越过断层，沿高架支路前进，蓄力清除前方障碍。', chaseView: '七航道飞行', flightState: '飞行模式',
@@ -358,6 +466,12 @@
       steer: '变道', jumpGlide: '跃升 / 滑翔', fireCharge: '射击 / 蓄力', pause: '暂停', boost: '超级加速', super: '超级形态', magnet: '磁力吸附', shield: '无敌保护',
       MENU: '系统就绪', PLAYING: '正在航行', PAUSED: '航行暂停', GAMEOVER: '信号中断', gliding: '滑翔', airborne: '跃升', ground: '贴地巡航', fuelCritical: '燃料不足 · 请拾取能量晶体', training: '飞行教学',
       terrace: '高架支路', rampUp: '上坡航段', rampDown: '下坡航段',
+      wormhole_heading: '异常航线', wormhole_preview: '高空虫洞',
+      wormhole_left: '左侧高架', wormhole_right: '右侧高架', wormhole_jump: '跃起后，近顶点再跳',
+      wormhole_capture: '引力捕获', wormhole_tear: '撕开空间', wormhole_tunnel: '时空穿梭',
+      wormhole_exit: '返回航道', wormhole_complete: '折跃完成', wormhole_noDrain: '能量零消耗 · 增益计时暂停',
+      wormhole_reward: '额外航程', wormhole_credited: '已计入总航程',
+      wormhole_progress: '折跃进度', wormhole_protection: '出场保护', wormhole_arrived: '已抵达新航段',
     }),
   });
 
