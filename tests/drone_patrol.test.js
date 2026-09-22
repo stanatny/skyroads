@@ -27,10 +27,12 @@ function createHarness(seed = 20260921, terrainEnabled = true) {
   }
   const source = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
   vm.runInContext(`${source}
-    globalThis.game = { STATE, CONFIG, newGenState, generateSegment, updateEnemies, enemyLane };
+    globalThis.game = { STATE, CONFIG, newGenState, generateSegment, updateEnemies, enemyLane, enemyAltitude, checkCollisions };
+    die = (reason) => { globalThis.death = reason; };
+    collectPickup = () => false;
   `, sandbox);
   sandbox.game.STATE.terrainEnabled = terrainEnabled;
-  return { ...sandbox.game, random };
+  return { ...sandbox.game, random, sandbox };
 }
 
 function drone(lane) {
@@ -76,10 +78,10 @@ test('drones patrol open valley lanes with the existing warning and move timing,
   h.updateEnemies(0.01);
   assert.equal(e.toLane, 2);
   assert.equal(e.state, 'warn');
-  h.updateEnemies(h.CONFIG.DRONE_WARN_TIME - 0.01);
+  h.updateEnemies(h.CONFIG.DRONE_WARN_TIME - 0.02);
   assert.equal(e.state, 'warn');
   assert.equal(h.enemyLane(e), 1);
-  h.updateEnemies(0.011);
+  h.updateEnemies(0.01);
   assert.equal(e.state, 'move');
   h.updateEnemies(h.CONFIG.DRONE_MOVE_TIME / 2);
   assert.ok(Math.abs(h.enemyLane(e) - 1.5) < 1e-6);
@@ -87,7 +89,8 @@ test('drones patrol open valley lanes with the existing warning and move timing,
   assert.equal(e.fromLane, 2);
   e.restT = 0;
   h.updateEnemies(0.01);
-  assert.equal(e.toLane, 1);
+  assert.equal(e.toLane, 2);
+  assert.equal(e.toAltitude, h.CONFIG.DRONE_PATROL_RISE);
   const visited = new Set();
   for (let step = 0; step < 2400; step += 1) {
     h.updateEnemies(1 / 60);
@@ -98,7 +101,7 @@ test('drones patrol open valley lanes with the existing warning and move timing,
   assert.ok(visited.size > 1);
 });
 
-test('isolated challenge drones hover and reverse away from walls or gaps instead of crossing them', () => {
+test('isolated challenge drones rise in place and reverse away from walls or gaps instead of crossing them', () => {
   for (const obstacle of ['WALL_LOW', 'GAP']) {
     const h = createHarness();
     const e = drone(1);
@@ -112,14 +115,15 @@ test('isolated challenge drones hover and reverse away from walls or gaps instea
     lanes[0] = obstacle;
     for (let step = 0; step < 600; step += 1) h.updateEnemies(1 / 60);
     assert.equal(h.enemyLane(seg.enemies[0]), 1);
-    assert.equal(seg.enemies[0].state, 'rest');
+    assert.ok(h.enemyAltitude(seg.enemies[0]) >= 0);
+    assert.equal(seg.enemies[0].patrolLaneB, 1);
   }
   const h = createHarness();
   const e = drone(2);
   place(h, 128, Array(7).fill('ROAD'), [e]);
   for (let step = 0; step < 600; step += 1) h.updateEnemies(1 / 60);
   assert.equal(h.enemyLane(e), 2);
-  assert.equal(e.state, 'rest');
+  assert.equal(e.patrolLaneA, e.patrolLaneB);
 });
 
 test('terrain-disabled drones retain unrestricted original lane changes', () => {
@@ -172,4 +176,70 @@ test('seeded long runs restore challenge encounters without adding enemies to pr
     assert.ok(longestEmpty < terrain.TUNING.period * 2, `seed ${seed}: empty ${longestEmpty}`);
     assert.deepEqual([...sections].sort(), ['broken_bridge', 'valley']);
   }
+});
+
+// 方形巡逻不能只升高模型：真实碰撞、定时推进和边界都必须使用同一状态。
+test('a drone completes a closed square through both lanes and single-jump altitude', () => {
+  const h = createHarness();
+  const e = drone(1);
+  place(h, 250, Array(7).fill('ROAD'), [e]);
+  h.random.random = () => 0.9;
+  const corners = [];
+  let last = e.state;
+  for (let frame = 0; frame < 600 && corners.length < 4; frame += 1) {
+    h.updateEnemies(1 / 120);
+    if (last === 'move' && e.state === 'rest') corners.push([h.enemyLane(e), h.enemyAltitude(e)]);
+    last = e.state;
+  }
+  assert.deepEqual(corners, [[2, 0], [2, 720], [1, 720], [1, 0]]);
+  const apex = h.CONFIG.JUMP_VELOCITY ** 2 / (2 * h.CONFIG.GRAVITY);
+  assert.ok(720 <= apex && apex <= 720 + h.CONFIG.DRONE_HEIGHT);
+});
+
+test('patrol altitude is smooth and independent of 20, 60 or 120 Hz update grouping', () => {
+  const samples = [];
+  for (const hz of [20, 60, 120]) {
+    const h = createHarness();
+    const e = drone(1);
+    place(h, 250, Array(7).fill('ROAD'), [e]);
+    h.random.random = () => 0.9;
+    let previous = 0;
+    for (let frame = 0; frame < hz * 3; frame += 1) {
+      h.updateEnemies(1 / hz);
+      const height = h.enemyAltitude(e);
+      assert.ok(Math.abs(height - previous) <= h.CONFIG.DRONE_PATROL_RISE * 1.6 / h.CONFIG.DRONE_MOVE_TIME / hz);
+      assert.ok(height >= 0 && height <= h.CONFIG.DRONE_PATROL_RISE);
+      previous = height;
+    }
+    samples.push([h.enemyLane(e), h.enemyAltitude(e), e.state]);
+  }
+  for (const sample of samples.slice(1)) {
+    assert.ok(Math.abs(sample[0] - samples[0][0]) < 1e-8);
+    assert.ok(Math.abs(sample[1] - samples[0][1]) < 1e-8);
+    assert.equal(sample[2], samples[0][2]);
+  }
+});
+
+test('raised drones allow underflight, hit single jumps, and retain boost protection', () => {
+  const h = createHarness();
+  const e = { ...drone(1), altitude: 720 };
+  place(h, 250, Array(7).fill('ROAD'), [e]);
+  Object.assign(h.STATE, { mode: 'PLAYING', tutorial: null, groundHeight: terrain.heightAt(250, 1) });
+  const collide = (height) => {
+    h.sandbox.death = null;
+    h.STATE.playerY = height;
+    h.checkCollisions(1, 1);
+    return h.sandbox.death;
+  };
+  assert.equal(collide(0), null);
+  assert.equal(collide(719.99), null);
+  assert.equal(collide(879), 'enemy');
+  assert.equal(collide(1220), 'enemy');
+  assert.equal(collide(1220.01), null);
+  h.STATE.boostGraceT = 1;
+  assert.equal(collide(879), null);
+  h.STATE.boostGraceT = 0;
+  e.altitude = 0;
+  assert.equal(collide(0), 'enemy');
+  assert.equal(collide(879), null);
 });

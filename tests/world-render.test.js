@@ -1640,3 +1640,33 @@ test('renderEffects paints expiry warning vignettes without throwing (boost / fu
     );
   }
 });
+
+
+test('Canvas drones lift with patrol altitude while their ground shadow stays on the deck', () => {
+  for (const options of [{}, { droneVisual: false, missing: ['droneScout'] }]) {
+    const h = createHarness(options);
+    const e = { type: 'drone', lane: 2, fromLane: 2, toLane: 2, state: 'rest', phase: 0, visualVariant: 'droneScout' };
+    const low = [...drawEnemy(h, e)];
+    e.altitude = 720;
+    const high = [...drawEnemy(h, e)];
+    const lowOrigin = low.find((event) => event.type === 'translate');
+    const highOrigin = high.find((event) => event.type === 'translate');
+    assert.ok(highOrigin.y < lowOrigin.y);
+    assert.equal(highOrigin.x, lowOrigin.x);
+    const shadow = (events) => events.find((event) => event.type === 'fill' && event.style === 'rgba(0,0,0,0.30)');
+    assert.deepEqual(shadow(high), shadow(low));
+  }
+});
+
+test('Canvas ascent and descent warnings stay visible with reduced motion', () => {
+  for (const [fromAltitude, toAltitude, sign] of [[0, 720, -1], [720, 0, 1]]) {
+    const h = createHarness();
+    const e = { type: 'drone', lane: 2, fromLane: 2, toLane: 2, state: 'warn', phase: 0,
+      fromAltitude, toAltitude, altitude: fromAltitude, visualVariant: 'droneScout' };
+    const events = drawEnemy(h, e, { reduced: true });
+    const cue = events.find((event) => event.type === 'fill' && event.style === '#fff4f7');
+    assert.ok(cue);
+    const points = cue.path.filter((part) => part.length >= 3);
+    assert.equal(Math.sign(points[0][2] - (points[1][2] + points[2][2]) / 2), sign);
+  }
+});

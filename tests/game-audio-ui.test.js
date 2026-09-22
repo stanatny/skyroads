@@ -2213,7 +2213,7 @@ test('holding W for one second triggers fuel burst from the ground at or above 7
   assert.equal(fired.beforeFire, 0, 'burst must not fire before one full second');
   assert.equal(fired.chargeT, 0, 'charge state must reset after firing');
   assert.equal(fired.jumpsUsed, 0, 'burst must not consume a jump');
-  assert.ok(Math.abs(fired.prevSpeed - (20 + 0.4 * 0.99)) < 1e-6,
+  assert.ok(Math.abs(fired.prevSpeed - (20 + 0.5 * 0.99)) < 1e-6,
     `burst must remember the speed reached while charging, got ${fired.prevSpeed}`);
   assert.ok(Math.abs(fired.fuel - (60 - 4.5 * fired.elapsed)) < 1e-6, `fuel ≈ 100 minus 40 cost minus drain, got ${fired.fuel}`);
   assert.ok(fired.burstT > 2.9 && fired.burstT <= 3, `burstT should start near 3s, got ${fired.burstT}`);
@@ -2346,7 +2346,7 @@ test('fuel burst locks speed for three seconds and restores the previous speed o
     });
   })()`, sandbox));
   assert.equal(result.during, 36);
-  assert.ok(Math.abs(result.after - (20 + 0.4 * 0.1)) < 1e-9, `speed must restore then resume acceleration, got ${result.after}`);
+  assert.ok(Math.abs(result.after - (20 + 0.5 * 0.1)) < 1e-9, `speed must restore then resume acceleration, got ${result.after}`);
   assert.equal(result.prevCleared, 0);
 });
 

@@ -842,7 +842,8 @@
       useSurface(terrainTile(state, index, lane), z);
       frameEntities.set(enemy, {
         index, x,
-        y: surfaceHeight + heightY(enemy.type === 'turret' ? config.TURRET_HEIGHT / 2 : config.DRONE_HEIGHT),
+        y: surfaceHeight + heightY(enemy.type === 'turret' ? config.TURRET_HEIGHT / 2
+          : config.DRONE_HEIGHT + (Number.isFinite(enemy.altitude) ? Math.max(0, enemy.altitude) : 0)),
       });
       if (flightObjects) { flightObjects.addEnemy(enemy, x, z, time); return; }
       if (enemy.type === 'turret') {
@@ -868,8 +869,9 @@
         collarBatch.add(x, 0.07, z, hullWidth * 0.82, hullWidth * 0.82, hullWidth * 0.82,
           -Math.PI / 2, 0, 0, 0xffc36b);
       } else {
-        // 机体最高点与 DRONE_HEIGHT 一致，漂浮和警告只作用于装饰灯。
-        const top = heightY(config.DRONE_HEIGHT || 500);
+        // 简化模型与精细模型读取同一物理高度，不能只升起外观而把命中点留在地面。
+        const altitude = Number.isFinite(enemy.altitude) ? Math.max(0, enemy.altitude) : 0;
+        const top = heightY((config.DRONE_HEIGHT || 500) + altitude);
         const y = top - 0.38;
         droneHullBatch.add(x, y, z);
         droneWingBatch.add(x, y - 0.10, z);
@@ -891,10 +893,18 @@
           cyanBatch.add(x + side * 0.91, y - 0.12, z - 1.26, 0.13, 0.13, 0.10);
           edgeBatch.add(x + side * 0.75, y - 0.008, z - 0.03, 0.048, 0.04, 0.89, 0, side * 0.72);
         }
-        if (enemy.state === 'warn') {
+        if (enemy.state === 'warn' || enemy.state === 'move') {
           const side = Math.sign(enemy.toLane - enemy.fromLane);
-          amberBatch.add(x + side * 1.3, y + 0.10, z, 0.11, 0.15, 0.70);
-          amberBatch.add(x + side * 1.48, y + 0.10, z + 0.25, 0.34, 0.15, 0.12, 0, side * 0.65);
+          const vertical = Math.sign((enemy.toAltitude || 0) - (enemy.fromAltitude || 0));
+          if (vertical) {
+            for (const sign of [-1, 1]) {
+              amberBatch.add(x + sign * 0.08, y + 0.08, z + 1.65,
+                0.34, 0.06, 0.06, 0, 0, -sign * vertical * 0.75);
+            }
+          } else if (side) {
+            amberBatch.add(x + side * 1.3, y + 0.10, z, 0.11, 0.15, 0.70);
+            amberBatch.add(x + side * 1.48, y + 0.10, z + 0.25, 0.34, 0.15, 0.12, 0, side * 0.65);
+          }
         }
       }
     }

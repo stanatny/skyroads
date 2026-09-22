@@ -155,14 +155,24 @@ test('repeated placement reuses owned geometries and materials', () => {
 
 test('dense real track renders every obstacle without clipping, state changes, or resource growth', () => {
   const h = createHarness();
-  // 此窗口来自真实生成器 100000 段扫描，包含 126 面墙，保留全部生成规则。
+  // 从真实生成器选取最密集的视距窗口；调速改变走廊长度后仍保留同等压力门槛。
   vm.runInContext(`{
     let seed = 42;
     Math.random = () => { seed = seed * 16807 % 2147483647; return (seed - 1) / 2147483646; };
   }`, h.sandbox);
   const generator = h.game.newGenState();
   const track = Array.from({ length: 28230 }, (_, index) => h.game.generateSegment(index, generator));
-  const position = 28104;
+  const wallCounts = track.map((segment) => segment.lanes.filter((type) => wallTypes.includes(type)).length);
+  let windowCount = wallCounts.slice(0, 120).reduce((sum, count) => sum + count, 0);
+  let maximumCount = windowCount;
+  let position = 2;
+  for (let end = 120; end < track.length; end += 1) {
+    windowCount += wallCounts[end] - wallCounts[end - 120];
+    if (windowCount > maximumCount) {
+      maximumCount = windowCount;
+      position = end - 117;
+    }
+  }
   const state = {
     mode: 'PLAYING', position, time: 10, elapsedMs: 10000, runId: 'dense-model-test',
     movement: { lanePosition: 3 }, playerY: 0, fuel: 100, reducedMotion: false,

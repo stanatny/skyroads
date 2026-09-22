@@ -67,6 +67,35 @@ function close(actual, expected, tolerance = 1e-10) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
 }
 
+// 只替换 GPU 提交；实际实例矩阵与击毁碎片仍由发布中的渲染器生成。
+function createRenderHarness(detailed) {
+  const h = createHarness();
+  for (const file of ['assets/vendor/three_r170.js', ...(detailed ? ['src/flight_objects.js'] : [])]) {
+    vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), h.sandbox, { filename: file });
+  }
+  let scene;
+  const { THREE } = h.sandbox;
+  THREE.WebGLRenderer = class {
+    constructor() { this.info = { render: {}, memory: {} }; }
+    setClearColor() {}
+    setPixelRatio() {}
+    setSize() {}
+    render(value) { scene = value; }
+    dispose() {}
+  };
+  const renderer = h.create({ canvas: { addEventListener() {}, removeEventListener() {} }, config: h.config });
+  Object.assign(h.state, { time: 0, elapsedMs: 0, runId: 'drone-altitude-test', shots: [],
+    movement: { lanePosition: 3 }, playerY: 0, reducedMotion: false });
+  return { ...h, renderer, THREE,
+    mesh(name) { return scene.getObjectByName(name); },
+    position(name, slot = 0) {
+      const matrix = new THREE.Matrix4();
+      scene.getObjectByName(name).getMatrixAt(slot, matrix);
+      return new THREE.Vector3().setFromMatrixPosition(matrix);
+    },
+  };
+}
+
 test('flight coordinates can load without Three.js, a canvas, or a WebGL context', () => {
   const { sandbox, WORLD, coordinates } = createHarness();
   assert.equal(sandbox.THREE, undefined);
@@ -149,7 +178,7 @@ test('enemy coordinates follow the real rest, warning, movement, and arrival sta
   assert.deepEqual([...states].sort(), ['move', 'rest', 'warn']);
   assert.ok(samples.some((lane) => lane > 5 && lane < 6));
   assert.equal(enemy.fromLane, 5);
-  assert.equal(enemy.lane, 6);
+  assert.equal(enemy.lane, 5);
   close(coordinates.enemyLane(enemy), 5);
 
   for (const fixture of [
@@ -158,6 +187,38 @@ test('enemy coordinates follow the real rest, warning, movement, and arrival sta
     { type: 'drone', lane: 0, fromLane: 3, toLane: 4, state: 'move', moveT: 1.2 },
   ]) {
     close(coordinates.enemyLane(fixture), game.enemyLane(fixture));
+  }
+});
+
+test('both drone render paths and destruction fragments follow altitude without raising the road', () => {
+  for (const detailed of [false, true]) {
+    const h = createRenderHarness(detailed);
+    const enemy = { type: 'drone', lane: 3, fromLane: 3, toLane: 3, state: 'move', moveT: 0,
+      altitude: 0, fromAltitude: 0, toAltitude: h.config.DRONE_PATROL_RISE };
+    const name = detailed ? 'object_drone_interceptor' : 'enemy_arrowhead_fuselage';
+    h.state.track[11].enemies = [enemy];
+    h.renderer.render(h.state);
+    const original = h.position(name);
+    const road = h.position('road_deck');
+    for (const step of [0.1, 0.1, 0.2]) {
+      h.game.updateEnemies(step);
+      assert.ok(enemy.altitude > 0);
+      h.renderer.render(h.state);
+      const placed = h.position(name);
+      close(placed.y - original.y, h.coordinates.heightY(enemy.altitude), 1e-6);
+      close(placed.x, original.x);
+      close(placed.z, original.z);
+      assert.deepEqual(h.position('road_deck'), road, 'Ground and its shadow receiver stay grounded');
+    }
+    h.state.track[11].enemies = [];
+    h.renderer.render(h.state);
+    const lights = h.mesh('warning_lights');
+    assert.ok(lights.count >= 10);
+    for (let slot = lights.count - 10; slot < lights.count; slot += 1) {
+      close(h.position('warning_lights', slot).y,
+        h.coordinates.heightY(h.config.DRONE_HEIGHT + enemy.altitude), 1e-6);
+    }
+    h.renderer.dispose();
   }
 });
 
