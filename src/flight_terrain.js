@@ -14,6 +14,12 @@
     safeEnd: 240,
     landingEnd: 184,
     bridgeGapLength: 2,
+    islandLaunch: 112,
+    islandGapStart: 114,
+    islandStart: 116,
+    islandEnd: 136,
+    islandLanding: 138,
+    islandLandingEnd: 160,
     playerHalfWidth: 0.14,
     terrainSideHalfWidth: dimensions.terrainSideHalfWidth,
     gunHeight: 100,
@@ -25,7 +31,7 @@
     if (p < TUNING.start) return { height: 0, baseHeight: 0, offset: 0, slope: 0, kind: 'flat', raised: false };
     const cycle = Math.floor((p - TUNING.start) / TUNING.period);
     const phase = (p - TUNING.start) % TUNING.period;
-    const peak = 1800 + Math.min(cycle, 6) * 100;
+    const peak = 2340 + Math.min(cycle, 6) * 130;
     let baseHeight = 0;
     let slope = 0;
     let kind = 'flat';
@@ -56,7 +62,8 @@
     const branchLane = cycle % 2 === 0 ? supportLane <= 1 : supportLane >= 5;
     let offset = 0;
     if (branchLane && phase >= TUNING.branchStart && phase < TUNING.branchDrop) {
-      const rise = 600 + Math.min(cycle, 3) * 60;
+      // 主高坡整体抬升，横向可跳的台差仍限制在一次正常跳跃内。
+      const rise = 660 + Math.min(cycle, 3) * 40;
       const ramp = smoothRamp((phase - TUNING.branchStart) / (TUNING.branchTop - TUNING.branchStart));
       offset = rise * ramp.height;
       slope += rise * ramp.slope / (TUNING.branchTop - TUNING.branchStart);
@@ -72,6 +79,10 @@
       offset = rise * (descending ? 1 - ramp.height : ramp.height);
       slope += rise * ramp.slope / span * (descending ? -1 : 1);
       kind = descending ? 'ramp_down' : phase < 72 ? 'ramp_up' : 'terrace';
+    }
+    const islandLane = cycle % 2 === 0 ? 6 : 0;
+    if (supportLane === islandLane && phase >= TUNING.islandStart && phase < TUNING.islandEnd) {
+      kind = 'floating_island';
     }
     return { height: baseHeight + offset, baseHeight, offset, slope, kind, raised: offset > 0 };
   }
@@ -165,8 +176,23 @@
     let gapLane = null;
     if (phase >= 108 && phase < 110) gapLane = branchLanes[0];
     if (phase >= 126 && phase < 128) gapLane = branchLanes[1];
-    return { cycle, phase, section, branchLanes, secondaryLanes, gapLane,
-      safeLanes: safeLanes.filter((lane) => lane !== gapLane) };
+    // 外侧浮岛前后各断两格、内侧整段留空；另一侧即航道边界，四周均无连接桥面。
+    const islandLane = cycle % 2 === 0 ? 6 : 0;
+    const islandSideLane = cycle % 2 === 0 ? 5 : 1;
+    const gapLanes = gapLane === null ? [] : [gapLane];
+    let islandStage = null;
+    if (phase >= TUNING.islandLaunch && phase < TUNING.islandLandingEnd) {
+      islandStage = phase < TUNING.islandGapStart ? 'launch'
+        : phase < TUNING.islandStart ? 'entry_gap'
+          : phase < TUNING.islandEnd ? 'island'
+            : phase < TUNING.islandLanding ? 'exit_gap' : 'landing';
+      if (!safeLanes.includes(islandLane)) safeLanes.push(islandLane);
+      if (phase >= TUNING.islandGapStart && phase < TUNING.islandLanding) gapLanes.push(islandSideLane);
+      if (islandStage === 'entry_gap' || islandStage === 'exit_gap') gapLanes.push(islandLane);
+    }
+    return { cycle, phase, section, branchLanes, secondaryLanes, gapLane, gapLanes,
+      islandLane, islandSideLane, islandStage,
+      safeLanes: safeLanes.filter((lane) => !gapLanes.includes(lane)) };
   }
 
   /** dronePatrolLanes 接收路段和可选起点车道，返回避开安全通道、障碍与道具的同层巡逻车道。 */
@@ -184,12 +210,12 @@
   function decorateSegment(segment) {
     const route = routeAt(segment.index);
     if (!route) return segment;
-    const { phase, branchLanes, secondaryLanes, gapLane } = route;
+    const { phase, branchLanes, secondaryLanes, gapLane, gapLanes, islandLane } = route;
     const safeLanes = new Set(route.safeLanes);
     const lanes = segment.lanes.map((type, lane) => safeLanes.has(lane)
       && (type === 'GAP' || type.startsWith('WALL_')) ? 'ROAD' : type);
     // 两条高架道交错断开，每次仅缺两段；相邻桥面始终连续，可跳过或提前换道。
-    if (gapLane !== null) lanes[gapLane] = 'GAP';
+    for (const lane of gapLanes) lanes[lane] = 'GAP';
     // 中层侧道按低障碍、装甲墙、防御塔递进；玩家可用跃升或导弹开路。
     const combatLane = route.cycle % 2 === 0 ? 2 : 4;
     if (phase === 82) lanes[combatLane] = 'WALL_LOW';
@@ -202,6 +228,9 @@
     if (phase === 114) lanes[branchLanes[0]] = 'TRIPLE';
     if (phase === 132) lanes[branchLanes[1]] = 'FUEL';
     if (phase === 78) lanes[secondaryLanes[1]] = 'FUEL';
+    // 奖励留在可落地的岛面中段，入口、出口和侧边缺口没有道具或敌人。
+    if (phase === 121) lanes[islandLane] = 'FUEL';
+    if (phase === 127) lanes[islandLane] = 'TRIPLE';
     const patrolLanes = new Set(dronePatrolLanes({ ...segment, lanes }));
     return {
       ...segment,
@@ -209,7 +238,7 @@
       // 无人机保留在合法挑战车道，后续巡逻沿用同一约束；切换三维时也排除正在闯入安全道的敌机。
       enemies: segment.enemies ? segment.enemies.filter((enemy) => {
         if (enemy.type !== 'drone') return enemy.type === 'turret'
-          && !safeLanes.has(Math.round(enemy.lane)) && Math.round(enemy.lane) !== gapLane;
+          && !safeLanes.has(Math.round(enemy.lane)) && !gapLanes.includes(Math.round(enemy.lane));
         const fromLane = Number.isFinite(enemy.fromLane) ? enemy.fromLane : enemy.lane;
         const toLane = enemy.state === 'move' || enemy.state === 'warn' ? enemy.toLane : fromLane;
         return patrolLanes.has(fromLane) && patrolLanes.has(toLane);

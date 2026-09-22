@@ -65,7 +65,7 @@ test('alternating raised routes and three valley depths are deterministic across
     const route = terrain.routeAt(start + 80);
     const branch = terrain.sample(start + 112, route.branchLanes[0]);
     const secondary = terrain.sample(start + 80, route.secondaryLanes[0]);
-    assert.ok(branch.offset >= 600 && branch.offset <= 780);
+    assert.ok(branch.offset >= 660 && branch.offset <= 780);
     assert.ok(secondary.offset >= 360 && secondary.offset <= 480);
     assert.equal(terrain.sample(start + 112, route.secondaryLanes[0]).offset, 0);
     valleys.add(terrain.heightAt(start + 212, 3));
@@ -74,7 +74,7 @@ test('alternating raised routes and three valley depths are deterministic across
         const sample = terrain.sample(start + phase, lane);
         assert.deepEqual(sample, terrain.sample(start + phase, lane));
         assert.ok(Number.isFinite(sample.height) && Number.isFinite(sample.slope));
-        assert.ok(Math.abs(sample.slope) <= 90.001);
+        assert.ok(Math.abs(sample.slope) <= 117.001);
       }
     }
   }
@@ -265,5 +265,87 @@ test('a held direction resumes from a blocked edge once a normal jump clears the
     assert.equal(reachedHigher, true);
     assert.equal(state.playerY, 0);
     assert.equal(state.jumpsUsed, 0);
+  }
+});
+
+test('floating islands have real front, rear and side gaps, safe runways and rewards', () => {
+  for (let cycle = 0; cycle < 12; cycle += 1) {
+    const start = terrain.TUNING.start + cycle * terrain.TUNING.period;
+    const islandLane = cycle % 2 === 0 ? 6 : 0;
+    const sideLane = cycle % 2 === 0 ? 5 : 1;
+    for (let phase = 112; phase < 160; phase += 1) {
+      const index = start + phase;
+      const route = terrain.routeAt(index);
+      const decorated = terrain.decorateSegment(hostileSegment(index));
+      assert.equal(route.islandLane, islandLane);
+      assert.equal(decorated.lanes[3], 'ROAD');
+      assert.ok(route.safeLanes.includes(3));
+      if (phase >= 114 && phase < 138) {
+        assert.equal(decorated.lanes[sideLane], 'GAP');
+        assert.ok(route.gapLanes.includes(sideLane));
+        assert.ok(!decorated.enemies.some((enemy) => enemy.lane === sideLane));
+      }
+      if ((phase >= 114 && phase < 116) || (phase >= 136 && phase < 138)) {
+        assert.equal(decorated.lanes[islandLane], 'GAP');
+        assert.ok(!decorated.enemies.some((enemy) => enemy.lane === islandLane));
+      } else {
+        assert.ok(!/^WALL_|^GAP$/.test(decorated.lanes[islandLane]));
+        assert.ok(!decorated.enemies.some((enemy) => enemy.lane === islandLane));
+      }
+      const tile = terrain.sampleTile(index, islandLane);
+      assert.equal(tile.kind === 'floating_island', phase >= 116 && phase < 136);
+      close(tile.nearHeight, terrain.heightAt(index, islandLane));
+      close(tile.farHeight, terrain.heightAt(index + 1, islandLane), 0.00002);
+      assert.equal(tile.dropAtEnd, false);
+    }
+    assert.equal(terrain.decorateSegment(hostileSegment(start + 121)).lanes[islandLane], 'FUEL');
+    assert.equal(terrain.decorateSegment(hostileSegment(start + 127)).lanes[islandLane], 'TRIPLE');
+  }
+});
+
+test('a complete floating island is reachable with one jump per gap at normal and maximum boost speed', () => {
+  for (const cycle of [0, 1, 6]) {
+    for (const speed of [8, 24, 36]) {
+      const start = terrain.TUNING.start + cycle * terrain.TUNING.period;
+      const lane = cycle % 2 === 0 ? 6 : 0;
+      const harness = createHarness(start + 114 - speed * 0.07, lane, speed);
+      const { state, game, config } = harness;
+      // 只去掉道具收集；真实生成的岛体和缺口必须原样保留。加速时仍显式检查越隙高度，不能借无敌掩盖不可达。
+      state.track = harness.decorated.map((segment) => ({ ...segment,
+        lanes: segment.lanes.map((type) => type === 'GAP' ? type : 'ROAD') }));
+      if (speed === config.BOOST_SPEED) state.boostT = 20;
+      game.tryJump();
+      let jumpedExit = false;
+      let landedIsland = false;
+      const crossed = new Set();
+      for (let frame = 0; frame < 2400 && state.mode === 'PLAYING'; frame += 1) {
+        harness.tick();
+        const phase = state.position - start;
+        if (phase >= 114 && phase < 116 || phase >= 136 && phase < 138) {
+          assert.equal(state.track[Math.floor(state.position)].lanes[lane], 'GAP');
+          crossed.add(phase < 116 ? 'entry' : 'exit');
+          assert.ok(state.playerY >= config.GAP_SAFE_HEIGHT,
+            `unsafe gap height: cycle ${cycle}, speed ${speed}, phase ${phase}, y ${state.playerY}`);
+        }
+        if (phase >= 116 && phase < 136 && state.playerY === 0) {
+          landedIsland = true;
+          assert.equal(state.jumpsUsed, 0);
+        }
+        if (!jumpedExit && phase >= 136 - state.speed * 0.07) {
+          assert.equal(landedIsland, true, `no landing before exit at speed ${speed}`);
+          assert.equal(state.playerY, 0);
+          game.tryJump();
+          assert.equal(state.jumpsUsed, 1);
+          jumpedExit = true;
+        }
+        if (phase > 138 && state.playerY === 0) break;
+      }
+      assert.equal(state.mode, 'PLAYING', `cycle ${cycle}, speed ${speed}: ${harness.sandbox.death}`);
+      assert.equal(jumpedExit, true);
+      assert.deepEqual([...crossed], ['entry', 'exit']);
+      assert.ok(state.position > start + 138 && state.position < start + 160);
+      assert.equal(state.playerY, 0);
+      assert.equal(state.jumpsUsed, 0);
+    }
   }
 });

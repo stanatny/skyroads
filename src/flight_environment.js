@@ -1,6 +1,6 @@
 'use strict';
 
-// 轨道枢纽是静态背景，建模时合并部件，运行时不增加逐帧对象或碰撞体。
+// 轨道站按真实行程依次掠过；模型预先合批，整个背景不产生碰撞体。
 (function attachFlightEnvironment(scope) {
   const PALETTE = Object.freeze({
     frame: 0x34485d,
@@ -16,8 +16,10 @@
     warm: 0xcdb27b,
   });
 
+  const JOURNEY = Object.freeze({ spacing: 1320, firstDepth: 1100, fadeStart: -1400, fadeEnd: -1120, behind: 220 });
+
   /**
-   * 创建分层转运环与侧向服务站。
+   * 创建四种轮换的轨道站与侧向服务平台。
    * 参数为 Three.js、背景父节点、共享材质表及资源登记器。
    * 返回模型根节点、随行程更新的 update 接口与诊断接口；own 登记器负责释放资源。
    */
@@ -28,32 +30,53 @@
     const station = new THREE.Group();
     station.name = 'aurelia_orbital_interchange';
     parent.add(station);
-    const opaque = own(new THREE.MeshStandardMaterial({
-      color: 0xffffff, vertexColors: true, roughness: 0.59, metalness: 0.48,
-      emissive: 0x07121b, emissiveIntensity: 0.22, fog: false,
-    }));
-    const glazing = own(new THREE.MeshStandardMaterial({
-      color: 0xffffff, vertexColors: true, roughness: 0.26, metalness: 0.58,
-      emissive: 0x173747, emissiveIntensity: 0.24, fog: false,
-    }));
-    const lamps = own(new THREE.MeshBasicMaterial({
-      color: 0xffffff, vertexColors: true, toneMapped: false, fog: false,
-    }));
-    const builder = createBuilder(THREE);
-    const center = new THREE.Vector3(-8, 23, -365);
-    buildTransferRing(builder, center);
-    buildServiceSpine(builder);
-    buildCounterweight(builder);
+    const materialByKind = createMaterials();
+    const variants = [
+      { name: 'transfer_ring', build: buildTransferStation },
+      { name: 'shipyard', build: buildShipyard },
+      { name: 'habitat', build: buildHabitat },
+      { name: 'research_dock', build: buildResearchDock },
+    ];
+    let stationTriangles = 0;
+    let maximumStationExtent = 0;
+    for (const variant of variants) {
+      const builder = createBuilder(THREE);
+      variant.build(builder, THREE);
+      variant.batches = builder.finish();
+      variant.group = new THREE.Group();
+      variant.group.name = `orbital_station_${variant.name}`;
+      variant.materials = createMaterials();
+      variant.triangles = 0;
+      variant.index = 0;
+      variant.z = 0;
+      variant.opacity = 0;
+      station.add(variant.group);
+      for (const [kind, geometry] of Object.entries(variant.batches)) {
+        own(geometry);
+        const mesh = new THREE.Mesh(geometry, variant.materials[kind]);
+        mesh.name = `${variant.group.name}_${kind}`;
+        variant.group.add(mesh);
+        variant.triangles += geometry.getAttribute('position').count / 3;
+        maximumStationExtent = Math.max(maximumStationExtent,
+          Math.abs(geometry.boundingBox.min.z), Math.abs(geometry.boundingBox.max.z));
+      }
+      stationTriangles += variant.triangles;
+    }
 
-    const batches = builder.finish();
-    const counts = {};
-    const materialByKind = { solid: opaque, glass: glazing, lights: lamps };
-    for (const [kind, geometry] of Object.entries(batches)) {
-      own(geometry);
-      const mesh = new THREE.Mesh(geometry, materialByKind[kind]);
-      mesh.name = `orbital_interchange_${kind}`;
-      station.add(mesh);
-      counts[kind] = geometry.getAttribute('position').count / 3;
+    function createMaterials() {
+      return {
+        solid: own(new THREE.MeshStandardMaterial({
+          color: 0xffffff, vertexColors: true, roughness: 0.59, metalness: 0.48,
+          emissive: 0x07121b, emissiveIntensity: 0.22, fog: false,
+        })),
+        glass: own(new THREE.MeshStandardMaterial({
+          color: 0xffffff, vertexColors: true, roughness: 0.26, metalness: 0.58,
+          emissive: 0x173747, emissiveIntensity: 0.24, fog: false,
+        })),
+        lights: own(new THREE.MeshBasicMaterial({
+          color: 0xffffff, vertexColors: true, toneMapped: false, fog: false,
+        })),
+      };
     }
 
     // 航道外的服务平台提供近景视差；位置来自真实行程，暂停时自然冻结。
@@ -79,10 +102,41 @@
     let previousPosition = null;
     let previousTerrainEnabled = null;
     const previousBackgroundOffset = new THREE.Vector3(NaN, NaN, NaN);
+    let journeyDistance = 0;
+    let previousRunId;
+    let reducedMotion = false;
 
-    /** 根据行程和地形开关更新两侧平台，不修改游戏状态。 */
-    function update(position = 0, terrainEnabled = false) {
-      const logicalPosition = Number.isFinite(position) ? position : 0;
+    /** 根据行程、地形开关及模式更新远站和平台；第三参数只读，暂停与减弱动态冻结远站。 */
+    function update(position = 0, terrainEnabled = false, options = {}) {
+      const logicalPosition = Number.isFinite(position) ? Math.max(0, position) : 0;
+      const changedRun = options.runId !== undefined && options.runId !== previousRunId;
+      previousRunId = options.runId;
+      reducedMotion = Boolean(options.reducedMotion);
+      if (changedRun || (!reducedMotion && (!options.mode || options.mode === 'PLAYING'))) {
+        journeyDistance = logicalPosition * 4;
+      }
+      const cycle = Math.floor(journeyDistance / JOURNEY.spacing);
+      for (let index = 0; index < variants.length; index += 1) {
+        const variant = variants[index];
+        const offset = ((index - cycle) % variants.length + variants.length) % variants.length;
+        variant.index = cycle + offset;
+        variant.z = journeyDistance - JOURNEY.firstDepth - variant.index * JOURNEY.spacing;
+        const fade = Math.max(0, Math.min(1,
+          (variant.z - JOURNEY.fadeStart) / (JOURNEY.fadeEnd - JOURNEY.fadeStart)));
+        variant.opacity = fade * fade * (3 - 2 * fade);
+        variant.group.visible = variant.z > JOURNEY.fadeStart && variant.z < JOURNEY.behind;
+        // 背景层的小幅镜头跟随不应影响站体的真实位置，否则贴近时会横切航道。
+        variant.group.position.set(-parent.position.x, -parent.position.y, variant.z - parent.position.z);
+        for (const material of Object.values(variant.materials)) {
+          material.opacity = variant.opacity;
+          const transparent = variant.opacity < 1;
+          if (material.transparent !== transparent) {
+            material.transparent = transparent;
+            material.depthWrite = !transparent;
+            material.needsUpdate = true;
+          }
+        }
+      }
       const terrain = scope.Skyroads.flightTerrain;
       const followsTerrain = Boolean(terrainEnabled && terrain && typeof terrain.heightAt === 'function');
       if (logicalPosition === previousPosition && followsTerrain === previousTerrainEnabled
@@ -136,15 +190,24 @@
       getDiagnostics() {
         return {
           name: station.name,
-          drawCalls: Object.keys(batches).length + movingBatches.length,
-          triangles: Object.values(counts).reduce((sum, value) => sum + value, 0) + platformTriangles * 8,
-          triangleBatches: { ...counts },
+          drawCalls: variants.filter((variant) => variant.group.visible).length * 3 + movingBatches.length,
+          triangles: variants.filter((variant) => variant.group.visible)
+            .reduce((sum, variant) => sum + variant.triangles, platformTriangles * 8),
+          stationTriangles,
+          stationVariants: variants.map((variant) => ({ name: variant.name, triangles: variant.triangles })),
+          visibleStations: variants.filter((variant) => variant.group.visible).map((variant) => ({
+            variant: variant.name, index: variant.index, z: variant.z, opacity: variant.opacity,
+          })),
+          journeyDistance,
+          stationSpacing: JOURNEY.spacing,
+          maximumStationExtent,
           tracksideInstances: 8,
           tracksideTriangles: platformTriangles,
-          ringCenter: center.toArray(),
-          clearInnerRadius: 43,
+          clearInnerRadius: 64,
+          clearCorridor: { halfWidth: 24, minimumY: -25, maximumY: 52 },
           autonomousAnimation: false,
           followsTrackPosition: true,
+          reducedMotion,
           followsTerrain: previousTerrainEnabled,
         };
       },
@@ -220,119 +283,160 @@
     }
   }
 
-  function buildServiceSpine(b) {
+  function buildTransferStation(b, THREE) {
+    // 放大后的承压环留出完整的高架与超级跳跃净空，环心不随玩家横移。
+    buildTransferRing(b, new THREE.Vector3(0, 0, 0));
+    b.transform(1.5, [0, 14, 0]);
+    buildRadiator(b, -101, 32, -4, 26, 31);
+    b.beam([-85, 32, -4], [-101, 32, -4], 1.1, PALETTE.copper);
+  }
+
+  function buildShipyard(b) {
     const C = PALETTE;
-    const x = -89;
-    const z = -283;
-    // 左侧站体是开放的箱形桁架，连接舱室而不是一根没有用途的实心柱。
-    for (const dx of [-5.4, 5.4]) {
-      for (const dz of [-7.3, 7.3]) {
-        b.beam([x + dx, -45, z + dz], [x + dx, 74, z + dz], 1.0, C.frame);
+    // 双侧龙门沿纵向伸展，开放的维修坞朝向来船，顶部吊桥远高于全部航道。
+    for (const side of [-1, 1]) {
+      const x = side * 59;
+      for (const dx of [-8, 8]) for (const dz of [-28, 26]) {
+        b.beam([x + dx, -29, dz], [x + dx, 77, dz], 1.1, C.frame);
       }
-    }
-    for (let index = 0; index < 8; index += 1) {
-      const y = -45 + index * 17;
-      for (const dz of [-7.3, 7.3]) {
-        b.beam([x - 5.4, y, z + dz], [x + 5.4, y, z + dz], 0.78, C.edge);
-        if (index < 7) {
-          b.beam([x - 5.4, y, z + dz], [x + 5.4, y + 17, z + dz], 0.51, C.frame);
-          b.beam([x + 5.4, y, z + dz], [x - 5.4, y + 17, z + dz], 0.51, C.frame);
+      for (let level = 0; level < 5; level += 1) {
+        const y = -24 + level * 24;
+        for (const dz of [-28, 26]) {
+          b.beam([x - 8, y, dz], [x + 8, y, dz], 0.8, C.edge);
+          if (level < 4) b.beam([x - 8, y, dz], [x + 8, y + 24, dz], 0.65, C.copper);
+        }
+        buildPressurizedDeck(b, [x, y, 0], [23, 12, 39], level % 2 ? C.ceramic : C.armor);
+      }
+      for (const y of [-13, 34]) {
+        b.box([x + side * 7, y, -40], [10, 10, 43], C.armor, [0, 0, 0], 0.7);
+        for (const dx of [-7, 7]) {
+          b.box([x + dx, y - 3.5, 43], [4.2, 7.2, 40], C.ceramic, [0, 0, 0], 0.5);
+          b.box([x + dx, y - 3.1, 63.5], [1.4, 2.8, 0.25], C.warm, [0, 0, 0], 0, 'lights');
         }
       }
-      for (const dx of [-5.4, 5.4]) {
-        b.beam([x + dx, y, z - 7.3], [x + dx, y, z + 7.3], 0.8, C.edge);
-      }
+      buildRadiator(b, x + side * 29, 28, -11, 24, 55);
+      b.beam([x, 28, -11], [x + side * 29, 28, -11], 1.0, C.copper);
+      b.beam([x, 77, 0], [x, 100, 0], 0.5, C.edge);
+      b.box([x, 102, 0], [8, 4, 5], C.armor, [0, 0, 0], 0.3);
     }
-
-    const decks = [
-      { y: -33, dx: -4, width: 22, height: 12, depth: 25 },
-      { y: 3, dx: -7, width: 27, height: 15, depth: 29 },
-      { y: 40, dx: -1, width: 24, height: 16, depth: 28 },
-      { y: 73, dx: -7, width: 20, height: 9, depth: 24 },
-    ];
-    for (const deck of decks) {
-      const dx = x + deck.dx;
-      b.box([dx, deck.y, z], [deck.width, deck.height, deck.depth], C.shadow, [0, 0, 0], 1.2);
-      b.box([dx, deck.y + deck.height * 0.19, z + 1],
-        [deck.width + 2, deck.height * 0.63, deck.depth - 3], C.armor, [0, 0, 0], 0.9);
-      b.box([dx, deck.y + deck.height * 0.50, z],
-        [deck.width + 3, 1.7, deck.depth + 2], C.ceramic, [0, 0, 0], 0.3);
-      const front = z + deck.depth / 2 + 0.18;
-      b.box([dx, deck.y + 1.0, front], [deck.width * 0.73, 3.3, 0.4], C.glass, [0, 0, 0], 0, 'glass');
-      for (let divider = -2; divider <= 2; divider += 1) {
-        b.box([dx + divider * deck.width * 0.15, deck.y + 1.0, front + 0.35],
-          [0.68, 4.0, 0.36], C.edge);
-      }
-      b.box([dx - deck.width * 0.36, deck.y - deck.height * 0.25, front + 0.12],
-        [2.6, 0.55, 0.2], C.warm, [0, 0, 0], 0, 'lights');
-      for (let vent = 0; vent < 4; vent += 1) {
-        b.box([dx + deck.width * 0.30, deck.y - 3.1 + vent * 1.3, front + 0.22],
-          [3.7, 0.55, 0.42], C.joint);
-      }
+    b.box([0, 78, -10], [122, 9, 18], C.frame, [0, 0, 0], 0.6);
+    b.box([0, 82, -10], [105, 3.4, 22], C.ceramic, [0, 0, 0], 0.4);
+    for (let x = -45; x <= 45; x += 15) {
+      b.box([x, 78, -0.8], [10, 2.8, 0.3], C.glass, [0, 0, 0], 0, 'glass');
+      b.beam([x - 7, 74, 1], [x + 7, 82, 1], 0.5, C.copper);
     }
+    b.box([0, 92, -10], [26, 12, 24], C.armor, [0, 0, 0], 0.8);
+    b.box([0, 94, 2.2], [18, 4, 0.4], C.glass, [0, 0, 0], 0, 'glass');
+  }
 
-    // 双层承力臂连接转运环，全部留在航道左侧；斜向撑杆解释悬臂载荷。
-    const bridgeStart = [-81, 33, -295];
-    const bridgeEnd = [-56, 26, -350];
-    for (const sign of [-1, 1]) {
-      const a = [bridgeStart[0] + sign * 3, bridgeStart[1], bridgeStart[2]];
-      const e = [bridgeEnd[0] + sign * 3, bridgeEnd[1], bridgeEnd[2]];
-      b.beam(a, e, 1.4, C.armor);
-      b.beam([a[0], a[1] - 7, a[2]], [e[0], e[1] - 7, e[2]], 0.85, C.frame);
-      for (let index = 0; index < 5; index += 1) {
-        const t0 = index / 5;
-        const t1 = (index + 1) / 5;
-        b.beam(interpolate(a, e, t0), interpolate([a[0], a[1] - 7, a[2]],
-          [e[0], e[1] - 7, e[2]], t1), 0.50, C.edge);
+  function buildHabitat(b) {
+    const C = PALETTE;
+    // 双滚筒居住站具有完整厚度与分段窗带，中央通道由高低两条桥连接。
+    for (const side of [-1, 1]) {
+      const x = side * 89;
+      const y = 13;
+      for (const z of [-23, 23]) {
+        b.torus(33.5, 1.2, [x, y, z], C.edge, 48);
+        b.torus(26.3, 1.0, [x, y, z + 1], C.frame, 48);
+        for (let sector = 0; sector < 12; sector += 1) {
+          const a = sector / 12 * Math.PI * 2;
+          const e = a + Math.PI / 6;
+          b.arc(28.0, 35.4, 5.0, a + 0.035, e - 0.035,
+            [x, y, z], sector % 3 ? C.armor : C.ceramic);
+          const mid = (a + e) / 2;
+          b.box([x + Math.cos(mid) * 31.2, y + Math.sin(mid) * 31.2, z + 2.7],
+            [8, 1.7, 0.22], C.glass, [0, 0, mid + Math.PI / 2], 0, 'glass');
+          if (z < 0) {
+            b.beam([x + Math.cos(a) * 33.5, y + Math.sin(a) * 33.5, -23],
+              [x + Math.cos(a) * 33.5, y + Math.sin(a) * 33.5, 23], 0.6, C.frame);
+          }
+        }
       }
+      b.cylinder([x, y, 0], 9.7, 67, C.ceramic, [Math.PI / 2, 0, 0]);
+      b.cylinder([x, y, 34], 6.7, 2.8, C.armor, [Math.PI / 2, 0, 0]);
+      b.torus(7.0, 0.6, [x, y, 35.5], C.copper, 24);
+      for (const z of [-24, 24]) for (const angle of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) {
+        b.beam([x + Math.cos(angle) * 10, y + Math.sin(angle) * 10, z],
+          [x + Math.cos(angle) * 27, y + Math.sin(angle) * 27, z], 1.0, C.frame);
+      }
+      b.beam([x, 45, -3], [x, 77, -3], 2.0, C.frame);
+      b.beam([x, -20, -3], [x, -52, -3], 1.4, C.frame);
+      buildRadiator(b, x + side * 52, 13, -13, 21, 60);
+      b.beam([x + side * 32, 13, -13], [x + side * 52, 13, -13], 1.0, C.copper);
     }
+    buildPressurizedDeck(b, [0, 79, -3], [186, 9, 16], C.ceramic);
+    b.beam([-89, -52, -3], [89, -52, -3], 1.8, C.frame);
+    buildPressurizedDeck(b, [0, 88, -3], [26, 14, 22], C.armor);
+    for (const x of [-46, 0, 46]) b.box([x, -52, 1], [7, 1.0, 0.35], C.warm, [0, 0, 0], 0, 'lights');
+  }
 
-    // 向外伸展的散热翼包含窄边框、脊梁和分片，色彩保持低饱和。
-    for (const y of [-12, 48]) {
-      b.beam([-99, y, z - 2], [-128, y, z - 2], 1.15, C.copper);
-      b.beam([-99, y - 8, z], [-123, y, z - 2], 0.7, C.frame);
-      b.box([-136, y, z - 3], [29, 20, 1.3], C.shadow);
-      b.box([-136, y, z - 2.24], [27, 18.4, 0.16], C.radiator);
-      for (let line = 0; line < 9; line += 1) {
-        b.box([-148.5 + line * 3.1, y, z - 1.99], [0.27, 18.4, 0.2], C.edge);
-      }
-      for (const offset of [-9.7, 0, 9.7]) {
-        b.box([-136, y + offset, z - 1.95], [29, 0.36, 0.3], C.frame);
-      }
+  function buildResearchDock(b) {
+    const C = PALETTE;
+    // 非对称深空观测站：左侧多级望远镜，右侧梳形泊位和分片阵列。
+    const x = -70;
+    for (const dx of [-11, 11]) for (const dz of [-18, 18]) {
+      b.beam([x + dx, -28, dz], [x + dx, 77, dz], 0.95, C.frame);
     }
-
-    // 下方泊位朝向观察者，夹爪之间留空；尺寸明显区别于转运环。
-    const dock = [-72, -19, -245];
-    b.beam([-86, -13, -277], dock, 2.4, C.frame);
-    b.box(dock, [16, 11, 11], C.armor, [0, -0.15, 0], 0.8);
-    for (const sign of [-1, 1]) {
-      b.box([dock[0] + sign * 7.1, dock[1], dock[2] + 10], [3.1, 9, 19], C.ceramic,
-        [0, sign * -0.07, 0], 0.45);
-      b.box([dock[0] + sign * 7.1, dock[1], dock[2] + 19.6], [1.0, 3.4, 0.35], C.warm,
-        [0, 0, 0], 0, 'lights');
+    for (const y of [-23, 12, 53]) {
+      buildPressurizedDeck(b, [x, y, 0], [29, 13, 39], C.armor);
+      for (const dz of [-18, 18]) b.beam([x - 11, y, dz], [x + 11, y + 24, dz], 0.7, C.copper);
+    }
+    b.cylinder([x - 5, 29, 0], 18, 66, C.frame, [Math.PI / 2, 0, 0]);
+    for (const z of [-32, -21, 20, 33]) b.torus(18.4, 1.0, [x - 5, 29, z], C.ceramic, 40);
+    b.cylinder([x - 5, 29, 35], 14.0, 1.2, C.shadow, [Math.PI / 2, 0, 0]);
+    b.cylinder([x - 5, 29, 35.7], 11.9, 0.3, C.glass, [Math.PI / 2, 0, 0], 'glass');
+    b.torus(12.2, 0.5, [x - 5, 29, 36], C.copper, 32);
+    for (const side of [-1, 1]) {
+      b.beam([x - 5 + side * 12, 29, 36], [x - 5, 29, 53], 0.45, C.frame);
+    }
+    b.box([x - 5, 29, 53], [3.6, 3.6, 3.2], C.ceramic, [0, 0, 0], 0.3);
+    buildRadiator(b, -116, 27, -7, 25, 77);
+    b.beam([-91, 27, -7], [-116, 27, -7], 1.0, C.copper);
+    b.box([58, 18, -10], [20, 99, 20], C.frame, [0, 0, 0], 1.1);
+    for (const y of [-20, 4, 28, 52]) {
+      buildPressurizedDeck(b, [62, y, -7], [30, 11, 24], y === 28 ? C.ceramic : C.armor);
+      b.beam([69, y, -7], [108, y, -7], 1.25, C.edge);
+      b.box([111, y + 3, -8], [22, 7, 38], C.armor, [0, 0, 0], 0.5);
+      for (const dx of [-7, 7]) b.box([111 + dx, y + 3, 18], [4.0, 7, 17], C.ceramic, [0, 0, 0], 0.3);
+    }
+    b.beam([-70, 77, -10], [58, 77, -10], 2.0, C.frame);
+    buildPressurizedDeck(b, [-7, 79, -10], [74, 8, 13], C.ceramic);
+    for (let index = 0; index < 6; index += 1) {
+      const ax = 36 + index * 11;
+      const top = 100 + (index % 2) * 13;
+      b.beam([ax, 80, -10], [ax, top, -10], 0.45, C.edge);
+      b.box([ax, top, -10], [8, 3.5, 2.5], C.armor, [0, 0, 0], 0.2);
     }
   }
 
-  function buildCounterweight(b) {
+  function buildPressurizedDeck(b, position, size, color) {
     const C = PALETTE;
-    // 右侧仅保留低位配重和两只气罐，行星正面及上方轮廓保持开放。
-    b.beam([36, -13, -357], [67, -19, -327], 1.15, C.frame);
-    b.beam([38, -20, -363], [67, -26, -327], 0.75, C.edge);
-    for (let index = 0; index < 4; index += 1) {
-      const t = index / 4;
-      b.beam(interpolate([36, -13, -357], [67, -19, -327], t),
-        interpolate([38, -20, -363], [67, -26, -327], (index + 1) / 4), 0.46, C.copper);
+    const [x, y, z] = position;
+    const [width, height, depth] = size;
+    b.box(position, size, C.shadow, [0, 0, 0], 0.8);
+    b.box([x, y + height * 0.12, z], [width + 1.4, height * 0.68, depth - 2], color, [0, 0, 0], 0.6);
+    b.box([x, y + height * 0.5, z], [width + 2.2, 1.2, depth + 1.6], C.ceramic, [0, 0, 0], 0.3);
+    b.box([x, y + 0.5, z + depth / 2 + 0.2], [width * 0.73, height * 0.22, 0.35], C.glass,
+      [0, 0, 0], 0, 'glass');
+    const divisions = Math.max(2, Math.floor(width / 7));
+    for (let index = 1; index < divisions; index += 1) {
+      b.box([x - width * 0.365 + width * 0.73 * index / divisions, y + 0.5, z + depth / 2 + 0.5],
+        [0.6, height * 0.29, 0.25], C.frame);
     }
-    b.box([73, -22, -326], [19, 13, 19], C.joint, [0, -0.18, 0], 0.65);
-    b.box([73, -17, -326], [22, 3.0, 22], C.armor, [0, -0.18, 0], 0.4);
-    for (const dx of [-4.8, 4.8]) {
-      b.cylinder([73 + dx, -23, -311], 3.1, 16, C.ceramic, [Math.PI / 2, 0, 0]);
-      for (const dz of [-6, 5]) {
-        b.torus(3.2, 0.45, [73 + dx, -23, -311 + dz], C.frame, 12);
-      }
-      b.cylinder([73 + dx, -23, -302.4], 2.15, 0.9, C.frame, [Math.PI / 2, 0, 0]);
+    b.box([x - width * 0.32, y - height * 0.26, z + depth / 2 + 0.2],
+      [Math.min(3.2, width * 0.12), 0.55, 0.25], C.warm, [0, 0, 0], 0, 'lights');
+  }
+
+  function buildRadiator(b, x, y, z, width, height) {
+    const C = PALETTE;
+    b.box([x, y, z], [width, height, 1.5], C.shadow);
+    b.box([x, y, z + 0.9], [width - 2, height - 2, 0.35], C.radiator);
+    for (let index = 0; index < Math.floor(width / 3); index += 1) {
+      b.box([x - width / 2 + 1.5 + index * 3, y, z + 1.2], [0.32, height - 2, 0.22], C.edge);
     }
-    b.box([73, -14.9, -314], [4.8, 0.55, 0.3], C.cyan, [0, 0, 0], 0, 'lights');
+    for (const offset of [-height / 2 + 0.8, 0, height / 2 - 0.8]) {
+      b.box([x, y + offset, z + 1.5], [width, 0.65, 0.4], C.frame);
+    }
   }
 
   function buildTracksidePlatform(b) {
@@ -388,10 +492,6 @@
     }
     b.beam([-2.4, 1.22, 0.9], [-2.4, 1.22, 3.7], 0.14, C.copper);
     b.beam([2.0, 1.22, 0.9], [2.0, 1.22, 3.7], 0.14, C.copper);
-  }
-
-  function interpolate(from, to, progress) {
-    return from.map((value, index) => value + (to[index] - value) * progress);
   }
 
   function createBuilder(THREE) {
@@ -491,8 +591,15 @@
       add(new THREE.TorusGeometry(radius, tube, 6, segments), color, position);
     }
 
-    function cylinder(position, radius, height, color, rotation = [0, 0, 0]) {
-      add(new THREE.CylinderGeometry(radius, radius, height, 12), color, position, rotation);
+    function cylinder(position, radius, height, color, rotation = [0, 0, 0], kind = 'solid') {
+      add(new THREE.CylinderGeometry(radius, radius, height, 12), color, position, rotation, kind);
+    }
+
+    function transformParts(scale, translation) {
+      for (const list of Object.values(parts)) for (const geometry of list) {
+        geometry.scale(scale, scale, scale);
+        geometry.translate(...translation);
+      }
     }
 
     function finish() {
@@ -518,9 +625,9 @@
       return result;
     }
 
-    return { box, beam, torus, arc, cylinder, plate, prism, finish };
+    return { box, beam, torus, arc, cylinder, plate, prism, finish, transform: transformParts };
   }
 
   scope.Skyroads = scope.Skyroads || {};
-  scope.Skyroads.flightEnvironment = Object.freeze({ create });
+  scope.Skyroads.flightEnvironment = Object.freeze({ create, JOURNEY });
 })(globalThis);

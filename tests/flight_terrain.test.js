@@ -68,8 +68,8 @@ test('terrain is deterministic, begins flat, and alternates optional raised rout
     const raised = terrain.sample(position, lane);
     const low = terrain.sample(position, 3);
     assert.deepEqual(raised, terrain.sample(position, lane));
-    assert.ok(low.height >= 1800 && low.height <= 2400);
-    assert.ok(raised.offset >= 600 && raised.offset <= 780);
+    assert.equal(low.height, (1800 + Math.min(cycle, 6) * 100) * 1.3);
+    assert.ok(raised.offset >= 660 && raised.offset <= 780);
     assert.equal(raised.height - low.height, raised.offset);
     assert.equal(terrain.sample(position, 6 - lane).offset, 0);
   }
@@ -88,7 +88,7 @@ test('ramp seams are continuous, tile ends preserve true drops, and slopes stay 
         assert.ok(tile.farHeight - next.nearHeight >= 599.999);
       } else close(tile.farHeight, next.nearHeight, 0.00002);
       const center = terrain.sample(index + 0.5, lane);
-      assert.ok(Math.abs(center.slope) <= 90.001);
+      assert.ok(Math.abs(center.slope) <= 117.001);
     }
   }
   assert.equal(drops, 8);
@@ -117,7 +117,7 @@ test('airborne movement preserves absolute altitude and lower exits grant an air
     lane: 2, groundHeight: terrain.heightAt(160, 1), playerY: 0, playerVY: 0 });
   assert.equal(exit.blocked, false);
   assert.equal(exit.falling, true);
-  assert.equal(exit.playerY, 600);
+  assert.equal(exit.playerY, 660);
   assert.equal(exit.jumpsUsed, 1);
 });
 
@@ -127,7 +127,7 @@ test('real physics follows the full steep ramp without spending a jump or leavin
   h.tick(430);
   assert.equal(h.state.mode, 'PLAYING');
   assert.ok(h.state.position > 104);
-  close(h.state.groundHeight, 1800);
+  close(h.state.groundHeight, 2340);
   assert.equal(h.state.playerY, 0);
   assert.equal(h.state.jumpsUsed, 0);
 });
@@ -181,6 +181,8 @@ test('real generator keeps a connected bypass and paired bridge routes across lo
   const gen = h.newGenState();
   let rewards = 0;
   let gaps = 0;
+  let islandTiles = 0;
+  let islandRewards = 0;
   for (let index = 0; index < 6000; index += 1) {
     const segment = h.generateSegment(index, gen);
     const route = terrain.routeAt(index);
@@ -197,6 +199,20 @@ test('real generator keeps a connected bypass and paired bridge routes across lo
       assert.equal(segment.lanes[route.gapLane], 'GAP');
       gaps += 1;
     }
+    for (const lane of route.gapLanes) {
+      assert.equal(segment.lanes[lane], 'GAP');
+      assert.ok(!(segment.enemies || []).some((enemy) => Math.round(enemy.lane) === lane));
+      assert.ok(!route.safeLanes.includes(lane));
+    }
+    if (route.islandStage === 'island') {
+      islandTiles += 1;
+      assert.equal(terrain.sampleTile(index, route.islandLane).kind, 'floating_island');
+      assert.equal(segment.lanes[route.islandSideLane], 'GAP');
+      if (route.phase === 121 || route.phase === 127) {
+        assert.equal(segment.lanes[route.islandLane], route.phase === 121 ? 'FUEL' : 'TRIPLE');
+        islandRewards += 1;
+      }
+    }
     if (route.phase >= 96 && route.phase < 144 && index % 12 === 0) {
       const rewardLane = route.gapLane === route.branchLanes[0] ? route.branchLanes[1] : route.branchLanes[0];
       assert.equal(segment.lanes[rewardLane], 'FUEL');
@@ -205,6 +221,8 @@ test('real generator keeps a connected bypass and paired bridge routes across lo
   }
   assert.equal(rewards, 100);
   assert.equal(gaps, 100);
+  assert.equal(islandTiles, 500);
+  assert.equal(islandRewards, 50);
 });
 
 

@@ -430,6 +430,7 @@
     }
 
     let orbitalEnvironment = null;
+    let galaxy = null;
     const sky = new THREE.Group();
     sky.name = 'orbital_environment';
     scene.add(sky);
@@ -493,44 +494,48 @@
         float fbm(vec3 p) { return noise(p) * 0.55 + noise(p * 2.03 + 7.1) * 0.27
           + noise(p * 4.13 + 13.7) * 0.13 + noise(p * 8.17) * 0.05; }
       `;
-      const nebulaMaterial = own(new THREE.ShaderMaterial({
-        vertexShader: `varying vec3 direction; void main() { direction = position;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-        fragmentShader: `${noiseFunctions} varying vec3 direction;
-          void main() {
-            vec3 d = normalize(direction);
-            float cloud = fbm(d * 5.0 + vec3(4.0, 11.0, 2.0));
-            float ridge = exp(-pow(d.y - 0.15 + d.x * 0.32 + (cloud - 0.5) * 0.3, 2.0) * 21.0);
-            float detail = smoothstep(0.28, 0.77, fbm(d * 17.0 + cloud));
-            vec3 color = vec3(0.007, 0.013, 0.026);
-            color += vec3(0.024, 0.047, 0.068) * ridge * detail;
-            color += vec3(0.024, 0.019, 0.032) * pow(cloud, 3.0) * ridge;
-            gl_FragColor = vec4(color, 1.0);
-          }`,
-        side: THREE.BackSide, depthWrite: false, fog: false,
-      }));
-      mesh(sphere, nebulaMaterial, sky, [0, 0, 0], [1000, 1000, 1000]).renderOrder = -10;
-      const positions = [];
-      const colors = [];
-      let seed = 9173;
-      const random = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
-      for (let index = 0; index < 1900; index += 1) {
-        const azimuth = random() * Math.PI * 2;
-        const elevation = Math.acos(random() * 2 - 1);
-        const radius = 630 + random() * 230;
-        positions.push(radius * Math.sin(elevation) * Math.cos(azimuth),
-          radius * Math.cos(elevation), radius * Math.sin(elevation) * Math.sin(azimuth));
-        const brightness = 0.25 + random() * 0.7;
-        colors.push(brightness * 0.78, brightness * 0.88, brightness);
+      if (scope.Skyroads.flightGalaxy) {
+        galaxy = scope.Skyroads.flightGalaxy.create({ THREE, parent: sky, own, sphere });
+      } else {
+        const nebulaMaterial = own(new THREE.ShaderMaterial({
+          vertexShader: `varying vec3 direction; void main() { direction = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+          fragmentShader: `${noiseFunctions} varying vec3 direction;
+            void main() {
+              vec3 d = normalize(direction);
+              float cloud = fbm(d * 5.0 + vec3(4.0, 11.0, 2.0));
+              float ridge = exp(-pow(d.y - 0.15 + d.x * 0.32 + (cloud - 0.5) * 0.3, 2.0) * 21.0);
+              float detail = smoothstep(0.28, 0.77, fbm(d * 17.0 + cloud));
+              vec3 color = vec3(0.007, 0.013, 0.026);
+              color += vec3(0.024, 0.047, 0.068) * ridge * detail;
+              color += vec3(0.024, 0.019, 0.032) * pow(cloud, 3.0) * ridge;
+              gl_FragColor = vec4(color, 1.0);
+            }`,
+          side: THREE.BackSide, depthWrite: false, fog: false,
+        }));
+        mesh(sphere, nebulaMaterial, sky, [0, 0, 0], [1000, 1000, 1000]).renderOrder = -10;
+        const positions = [];
+        const colors = [];
+        let seed = 9173;
+        const random = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+        for (let index = 0; index < 1900; index += 1) {
+          const azimuth = random() * Math.PI * 2;
+          const elevation = Math.acos(random() * 2 - 1);
+          const radius = 630 + random() * 230;
+          positions.push(radius * Math.sin(elevation) * Math.cos(azimuth),
+            radius * Math.cos(elevation), radius * Math.sin(elevation) * Math.sin(azimuth));
+          const brightness = 0.25 + random() * 0.7;
+          colors.push(brightness * 0.78, brightness * 0.88, brightness);
+        }
+        const starGeometry = own(new THREE.BufferGeometry());
+        starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        starGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        const starMaterial = own(new THREE.PointsMaterial({ size: 1.1, vertexColors: true, fog: false,
+          transparent: true, opacity: 0.85, sizeAttenuation: true, depthWrite: false }));
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        stars.name = 'seeded_star_field';
+        sky.add(stars);
       }
-      const starGeometry = own(new THREE.BufferGeometry());
-      starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-      starGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-      const starMaterial = own(new THREE.PointsMaterial({ size: 1.1, vertexColors: true, fog: false,
-        transparent: true, opacity: 0.85, sizeAttenuation: true, depthWrite: false }));
-      const stars = new THREE.Points(starGeometry, starMaterial);
-      stars.name = 'seeded_star_field';
-      sky.add(stars);
 
       // 程序化行星材质保留可编辑参数，不请求外部贴图。
       const planetMaterial = own(new THREE.ShaderMaterial({
@@ -672,6 +677,7 @@
             continue;
           }
           if (tile.raised) raisedTileCount += 1;
+          const floatingIsland = tile.kind === 'floating_island';
           roadBatch.add(x, -0.40, z, laneWidth - 0.035, 0.80, WORLD.segmentDepth,
             0, 0, 0, tile.raised ? 0xcddce0 : 0xffffff);
           insetBatch.add(x, 0.003, z, laneWidth * 0.968, 0.009, WORLD.segmentDepth * 0.965);
@@ -687,7 +693,7 @@
             const edgeX = x + side * (laneWidth / 2 - 0.055);
             edgeBatch.add(edgeX, -0.42, z, 0.09, 0.90, WORLD.segmentDepth - 0.05);
             cyanBatch.add(edgeX, 0.047, z, 0.07, 0.032, WORLD.segmentDepth - 0.2);
-            if (heightDifference > 0.04) {
+            if (heightDifference > 0.04 && !floatingIsland) {
               const wallDepth = heightDifference + 0.80;
               // 立壁分为内缩背板、装甲面及外露竖肋；最外侧仍收在真实车道边界内。
               retainingBatch.add(edgeX - side * 0.04, -wallDepth / 2, z,
@@ -723,11 +729,19 @@
                 0, 0, side * -0.64);
             }
           }
+          if (floatingIsland && index % 4 === 0) {
+            // 悬浮段的推进舱贴在路板下方，不用通到低层地面的挡墙伪装成高台。
+            structureBatch.add(x, -0.95, z, laneWidth * 0.72, 0.24, 1.15);
+            for (const side of [-1, 1]) {
+              engineBatch.add(x + side * 0.86, -1.14, z, 0.57, 0.28, 0.85);
+              cyanBatch.add(x + side * 0.86, -1.295, z, 0.42, 0.035, 0.61);
+            }
+          }
           const nextTile = terrainTile(state, index + 1, lane);
           const drop = heightY(tile.farHeight - nextTile.nearHeight);
           if (drop > 0.04) {
             const lipZ = z - WORLD.segmentDepth / 2 + 0.035;
-            retainingBatch.add(x, -(drop + 0.80) / 2, lipZ,
+            if (!floatingIsland) retainingBatch.add(x, -(drop + 0.80) / 2, lipZ,
               laneWidth - 0.04, drop + 0.80, 0.085, 0, 0, 0, 0xffffff);
             amberBatch.add(x, 0.055, lipZ + 0.075, laneWidth * 0.94, 0.035, 0.11);
             for (let stripe = -2; stripe <= 2; stripe += 1) {
@@ -1008,7 +1022,10 @@
       cameraTarget.set(playerX, playerHeight + 0.8, -WORLD.cameraLookAhead);
       camera.lookAt(cameraTarget);
       sky.position.set(camera.position.x * 0.06, camera.position.y * 0.06, 0);
-      if (orbitalEnvironment && typeof orbitalEnvironment.update === 'function') orbitalEnvironment.update(state.position, state.terrainEnabled);
+      if (orbitalEnvironment && typeof orbitalEnvironment.update === 'function') {
+        orbitalEnvironment.update(state.position, state.terrainEnabled,
+          { time, reducedMotion: state.reducedMotion, runId: state.runId, mode: state.mode });
+      }
       if (ship) {
         ship.update(state, config, { time, bank: bank * 6 });
         ship.group.position.set(playerX, playerHeight, 0);
@@ -1046,6 +1063,7 @@
       viewportWidth = Math.max(1, width);
       viewportHeight = Math.max(1, height);
       renderer.setPixelRatio(Math.min(1.75, Math.max(1, dpr)));
+      if (galaxy) galaxy.setPixelRatio(renderer.getPixelRatio());
       renderer.setSize(viewportWidth, viewportHeight, false);
       camera.aspect = viewportWidth / viewportHeight;
       camera.fov = camera.aspect < 1 ? 74 : 64;
@@ -1091,6 +1109,7 @@
         environmentLighting,
         shadows: { enabled: shadowsEnabled, mapSize: 1024, type: 'PCFSoft', nearObstacleOnly: true },
         orbitalEnvironment: orbitalEnvironment ? orbitalEnvironment.getDiagnostics() : null,
+        galaxy: galaxy ? galaxy.getDiagnostics() : null,
         obstacleModels: obstacleModels ? obstacleModels.getDiagnostics() : null,
         objectModels: flightObjects ? flightObjects.getDiagnostics() : null,
         weapons: weapons ? weapons.getDiagnostics() : null,
