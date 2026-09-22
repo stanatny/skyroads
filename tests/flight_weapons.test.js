@@ -124,6 +124,22 @@ test('charge and missile models read frozen physical state without modifying it'
   close(muzzle.position.x, 3.4); close(muzzle.position.y, 2 + 1 / 3); close(muzzle.position.z, -2.69 * 0.43);
 });
 
+test('muzzle and reactor charge effects stay hidden during taps and reveal after half a second', () => {
+  const h = createHarness();
+  const muzzle = h.weapons.group.getObjectByName('missile_charge_muzzle');
+  const reactor = h.weapons.group.getObjectByName('missile_charge_capacitor');
+  for (const reducedMotion of [false, true]) {
+    h.state.reducedMotion = reducedMotion;
+    for (const elapsed of [0.001, 0.06, 0.15, 0.499, 0.5, 0.75, 1.5, 0]) {
+      h.state.chargeT = elapsed;
+      h.update();
+      assert.equal(muzzle.visible, elapsed >= 0.5);
+      assert.equal(reactor.visible, elapsed >= 0.5);
+      close(h.weapons.getDiagnostics().chargeRatio, elapsed / 1.5);
+    }
+  }
+});
+
 test('paused updates preserve missile smoke, charge, particles and bursts without duplicate events', () => {
   const harness = createHarness();
   harness.state.chargeT = 1.5;

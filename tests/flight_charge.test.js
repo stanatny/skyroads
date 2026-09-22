@@ -120,6 +120,46 @@ test('J fully charges once while held and clears weapon charging when released',
   assert.equal(h.charge().weaponRatio, 0);
 });
 
+test('short J taps never reveal ship charge effects and sustained holds reveal at the HUD delay', () => {
+  const h = harness();
+  for (const duration of [0.05, 0.15, 0.45, 0.15]) {
+    h.state.shots = [];
+    h.key('keydown', 'KeyJ');
+    h.paint();
+    assert.equal(h.charge().visible, false);
+    h.advance(duration);
+    assert.ok(h.state.chargeT > 0);
+    assert.equal(h.charge().visible, false);
+    assert.equal(h.charge().particles, 0);
+    h.key('keyup', 'KeyJ');
+    h.paint();
+    assert.equal(h.state.shots.length, 1);
+    assert.equal(h.state.shots[0].kind, 'bullet');
+    assert.equal(h.charge().visible, false);
+    h.advance(0.3);
+  }
+  for (const reducedMotion of [false, true]) {
+    h.state.reducedMotion = reducedMotion;
+    h.state.chargeT = h.game.CONFIG.CHARGE_HUD_DELAY - 0.001;
+    h.paint();
+    assert.equal(h.charge().visible, false);
+    h.state.chargeT = h.game.CONFIG.CHARGE_HUD_DELAY;
+    h.paint();
+    assert.equal(h.charge().visible, true);
+    assert.equal(h.charge().kind, 'weapon');
+    near(h.charge().weaponRatio, h.state.chargeT / h.game.CONFIG.CHARGE_TIME);
+  }
+  h.key('keydown', 'KeyJ');
+  h.advance(h.game.CONFIG.CHARGE_TIME);
+  assert.ok(h.charge().readyPulse > 0);
+  // 松手和下一次点射可能发生在同一渲染帧，不能继承上一发的就绪脉冲。
+  h.key('keyup', 'KeyJ');
+  h.key('keydown', 'KeyJ');
+  h.paint();
+  assert.equal(h.charge().visible, false);
+  assert.equal(h.charge().readyPulse, 0);
+});
+
 test('fuel aliases, release, jump and loss of focus cancel charging without false burst feedback', () => {
   const h = harness();
   h.key('keydown', 'KeyW');

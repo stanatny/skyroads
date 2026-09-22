@@ -208,7 +208,8 @@
         ? Math.min(1, Math.max(0, (state.chargeT || 0) / config.CHARGE_TIME)) : 0;
       if (shipGroup) shipGroup.updateMatrixWorld(true);
       for (const charge of [chargeMuzzle, chargeReactor]) {
-        charge.group.visible = chargeRatio > 0.04 && Boolean(shipGroup);
+        charge.group.visible = chargeRatio > 0 && state.chargeT >= (config.CHARGE_HUD_DELAY || 0.5)
+          && Boolean(shipGroup);
         if (!charge.group.visible) continue;
         position.copy(charge.reactor ? reactorOffset : muzzleOffset);
         shipGroup.localToWorld(position);
@@ -308,7 +309,8 @@
 
     /** 返回池使用量与展示状态，便于真实输入测试核对蓄力、导弹和爆炸。 */
     function getDiagnostics() {
-      return { chargeRatio, missiles: visibleMissiles, particles: visibleParticles, bursts: visibleBursts,
+      return { chargeRatio, chargeVisible: chargeMuzzle.group.visible || chargeReactor.group.visible,
+        missiles: visibleMissiles, particles: visibleParticles, bursts: visibleBursts,
         particleCapacity, missileCapacity: missiles.length, resources: resources.size,
         lastEvent, disposed };
     }

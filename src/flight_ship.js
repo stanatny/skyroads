@@ -498,6 +498,8 @@
         fuelRatio = active ? Math.min(1, Math.max(0, (state.fuelBurstChargeT || 0)
           / (config.FUEL_BURST_CHARGE_TIME || 1))) : 0;
         weaponRatio = active ? Math.min(1, Math.max(0, (state.chargeT || 0) / (config.CHARGE_TIME || 1.5))) : 0;
+        // 与 HUD 同时揭示武器蓄力，点射期间只累计真实进度，不闪机身光环。
+        const showWeaponCharge = weaponRatio > 0 && state.chargeT >= (config.CHARGE_HUD_DELAY || 0.5);
         const burstActive = (state.fuelBurstT || 0) > 0;
         const weaponReady = weaponRatio >= 1;
         if (changedRun || !active) {
@@ -512,11 +514,11 @@
           if (!changedRun && burstActive && !previousFuelBurst) burstPulse = 0.32;
           if (!state.reducedMotion) phase += dt;
         }
-        if (weaponRatio === 0) readyPulse = 0;
+        if (!showWeaponCharge) readyPulse = 0;
         previousFuelBurst = burstActive;
         previousWeaponReady = weaponReady;
-        kind = fuelRatio > 0 || burstPulse > 0 ? 'fuel' : weaponRatio > 0 ? 'weapon' : null;
-        const ratio = kind === 'fuel' ? fuelRatio : weaponRatio;
+        kind = fuelRatio > 0 || burstPulse > 0 ? 'fuel' : showWeaponCharge ? 'weapon' : null;
+        const ratio = kind === 'fuel' ? fuelRatio : kind === 'weapon' ? weaponRatio : 0;
         const pulse = Math.max(readyPulse / 0.30, burstPulse / 0.32);
         field.visible = active && (ratio > 0 || pulse > 0);
         motes.count = 0;

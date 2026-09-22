@@ -78,6 +78,7 @@ function executeRealRender({
   mode = 'glide',
   reducedMotion = true,
   time = 1,
+  chargeT = 0,
 } = {}) {
   const context = makeCanvasContext();
   const sandbox = {
@@ -120,6 +121,7 @@ function executeRealRender({
     STATE.width = 960;
     STATE.height = 600;
     STATE.time = ${time};
+    STATE.chargeT = ${chargeT};
     STATE.reducedMotion = ${reducedMotion};
     STATE.playerY = 500;
     STATE.playerVY = ${gliding ? -100 : 7500};
@@ -148,6 +150,14 @@ test('real renderPlayer draws fallback super frames without losing shared geomet
   const context = executeRealRender({ loadedFrames: false, mode: 'super-glide' });
   assert.equal(context.drawImageCalls, 0);
   assert.ok(context.fillCalls > 0);
+});
+
+test('compatibility ship renderer suppresses tap charge glow and reveals it for sustained holds', () => {
+  for (const loadedFrames of [false, true]) {
+    const baseline = JSON.stringify(executeRealRender({ loadedFrames }).events);
+    assert.equal(JSON.stringify(executeRealRender({ loadedFrames, chargeT: 0.499 }).events), baseline);
+    assert.notEqual(JSON.stringify(executeRealRender({ loadedFrames, chargeT: 0.5 }).events), baseline);
+  }
 });
 
 function feedbackEvents(context) {

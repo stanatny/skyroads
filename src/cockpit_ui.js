@@ -145,6 +145,7 @@
     let previousMode = '';
     let lastUpdate = -Infinity;
     let previousProtection = false;
+    let previousChargeStage = 0;
 
     // update 从 STATE / CONFIG 读取仪表真值；不改变游戏状态或输入，返回 undefined。
     function update(state = {}, config = {}) {
@@ -155,10 +156,14 @@
       const protection = root.Skyroads && root.Skyroads.flightStatusFx
         ? root.Skyroads.flightStatusFx.protection(state, config) : { active: false, remaining: 0, duration: 1 };
       const protectedNow = protection.active;
-      // 保护出现与到期立即同步，避免 HUD 节流让无敌提示滞后于真实判定。
+      const chargeRatio = clamp(numeric(state.chargeT) / positive(config.CHARGE_TIME, 1.5));
+      const revealCharge = numeric(state.chargeT) >= positive(config.CHARGE_HUD_DELAY, 0.5);
+      const chargeStage = chargeRatio >= 1 ? 2 : revealCharge ? 1 : 0;
+      // 保护切换和蓄力出现／就绪／归零立即同步，避免节流残留上一发的进度条。
       if (mode === previousMode && locale === previousLocale && protectedNow === previousProtection
-        && now >= lastUpdate && now - lastUpdate < 70) return;
+        && chargeStage === previousChargeStage && now >= lastUpdate && now - lastUpdate < 70) return;
       previousProtection = protectedNow;
+      previousChargeStage = chargeStage;
       lastUpdate = now;
       const messages = MESSAGES[locale];
       if (locale !== previousLocale) {
@@ -206,11 +211,9 @@
       updateRoute(state, currentLane);
       refs.route.setAttribute('aria-label', `${messages.route}, ${messages.lane} ${currentLane + 1}/7`);
 
-      const chargeRatio = clamp(numeric(state.chargeT) / positive(config.CHARGE_TIME, 1.5));
-      const revealCharge = numeric(state.chargeT) >= positive(config.CHARGE_HUD_DELAY, 0.5);
       setText(refs.weapon, chargeRatio >= 1 ? messages.missileReady : revealCharge ? `${messages.charging} ${Math.round(chargeRatio * 100)}%` : messages.weaponReady);
       tactical.dataset.charged = chargeRatio >= 1 ? 'true' : 'false';
-      setMeter(refs.weaponBar, chargeRatio, messages.weapon);
+      setMeter(refs.weaponBar, revealCharge ? chargeRatio : 0, messages.weapon);
       const leaderboard = root.Skyroads && root.Skyroads.leaderboard;
       const liveScore = leaderboard && typeof leaderboard.calculateScore === 'function'
         ? leaderboard.calculateScore(state) : numeric(state.score);
