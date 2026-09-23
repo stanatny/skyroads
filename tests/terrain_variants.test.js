@@ -299,7 +299,39 @@ test('floating islands have real front, rear and side gaps, safe runways and rew
       assert.equal(tile.dropAtEnd, false);
     }
     assert.equal(terrain.decorateSegment(hostileSegment(start + 121)).lanes[islandLane], 'FUEL');
-    assert.equal(terrain.decorateSegment(hostileSegment(start + 127)).lanes[islandLane], 'TRIPLE');
+    assert.equal(terrain.decorateSegment(hostileSegment(start + 127)).lanes[islandLane],
+      cycle % 2 === 1 ? 'TRIPLE' : 'ROAD');
+  }
+});
+
+test('terrain supplies five crystals and alternates one transformation between bridge and island per cycle', () => {
+  for (let cycle = 0; cycle < 24; cycle += 1) {
+    const start = terrain.TUNING.start + cycle * terrain.TUNING.period;
+    const fuels = [];
+    const transformations = [];
+    for (let phase = 0; phase < terrain.TUNING.period; phase += 1) {
+      const index = start + phase;
+      const source = { index, lanes: Array(7).fill('ROAD'), enemies: [] };
+      const segment = terrain.decorateSegment(source);
+      for (let lane = 0; lane < 7; lane += 1) {
+        if (segment.lanes[lane] === 'FUEL') fuels.push({ phase, lane });
+        if (segment.lanes[lane] === 'TRIPLE') transformations.push({ phase, lane });
+      }
+    }
+    assert.deepEqual(fuels.map((reward) => reward.phase), [78, 96, 120, 121, 132]);
+    const route = terrain.routeAt(start + 114);
+    assert.deepEqual(transformations, [{
+      phase: cycle % 2 === 0 ? 114 : 127,
+      lane: cycle % 2 === 0 ? route.branchLanes[0] : route.islandLane,
+    }]);
+    // 非本轮变身路线空出为路面，不把旧奖励换成额外晶体，也不保留预生成的叠加奖励。
+    const inactivePhase = cycle % 2 === 0 ? 127 : 114;
+    const inactiveLane = cycle % 2 === 0 ? route.islandLane : route.branchLanes[0];
+    const source = { index: start + inactivePhase, lanes: Array(7).fill('ROAD') };
+    source.lanes[inactiveLane] = 'TRIPLE';
+    assert.equal(terrain.decorateSegment(source).lanes[inactiveLane], 'ROAD');
+    source.lanes[inactiveLane] = 'FUEL';
+    assert.equal(terrain.decorateSegment(source).lanes[inactiveLane], 'ROAD');
   }
 });
 
@@ -313,7 +345,10 @@ test('a complete floating island is reachable with one jump per gap at normal an
       // 只去掉道具收集；真实生成的岛体和缺口必须原样保留。加速时仍显式检查越隙高度，不能借无敌掩盖不可达。
       state.track = harness.decorated.map((segment) => ({ ...segment,
         lanes: segment.lanes.map((type) => type === 'GAP' ? type : 'ROAD') }));
-      if (speed === config.BOOST_SPEED) state.boostT = 20;
+      if (speed === config.BOOST_SPEED) {
+        state.boostT = 20;
+        state.boostPrevSpeed = speed - config.BOOST_SPEED_BONUS;
+      }
       game.tryJump();
       let jumpedExit = false;
       let landedIsland = false;

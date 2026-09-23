@@ -157,6 +157,7 @@
     let lastUpdate = -Infinity;
     let previousProtection = false;
     let previousChargeStage = 0;
+    let previousSuperActive = false;
     let previousWormholeStage = '';
     let settlementKey = '';
     let settlementAge = 0;
@@ -174,6 +175,7 @@
       const chargeRatio = clamp(numeric(state.chargeT) / positive(config.CHARGE_TIME, 1.5));
       const revealCharge = numeric(state.chargeT) >= positive(config.CHARGE_HUD_DELAY, 0.5);
       const chargeStage = chargeRatio >= 1 ? 2 : revealCharge ? 1 : 0;
+      const superActive = state.tripleT > 0;
       const warp = state.wormhole || {};
       const missionActive = mode === 'PLAYING' || mode === 'PAUSED';
       const warping = missionActive && Boolean(warp.active);
@@ -187,12 +189,13 @@
       const messages = MESSAGES[locale];
       // 里程累计和结算跟随物理帧；其余仪表仍按原频率更新，暂停时没有独立动画时钟。
       updateWormhole(state, config, warp, warpPhase, warpElapsed, warping, gateDistance, messages, locale);
-      // 保护、蓄力与折跃阶段切换立即同步，避免节流显示上一阶段的能量警告或提示。
+      // 状态切换立即同步，避免节流显示旧的保护提示或不可拾取的变身奖励。
       if (mode === previousMode && locale === previousLocale && protectedNow === previousProtection
-        && chargeStage === previousChargeStage && warpStage === previousWormholeStage
+        && chargeStage === previousChargeStage && superActive === previousSuperActive && warpStage === previousWormholeStage
         && now >= lastUpdate && now - lastUpdate < 70) return;
       previousProtection = protectedNow;
       previousChargeStage = chargeStage;
+      previousSuperActive = superActive;
       previousWormholeStage = warpStage;
       lastUpdate = now;
       if (locale !== previousLocale) {
@@ -418,7 +421,7 @@
         // 每格覆盖两段：任一段有缺口或障碍都保留告警，避免跳采样漏掉单段危险。
         const nextSegment = track[segmentIndex + 1];
         const nextType = nextSegment && nextSegment.lanes && nextSegment.lanes[lane];
-        const kinds = [routeType(type), routeType(nextType)];
+        const kinds = [routeType(type, state.tripleT > 0), routeType(nextType, state.tripleT > 0)];
         const kind = kinds.includes('wall') ? 'wall' : kinds.includes('gap') ? 'gap' : kinds.includes('fuel') ? 'fuel' : kinds.includes('pickup') ? 'pickup' : kinds[0];
         const player = row === ROUTE_ROWS - 1 && lane === currentLane;
         const className = `cockpit-route-cell is-${kind}${player ? ' is-player' : ''}`;
@@ -502,12 +505,12 @@
     return Math.max(0, Math.min(1, numeric(value)));
   }
 
-  function routeType(type) {
+  function routeType(type, superActive = false) {
     if (typeof type !== 'string') return 'empty';
     if (type.startsWith('WALL_')) return 'wall';
     if (type === 'GAP') return 'gap';
     if (type === 'FUEL') return 'fuel';
-    return type === 'ROAD' ? 'road' : 'pickup';
+    return type === 'ROAD' || (type === 'TRIPLE' && superActive) ? 'road' : 'pickup';
   }
 
   const api = Object.freeze({ create });

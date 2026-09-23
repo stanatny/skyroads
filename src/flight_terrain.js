@@ -210,7 +210,7 @@
   function decorateSegment(segment) {
     const route = routeAt(segment.index);
     if (!route) return segment;
-    const { phase, branchLanes, secondaryLanes, gapLane, gapLanes, islandLane } = route;
+    const { cycle, phase, branchLanes, secondaryLanes, gapLane, gapLanes, islandLane } = route;
     const safeLanes = new Set(route.safeLanes);
     const lanes = segment.lanes.map((type, lane) => safeLanes.has(lane)
       && (type === 'GAP' || type.startsWith('WALL_')) ? 'ROAD' : type);
@@ -221,16 +221,18 @@
     if (phase === 82) lanes[combatLane] = 'WALL_LOW';
     if (phase === 94) lanes[combatLane] = 'WALL_MEDIUM';
     if (phase === 118) lanes[combatLane] = 'WALL_HIGH';
-    if (phase >= 96 && phase < 144 && segment.index % 12 === 0) {
+    // 挑战支路减少连续补给；每轮仍保留高架、次级支路与浮岛上的五枚晶体。
+    if (phase >= 96 && phase < 144 && phase % 24 === 0) {
       const rewardLane = gapLane === branchLanes[0] ? branchLanes[1] : branchLanes[0];
       lanes[rewardLane] = 'FUEL';
     }
-    if (phase === 114) lanes[branchLanes[0]] = 'TRIPLE';
+    // 固定变身奖励每轮只出现一次，高架与浮岛轮流承载；空轮的位置恢复路面。
+    if (phase === 114) lanes[branchLanes[0]] = cycle % 2 === 0 ? 'TRIPLE' : 'ROAD';
     if (phase === 132) lanes[branchLanes[1]] = 'FUEL';
     if (phase === 78) lanes[secondaryLanes[1]] = 'FUEL';
     // 奖励留在可落地的岛面中段，入口、出口和侧边缺口没有道具或敌人。
     if (phase === 121) lanes[islandLane] = 'FUEL';
-    if (phase === 127) lanes[islandLane] = 'TRIPLE';
+    if (phase === 127) lanes[islandLane] = cycle % 2 === 1 ? 'TRIPLE' : 'ROAD';
     const patrolLanes = new Set(dronePatrolLanes({ ...segment, lanes }));
     return {
       ...segment,

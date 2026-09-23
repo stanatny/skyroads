@@ -130,15 +130,15 @@ async function main() {
     });
     assert.equal((await sample(page)).flight.renderer, 'webgl-chase');
     report.samples.tuning = await page.evaluate(() => ({ acceleration: CONFIG.ACCEL, initial: CONFIG.INITIAL_SPEED,
-      max: CONFIG.MAX_SPEED, tutorialMax: CONFIG.TUTORIAL_SPEED_CAP, boost: CONFIG.BOOST_SPEED }));
-    assert.deepEqual(report.samples.tuning, { acceleration: 0.5, initial: 8, max: 25, tutorialMax: 16, boost: 36 });
+      softThreshold: CONFIG.CRUISE_SOFT_CAP, tailAcceleration: CONFIG.CRUISE_TAIL_ACCEL, tutorialMax: CONFIG.TUTORIAL_SPEED_CAP, boost: CONFIG.BOOST_SPEED }));
+    assert.deepEqual(report.samples.tuning, { acceleration: 0.65, initial: 8, softThreshold: 36, tailAcceleration: 0.1, tutorialMax: 16, boost: 36 });
     await page.evaluate(() => {
       STATE.tutorial = null;
       for (const segment of STATE.track) { segment.lanes.fill('ROAD'); segment.enemies = []; }
     });
     await advance(page, 4);
-    close((await sample(page)).speed, 10);
-    report.checks.push('Real physics accelerates from 8 to 10 in four seconds; normal cap 25, tutorial cap 16 and boost 36 are preserved');
+    close((await sample(page)).speed, 10.6);
+    report.checks.push('Real physics accelerates from 8 to 10.6 in four seconds; continuous tail growth, tutorial cap 16 and boost minimum 36 are configured');
 
     await setup(page);
     const corners = [];

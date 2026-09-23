@@ -208,21 +208,25 @@ test('real generator keeps a connected bypass and paired bridge routes across lo
       islandTiles += 1;
       assert.equal(terrain.sampleTile(index, route.islandLane).kind, 'floating_island');
       assert.equal(segment.lanes[route.islandSideLane], 'GAP');
-      if (route.phase === 121 || route.phase === 127) {
-        assert.equal(segment.lanes[route.islandLane], route.phase === 121 ? 'FUEL' : 'TRIPLE');
+      if (route.phase === 121) {
+        assert.equal(segment.lanes[route.islandLane], 'FUEL');
         islandRewards += 1;
+      } else if (route.phase === 127) {
+        // 固定候选只在浮岛轮出现；生成器还会按全部来源的间距上限将候选留空。
+        if (route.cycle % 2 === 0) assert.equal(segment.lanes[route.islandLane], 'ROAD');
+        else assert.ok(['ROAD', 'TRIPLE'].includes(segment.lanes[route.islandLane]));
       }
     }
-    if (route.phase >= 96 && route.phase < 144 && index % 12 === 0) {
+    if (route.phase >= 96 && route.phase < 144 && route.phase % 24 === 0) {
       const rewardLane = route.gapLane === route.branchLanes[0] ? route.branchLanes[1] : route.branchLanes[0];
       assert.equal(segment.lanes[rewardLane], 'FUEL');
       rewards += 1;
     }
   }
-  assert.equal(rewards, 100);
+  assert.equal(rewards, 50);
   assert.equal(gaps, 100);
   assert.equal(islandTiles, 500);
-  assert.equal(islandRewards, 50);
+  assert.equal(islandRewards, 25);
 });
 
 

@@ -27,7 +27,9 @@ function createHarness({ position = 0, lane = 3, speed = 8 } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/game.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
   vm.runInContext(`${source}
     globalThis.game = { STATE, CONFIG, KEYS, updatePhysics, tryJump, tryFuelBurst,
-      collectPickup, enableFlightTerrain };
+      collectPickup, enableFlightTerrain,
+      currentCruiseSpeed: typeof currentCruiseSpeed === 'function' ? currentCruiseSpeed : () => STATE.speed,
+      reactionSegmentsAt: typeof reactionSegmentsAt === 'function' ? reactionSegmentsAt : () => CONFIG.REACTION_SEGS };
     syncPropulsionAudio = () => {};
     die = reason => { STATE.mode = 'GAMEOVER'; globalThis.death = reason; };
   `, sandbox);
@@ -52,26 +54,25 @@ function createHarness({ position = 0, lane = 3, speed = 8 } = {}) {
   };
 }
 
-test('normal acceleration reaches 13 after ten seconds and caps at 25 after 34 seconds', () => {
+test('cruise accelerates faster initially and keeps growing past the former limits', () => {
   for (const hz of [20, 60, 120]) {
     const h = createHarness();
     h.advance(10, hz);
-    close(h.state.speed, 13);
-    h.advance(24, hz);
-    close(h.state.speed, 25);
-    h.advance(5, hz);
-    close(h.state.speed, 25);
+    close(h.state.speed, 14.5);
+    h.advance(40, hz);
+    close(h.state.speed, 36 + (50 - 28 / 0.65) * 0.1);
+    const previous = h.state.speed;
+    h.advance(20, hz);
+    close(h.state.speed, previous + 2);
   }
 });
 
-test('a slow pickup at cruising speed recovers in twenty seconds without changing its strength', () => {
-  const h = createHarness({ speed: 25 });
+test('slow pickups lower the cruise baseline and acceleration resumes without a hard cap', () => {
+  const h = createHarness({ speed: 45 });
   h.game.collectPickup(h.state.track[0], 3, 'SLOW');
-  close(h.state.speed, 15);
+  close(h.state.speed, 27);
   h.advance(10);
-  close(h.state.speed, 20);
-  h.advance(10);
-  close(h.state.speed, 25);
+  close(h.state.speed, 33.5);
 });
 
 test('the practice speed cap remains sixteen under the quicker acceleration', () => {
@@ -83,91 +84,150 @@ test('the practice speed cap remains sixteen under the quicker acceleration', ()
   close(h.state.speed, 16);
 });
 
-test('boost and fuel burst retain speed 36, prior cruising speed and their exit protection', () => {
+test('boosts stay faster than cruise and preserve its growing baseline and exit protection', () => {
   for (const kind of ['boost', 'fuelBurst']) {
-    for (const priorSpeed of [22, 25]) {
+    for (const priorSpeed of [22, 45]) {
       const h = createHarness({ speed: priorSpeed });
       if (kind === 'boost') h.game.collectPickup(h.state.track[0], 3, 'BOOST');
       else h.game.tryFuelBurst();
       const timer = `${kind}T`;
-      assert.ok(h.state[timer] > 0);
-      let frames = 0;
-      while (h.state[timer] > 0 && frames++ < 600) {
+      let elapsed = 0;
+      while (h.state[timer] > 0 && elapsed < 6) {
         h.step(0.01);
-        close(h.state.speed, 36);
+        elapsed += 0.01;
+        const base = priorSpeed + elapsed * (priorSpeed < 36 ? 0.65 : 0.1);
+        close(h.state.speed, Math.max(36, base + 8));
       }
       assert.equal(h.state[timer], 0);
       h.step(0.02);
-      close(h.state.speed, Math.min(25, priorSpeed + 0.01));
+      close(h.state.speed, priorSpeed + (elapsed + 0.02) * (priorSpeed < 36 ? 0.65 : 0.1));
       assert.ok(h.state[`${kind}GraceT`] > 1.9);
     }
   }
 });
 
-test('new maximum speed preserves real low-wall glide and medium-wall double-jump corridors', () => {
-  for (const hz of [20, 60, 120]) {
-    for (const type of ['WALL_LOW', 'WALL_MEDIUM']) {
-      // 20 Hz 下低墙上升越线约需 0.12 秒；避免过早起跳把滑翔余量浪费在墙前。
-      const lead = type === 'WALL_LOW' ? 0.12 : 0.35;
-      const start = 30;
-      const h = createHarness({ position: start - 25 * lead, speed: 25 });
-      const length = h.sandbox.Skyroads.obstacles.selectRunLength(type, 25, 0.999);
-      for (let index = start; index < start + length; index += 1) {
-        h.state.track[index].lanes[3] = type;
-      }
-      h.game.KEYS.KeyK = true;
-      h.game.tryJump();
-      let secondJump = false;
-      for (let frame = 0; frame < hz * 2 && h.state.position <= start + length; frame += 1) {
-        if (type === 'WALL_MEDIUM' && !secondJump && frame / hz >= 0.23) {
-          h.game.tryJump();
-          secondJump = true;
+test('slow during overlapping boosts changes the underlying cruise instead of being undone', () => {
+  const h = createHarness({ speed: 45 });
+  h.game.tryFuelBurst();
+  h.step(0.1);
+  h.game.collectPickup(h.state.track[0], 3, 'BOOST');
+  h.game.collectPickup(h.state.track[1], 3, 'SLOW');
+  const slowed = 45.01 * 0.6;
+  close(h.game.currentCruiseSpeed(), slowed);
+  h.advance(6);
+  close(h.state.speed, slowed + 6 * 0.65);
+  assert.equal(h.state.boostPrevSpeed, 0);
+  assert.equal(h.state.fuelBurstPrevSpeed, 0);
+});
+
+test('super pickups cannot extend an active transformation and become collectible after expiry', () => {
+  const h = createHarness();
+  const first = h.state.track[5];
+  first.lanes[3] = 'TRIPLE';
+  assert.equal(h.game.collectPickup(first, 3, 'TRIPLE'), true);
+  close(h.state.tripleT, 20);
+  h.advance(1);
+  const second = h.state.track[100];
+  second.lanes[3] = 'TRIPLE';
+  h.state.superFx = 0;
+  assert.equal(h.game.collectPickup(second, 3, 'TRIPLE'), false);
+  close(h.state.tripleT, 19);
+  assert.equal(h.state.superFx, 0);
+  assert.equal(second.lanes[3], 'ROAD');
+  h.advance(19.1);
+  assert.equal(h.state.tripleT, 0);
+  const later = h.state.track[1000];
+  later.lanes[3] = 'TRIPLE';
+  assert.equal(h.game.collectPickup(later, 3, 'TRIPLE'), true);
+  close(h.state.tripleT, 20);
+});
+
+test('late-game generation reserves real lane-change time as cruising speed rises', () => {
+  const h = createHarness();
+  for (const index of [0, 3000, 4000, 15000]) {
+    const speed = h.sandbox.Skyroads.obstacles.nominalSpeed(index, {
+      initialSpeed: 8, acceleration: 0.65, cruiseSoftCap: 36, cruiseTailAcceleration: 0.1,
+    });
+    assert.ok(h.game.reactionSegmentsAt(index) >= 8);
+    assert.ok(h.game.reactionSegmentsAt(index) / speed >= 0.26);
+  }
+});
+
+test('faster cruise preserves real low-wall glide and medium-wall double-jump corridors', () => {
+  for (const speed of [25, 45]) {
+    for (const hz of [20, 60, 120]) {
+      for (const type of ['WALL_LOW', 'WALL_MEDIUM']) {
+        // 20 Hz 下低墙上升越线约需 0.12 秒；避免过早起跳把滑翔余量浪费在墙前。
+        const lead = type === 'WALL_LOW' ? 0.12 : 0.35;
+        const start = 30;
+        const h = createHarness({ position: start - speed * lead, speed });
+        h.game.CONFIG.ACCEL = 0;
+        const length = h.sandbox.Skyroads.obstacles.selectRunLength(type, speed, 0.999);
+        for (let index = start; index < start + length; index += 1) {
+          h.state.track[index].lanes[3] = type;
         }
-        h.step(1 / hz);
+        h.game.KEYS.KeyK = true;
+        h.game.tryJump();
+        let secondJump = false;
+        for (let frame = 0; frame < hz * 2 && h.state.position <= start + length; frame += 1) {
+          if (type === 'WALL_MEDIUM' && !secondJump && frame / hz >= 0.23) {
+            h.game.tryJump();
+            secondJump = true;
+          }
+          h.step(1 / hz);
+        }
+        assert.ok(h.state.position > start + length, `${type} at ${hz} Hz, speed ${speed}`);
+        close(h.state.speed, speed);
+        assert.equal(secondJump, type === 'WALL_MEDIUM');
       }
-      assert.ok(h.state.position > start + length, `${type} at ${hz} Hz`);
-      close(h.state.speed, 25);
-      assert.equal(secondJump, type === 'WALL_MEDIUM');
     }
   }
 });
 
-test('speed 25 leaves enough time to land on floating islands and jump their exit gaps', () => {
-  for (const hz of [20, 60, 120]) {
-    for (const cycle of [0, 1, 6]) {
-      const start = 48 + cycle * 240;
-      const lane = cycle % 2 === 0 ? 6 : 0;
-      const h = createHarness({ position: start + 114 - 25 * 0.07, lane, speed: 25 });
-      h.game.enableFlightTerrain();
-      // 保留真实浮岛和缺口，只移除奖励，避免三段跳或加速拾取改变本次几何验证。
-      h.state.track = h.state.track.map((segment) => ({ ...segment,
-        lanes: segment.lanes.map((type) => type === 'GAP' ? type : 'ROAD'), enemies: [],
-      }));
-      h.game.tryJump();
-      let landed = false;
-      let exitJump = false;
-      const crossed = new Set();
-      for (let frame = 0; frame < hz * 4; frame += 1) {
-        h.step(1 / hz);
-        const phase = h.state.position - start;
-        if (phase >= 114 && phase < 116 || phase >= 136 && phase < 138) {
-          crossed.add(phase < 116 ? 'entry' : 'exit');
-          assert.ok(h.state.playerY >= h.game.CONFIG.GAP_SAFE_HEIGHT);
+test('normal and late-game cruising leave enough time to land on floating islands and jump exit gaps', () => {
+  for (const speed of [25, 45]) {
+    for (const hz of [20, 60, 120]) {
+      for (const cycle of [0, 1, 6]) {
+        const start = 48 + cycle * 240;
+        const lane = cycle % 2 === 0 ? 6 : 0;
+        const h = createHarness({ position: start + 114 - speed * 0.07, lane, speed });
+        h.game.CONFIG.ACCEL = 0;
+        h.game.enableFlightTerrain();
+        // 保留真实浮岛和缺口，只移除奖励，避免三段跳或加速拾取改变本次几何验证。
+        h.state.track = h.state.track.map((segment) => ({ ...segment,
+          lanes: segment.lanes.map((type) => type === 'GAP' ? type : 'ROAD'), enemies: [],
+        }));
+        h.game.tryJump();
+        let landed = false;
+        let exitJump = false;
+        const crossed = new Set();
+        for (let frame = 0; frame < hz * 4; frame += 1) {
+          h.step(1 / hz);
+          const phase = h.state.position - start;
+          if (phase >= 114 && phase < 116 || phase >= 136 && phase < 138) {
+            crossed.add(phase < 116 ? 'entry' : 'exit');
+            assert.ok(h.state.playerY >= h.game.CONFIG.GAP_SAFE_HEIGHT);
+          }
+          if (phase >= 116 && phase < 136 && h.state.playerY === 0) landed = true;
+          if (!exitJump && phase >= 136 - h.state.speed * 0.09) {
+            assert.equal(landed, true, `island ${cycle} at ${hz} Hz, speed ${speed}`);
+            assert.equal(h.state.playerY, 0);
+            h.game.tryJump();
+            exitJump = true;
+          }
+          if (phase > 138 && h.state.playerY === 0) break;
         }
-        if (phase >= 116 && phase < 136 && h.state.playerY === 0) landed = true;
-        if (!exitJump && phase >= 136 - h.state.speed * 0.09) {
-          assert.equal(landed, true);
-          assert.equal(h.state.playerY, 0);
-          h.game.tryJump();
-          exitJump = true;
-        }
-        if (phase > 138 && h.state.playerY === 0) break;
+        assert.equal(exitJump, true);
+        assert.deepEqual([...crossed], ['entry', 'exit']);
+        // 高速跨出口后沿下坡继续飞行，真正保留的安全着陆区延伸至 landingEnd。
+        assert.ok(h.state.position > start + 138 && h.state.position < start + h.terrain.TUNING.landingEnd,
+          `landing phase ${h.state.position - start}, island ${cycle} at ${hz} Hz, speed ${speed}`);
+        assert.ok(h.terrain.routeAt(h.state.position).safeLanes.includes(lane));
+        assert.equal(h.state.track[Math.floor(h.state.position)].lanes[lane], 'ROAD');
+        assert.equal(h.state.playerY, 0);
+        assert.equal(h.state.jumpsUsed, 0);
+        close(h.state.speed, speed);
       }
-      assert.equal(exitJump, true);
-      assert.deepEqual([...crossed], ['entry', 'exit']);
-      assert.ok(h.state.position > start + 138 && h.state.position < start + 160);
-      assert.equal(h.state.playerY, 0);
-      assert.equal(h.state.jumpsUsed, 0);
     }
   }
 });

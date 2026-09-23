@@ -45,13 +45,55 @@
     }),
   });
 
+  /**
+   * advanceCruiseSpeed 按秒推进巡航速度，返回新速度，不修改游戏状态。
+   * options 未设 cruiseSoftCap 时沿用有上限的旧曲线；设置后跨阈值精确分段，后段持续缓慢加速。
+   * acceleration 为零时冻结整条曲线，保留静止预览所需的零速度。
+   */
+  function advanceCruiseSpeed(speed, dt, {
+    acceleration = 0.4,
+    maxSpeed = 24,
+    cruiseSoftCap,
+    cruiseTailAcceleration = 0.1,
+  } = {}) {
+    const velocity = Math.max(0, Number(speed) || 0);
+    const seconds = Math.max(0, Number(dt) || 0);
+    if (!(acceleration > 0) || seconds === 0) return velocity;
+    if (!Number.isFinite(cruiseSoftCap)) {
+      return Math.min(maxSpeed, velocity + acceleration * seconds);
+    }
+    const timeToThreshold = Math.max(0, (cruiseSoftCap - velocity) / acceleration);
+    const initialSeconds = Math.min(seconds, timeToThreshold);
+    const tailAcceleration = Math.max(0, Number(cruiseTailAcceleration) || 0);
+    return velocity + acceleration * initialSeconds
+      + tailAcceleration * (seconds - initialSeconds);
+  }
+
+  /**
+   * nominalSpeed 根据行驶段数和 options 预测不减速、无奖励时的巡航速度，供生成器预留通行空间。
+   * 软阈值前后分别按各自的加速度计算距离；结果与 advanceCruiseSpeed 的时间曲线一致。
+   */
   function nominalSpeed(segmentIndex, {
     initialSpeed = 8,
     acceleration = 0.4,
     maxSpeed = 24,
+    cruiseSoftCap,
+    cruiseTailAcceleration = 0.1,
   } = {}) {
     const index = Math.max(0, Number(segmentIndex) || 0);
-    return Math.min(maxSpeed, Math.sqrt(initialSpeed * initialSpeed + 2 * acceleration * index));
+    if (!Number.isFinite(cruiseSoftCap)) {
+      return Math.min(maxSpeed, Math.sqrt(initialSpeed * initialSpeed + 2 * acceleration * index));
+    }
+    if (!(acceleration > 0)) return initialSpeed;
+    const thresholdSpeed = Math.max(initialSpeed, cruiseSoftCap);
+    const thresholdDistance = (thresholdSpeed * thresholdSpeed - initialSpeed * initialSpeed)
+      / (2 * acceleration);
+    if (index <= thresholdDistance) {
+      return Math.sqrt(initialSpeed * initialSpeed + 2 * acceleration * index);
+    }
+    const tailAcceleration = Math.max(0, Number(cruiseTailAcceleration) || 0);
+    return Math.sqrt(thresholdSpeed * thresholdSpeed
+      + 2 * tailAcceleration * (index - thresholdDistance));
   }
 
   function runLengthBounds(wallType, speed) {
@@ -110,6 +152,7 @@
     RUN_CLEARANCE,
     jumpApex,
     clearanceWindow,
+    advanceCruiseSpeed,
     nominalSpeed,
     runLengthBounds,
     selectRunLength,

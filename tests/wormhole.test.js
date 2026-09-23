@@ -143,7 +143,8 @@ function createFlightHarness(speed, gate, approachSeconds) {
   Object.assign(state, {
     mode: 'PLAYING', position: gate.segment - speed * approachSeconds,
     speed, playerY: 0, playerVY: 0, jumpsUsed: 0, fuel: config.FUEL_MAX,
-    boostT: speed > config.MAX_SPEED ? 10 : 0, tutorial: null,
+    boostT: speed >= config.BOOST_SPEED ? 10 : 0,
+    boostPrevSpeed: speed >= config.BOOST_SPEED ? speed - config.BOOST_SPEED_BONUS : 0, tutorial: null,
     movement: sandbox.Skyroads.input.createMovementState(gate.lane),
     track: Array.from({ length: gate.segment + 300 }, (_, index) => ({ index, lanes: Array(7).fill('ROAD'), enemies: [] })),
   });

@@ -6,6 +6,7 @@ const {
   OBSTACLE_HEIGHTS,
   jumpApex,
   clearanceWindow,
+  advanceCruiseSpeed,
   nominalSpeed,
   runLengthBounds,
   selectRunLength,
@@ -17,6 +18,74 @@ const {
 function close(actual, expected, epsilon = 1e-6) {
   assert.ok(Math.abs(actual - expected) <= epsilon, actual + ' != ' + expected);
 }
+
+const continuousCruise = Object.freeze({
+  initialSpeed: 8,
+  acceleration: 0.65,
+  maxSpeed: 25,
+  cruiseSoftCap: 36,
+  cruiseTailAcceleration: 0.1,
+});
+
+test('cruise advancement retains the legacy cap unless the continuous curve is requested', () => {
+  close(advanceCruiseSpeed(8, 2), 8.8);
+  close(advanceCruiseSpeed(23.8, 2), 24);
+  close(advanceCruiseSpeed(24.8, 2, { acceleration: 0.5, maxSpeed: 25 }), 25);
+  close(advanceCruiseSpeed(25, 2, continuousCruise), 26.3);
+});
+
+test('continuous cruise splits a frame at the soft threshold and never stops accelerating', () => {
+  // 先以 0.65 加速 0.2 秒抵达 36，再以 0.1 加速余下的 0.3 秒。
+  close(advanceCruiseSpeed(35.87, 0.5, continuousCruise), 36.03);
+  close(advanceCruiseSpeed(36, 20, continuousCruise), 38);
+  close(advanceCruiseSpeed(80, 10, continuousCruise), 81);
+});
+
+test('continuous cruise reaches the same speed at different frame rates across the threshold', () => {
+  for (const fps of [20, 60, 120]) {
+    let speed = 8;
+    for (let frame = 0; frame < 130 * fps; frame += 1) {
+      speed = advanceCruiseSpeed(speed, 1 / fps, continuousCruise);
+    }
+    close(speed, 44.69230769230769);
+    close(speed, advanceCruiseSpeed(8, 130, continuousCruise));
+  }
+});
+
+test('paused cruise and zero-time steps preserve speeds including stationary preview fixtures', () => {
+  const paused = { ...continuousCruise, acceleration: 0 };
+  for (const speed of [0, 8, 35, 36, 80]) {
+    close(advanceCruiseSpeed(speed, 100, paused), speed);
+    close(advanceCruiseSpeed(speed, 0, continuousCruise), speed);
+    close(advanceCruiseSpeed(speed, -1, continuousCruise), speed);
+  }
+  close(nominalSpeed(10000, paused), 8);
+});
+
+test('continuous nominal speed matches distance before and after the threshold without a hard cap', () => {
+  const rows = [
+    [100, 13.92838827718412],
+    [500, 26.720778431774775],
+    [1000, 36.14500710280105],
+    [2000, 38.81316192300672],
+    [3000, 41.309339603309304],
+    [4000, 43.66304545564291],
+    [10000, 55.73563975107434],
+  ];
+  for (const [distance, speed] of rows) close(nominalSpeed(distance, continuousCruise), speed);
+  const thresholdDistance = 947.6923076923076;
+  close(nominalSpeed(thresholdDistance, continuousCruise), 36);
+  assert.ok(nominalSpeed(thresholdDistance - 0.01, continuousCruise) < 36);
+  assert.ok(nominalSpeed(thresholdDistance + 0.01, continuousCruise) > 36);
+});
+
+test('time-based and distance-based cruise predictions agree after a threshold crossing', () => {
+  // 43.0769 秒抵达软阈值，随后 20 秒走过 740 段；两种入口应得到同一 38 段/秒。
+  const crossingTime = 43.07692307692307;
+  const distance = 947.6923076923076 + 740;
+  close(advanceCruiseSpeed(8, crossingTime + 20, continuousCruise), 38);
+  close(nominalSpeed(distance, continuousCruise), 38);
+});
 
 test('jump envelopes preserve all three approved apex values', () => {
   close(jumpApex(1), 878.90625);

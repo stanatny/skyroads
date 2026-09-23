@@ -83,7 +83,8 @@ async function setupApproach(page, { laneOffset = 0, speed = 24, fuel = 100, lea
     STATE.distanceMeters = STATE.position * CONFIG.DISTANCE_PER_SEGMENT;
     STATE.speed = options.speed;
     STATE.fuel = options.fuel;
-    STATE.boostT = options.speed > CONFIG.MAX_SPEED ? 10 : 0;
+    STATE.boostT = options.speed >= CONFIG.BOOST_SPEED ? 10 : 0;
+    STATE.boostPrevSpeed = STATE.boostT > 0 ? options.speed - CONFIG.BOOST_SPEED_BONUS : 0;
     resetMovement(STATE.movement, lane);
     STATE.groundHeight = Skyroads.flightTerrain.heightAt(STATE.position, lane);
     STATE.playerY = 0;

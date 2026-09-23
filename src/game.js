@@ -25,6 +25,7 @@ const {
 const {
   OBSTACLE_HEIGHTS,
   nominalSpeed,
+  advanceCruiseSpeed,
   selectRunLength,
   wallHeight,
   isWallType,
@@ -63,15 +64,18 @@ const CONFIG = {
   HORIZON_RATIO: 0.35,         // 地平线在屏幕高度上的比例
   RENDER_DISTANCE: 120,        // 渲染前方多少个 segment
 
-  // ---- 常规速度：缩短提速等待，并小幅增加中后程压力 ----
+  // ---- 常规速度：前段加快爬升，越过软阈值后继续缓慢增长 ----
   INITIAL_SPEED: 8,            // 初始速度（segment/秒），保持起步反应时间
-  MAX_SPEED: 25,               // 常规最高速度（segment/秒），比原来提高约 4%
-  ACCEL: 0.5,                  // 线性加速度（segment/秒²），(25-8)/0.5 = 34 秒到满速
+  MAX_SPEED: 25,               // 视觉与音效的归一化参考值，不是巡航速度上限
+  ACCEL: 0.65,                 // 前段加速度（segment/秒²），约 43 秒达到软阈值
+  CRUISE_SOFT_CAP: 36,         // 只在这里放缓加速度，巡航不会封顶
+  CRUISE_TAIL_ACCEL: 0.10,     // 后段每 10 秒继续提高 1 段/秒
+  BOOST_SPEED_BONUS: 8,       // 临时加速至少快于当前巡航基线 8 段/秒
   DISTANCE_PER_SEGMENT: 10,    // HUD 距离换算：1 segment = 10 米
 
   // ---- 变道 ----
   LANE_SWITCH_TIME: 0.18,      // 变道耗时（秒）
-  // 满速下变 1 条车道的位移 = 25 * 0.18 = 4.5 个 segment（生成器据此留反应距离）
+  // 生成器按当前进度的名义速度动态扩大缓冲，始终留出一次换道及反应余量。
 
   // ---- 跳跃与高度判定（数值必须互相匹配）----
   //   单跳顶点 = JUMP_VELOCITY² / (2·GRAVITY)
@@ -107,15 +111,12 @@ const CONFIG = {
   // ---- 赛道生成（可解性参数，详见第 4 节注释）----
   WARMUP_SEGMENTS: 24,         // 起跑热身区：全 ROAD（偶有燃料），放缓后略加长
   TUTORIAL_SPEED_CAP: 16,      // 教学模式限速（段/秒）：练习场环境，给新手反应时间
-  REACTION_SEGS: 8,            // 障碍簇/窄桥之间的全路面缓冲段数
-                               //   推导：满速 25 段/秒 × 变道 0.18 秒 = 4.5 段/次变道，
-                               //   8 段 ≈ 1.78 倍单次变道行程；核心保障仍是
-                               //   "相邻簇保证车道差 ≤ 1"，缓冲段给出充裕反应窗口
+  REACTION_SEGS: 8,            // 最小缓冲段数；高速时按 0.18 秒换道 + 0.08 秒余量扩展
   MAX_GAP_RUN: 3,              // 连续全缺口段数上限
-                               //   推导：全缺口在 segment ≥ 100 解锁（此时 speed≈12.8，
+                               //   推导：全缺口在 segment ≥ 100 解锁（此时 speed≈13.9，
                                //   安全腾空可跨 ≈5.28 段 ≫ 3 ✓）
   FULL_GAP_MIN_INDEX: 100,     // 全缺口挑战在 segment 100 之后才出现
-                               //   推导：到达 100 段时速度 √(8²+2×0.5×100) ≈ 12.8，
+                               //   推导：到达 100 段时速度 √(8²+2×0.65×100) ≈ 13.9，
                                //   高于缺口净空 200 的安全腾空可跨约 5.28 段，
                                //   大于 MAX_GAP_RUN 3，故维持 100 不变
   FUEL_FORCE_EVERY: 75,        // 最多间隔多少段强制在"保证车道"放燃料（第六轮 55→75）
@@ -127,9 +128,9 @@ const CONFIG = {
   BRIDGE_MIN_INDEX: 100,       // 窄桥在 segment 100 之后才出现（玩家已有变道熟练度）
 
   // ---- 奖励道具（需求 6；第四轮：无敌护盾 → 闪电超级加速）----
-  BOOST_DURATION: 5,           // 超级加速秒数：期间无敌穿透（撞墙/过缺口不伤）+ 速度锁定
+  BOOST_DURATION: 5,           // 超级加速秒数：期间无敌穿透（撞墙/过缺口不伤）+ 临时提速
   BOOST_GRACE: 2,              // 超级加速结束后继续无敌两秒，恢复航速时保持护罩
-  BOOST_SPEED: 36,             // 超级加速保持原速，仍明显快于常规巡航
+  BOOST_SPEED: 36,             // 超级加速最低速度；高速局使用巡航基线 + BOOST_SPEED_BONUS
                                //   穿段校验：36 段/秒 × 最长帧 0.05s = 1.8 段/帧，
                                //   子步扫掠（≤0.5 段/子步，见第 7 节）逐段覆盖 ✓ 不漏判
   BOOST_WARN_TIME: 1.5,        // BOOST 到期预警窗口（秒）：最后 1.5s 内 HUD 条变红急促
@@ -145,14 +146,14 @@ const CONFIG = {
   //   ④ 船体变身：金白能量装甲 + 顶部光刃 + 金色光环（见 renderPlayer）。
   // 到期前 TRIPLE_WARN_TIME(3) 秒进入预警：HUD 条急促闪烁 + 3 声渐高 beep
   // （3/2/1s 三档阈值）+ 船体金色光环同步闪烁。
-  TRIPLE_DURATION: 20,         // 超级形态持续秒数
+  TRIPLE_DURATION: 20,         // 超级形态持续秒数；期间不显示或拾取同类奖励
+  TRIPLE_MIN_GAP: 240,         // 所有随机、高架、浮岛来源共用至少 2400 米间距
   TRIPLE_GLIDE_FACTOR: 0.045,  // 奖励期滑翔重力系数（基准 0.08 → 滞空 ≈0.7s 提升到 ≈1.0s）
   TRIPLE_WARN_TIME: 3,         // 超级形态到期预警窗口（秒，3/2/1s 三档 beep）
   SUPER_MISSILE_RADIUS: 1,     // 超级形态导弹范围清除半径（段）：命中段 ±1 × 全车道
   SLOW_FACTOR: 0.6,            // 减速道具：速度立即 × 0.6（不低于 INITIAL_SPEED），之后按 ACCEL 重爬
-  PICKUP_MIN_GAP: 40,          // 道具最小间隔段数；到期后每次布置机会 20% 概率出现
-                               //   → 期望间隔 ≈ 40 + 1/0.2 ≈ 45~50 段一枚（四种按序轮换）
-                               //   轮换 BOOST→SLOW→TRIPLE→MAGNET：每种期望间隔 ≈ 180~200 段
+  PICKUP_MIN_GAP: 60,          // 道具最小布置机会间隔；到期后每次仍有 20% 概率
+  FUEL_RANDOM_CHANCE: 0.04,   // 随机能源密度降低，保留热身、落地及 75 段保底补给
 
   // ---- 燃料玩法深化（二段跳耗油 + 按住滑翔）----
   DOUBLEJUMP_FUEL: 3,          // 二段跳一次性扣 3 燃料（第一跳免费）—— 跃升推进器烧油
@@ -172,7 +173,7 @@ const CONFIG = {
   FUEL_BURST_MIN: 70,          // 触发燃料爆发所需最低燃料百分比（v1.3.1：门槛回调，避免过于频繁）
   FUEL_BURST_COST: 40,         // 燃料爆发消耗燃料百分比（v1.3.1）
   FUEL_BURST_DURATION: 3,      // 燃料爆发持续秒数
-  FUEL_BURST_SPEED: 36,        // 燃料爆发速度（复用 BOOST_SPEED）
+  FUEL_BURST_SPEED: 36,        // 燃料爆发最低速度；同样保证比巡航更快
   FUEL_BURST_WARN_TIME: 1,     // 燃料爆发到期预警窗口（秒）
   FUEL_BURST_CHARGE_TIME: 1,   // 按住 W/↑ 蓄力触发燃料爆发所需秒数（松手取消）
   FUEL_BURST_GRACE: 2,         // 燃料爆发结束后的无敌保护秒数（金色护盾环提示），
@@ -240,9 +241,9 @@ const STATE = {
   trail: [],                   // 船尾短寿命尾迹粒子（渲染侧生成，updateEffects 推进）
   recoil: 0,                   // 二段跳后坐动感 1→0（船体瞬间下沉再上冲）
   // 道具效果
-  boostT: 0,                   // 超级加速剩余时间（秒，>0 期间无敌穿透 + 速度锁定 BOOST_SPEED）
+  boostT: 0,                   // 超级加速剩余时间（秒，>0 期间无敌穿透 + 临时提速）
   boostGraceT: 0,              // 超级加速结束后的无敌保护；折跃中一同暂停
-  boostPrevSpeed: 0,           // 吃闪电前的速度（>0 表示待恢复，BOOST 结束后恢复到此速度）
+  boostPrevSpeed: 0,           // 超级加速期间仍持续增长的巡航基线，结束后恢复
   tripleT: 0,                  // 超级形态剩余时间（秒，>0 期间三段跳+长滑翔+武器强化+船体变身）
   tripleWarnStage: 0,          // 超级形态到期预警 beep 已发档位（0..3，吃星/开局重置）
   superFx: 0,                  // 变身特效计时（秒，0.9→0：金色冲击波+大字+爆发粒子）
@@ -260,8 +261,8 @@ const STATE = {
   bulletCD: 0,                 // 子弹冷却剩余秒数
   boostWarnStage: 0,           // BOOST 预警已响到第几声（0..3，防重发）
   // 燃料爆发（v1.2.0）
-  fuelBurstT: 0,               // 燃料爆发剩余时间（秒，>0 期间无敌穿透 + 速度锁定 FUEL_BURST_SPEED）
-  fuelBurstPrevSpeed: 0,       // 燃料爆发前的速度（>0 表示待恢复，爆发后恢复到此速度）
+  fuelBurstT: 0,               // 燃料爆发剩余时间（秒，>0 期间无敌穿透 + 临时提速）
+  fuelBurstPrevSpeed: 0,       // 燃料爆发期间的巡航基线；与 BOOST 重叠时保持一致
   fuelBurstWarnStage: 0,       // 燃料爆发预警已响到第几声（0..3，防重发）
   fuelBurstChargeT: 0,         // W/↑ 按住蓄力进度（秒，>0 表示蓄力中；满 FUEL_BURST_CHARGE_TIME 自动触发）
   fuelBurstChargeStage: 0,     // 燃料爆发蓄力提示音已响到第几声（防重发）
@@ -690,14 +691,14 @@ function fuelBurstChargeBroken() {
     || STATE.boostT > 0 || STATE.fuelBurstT > 0;
 }
 
-// v1.2.0 燃料爆发：消耗 FUEL_BURST_COST(50%) 燃料，锁定 FUEL_BURST_SPEED(36 m/s)
+// 燃料爆发：消耗 FUEL_BURST_COST(40%) 燃料，最低提速至 36 段/秒，高速时追加 8 段/秒
 // 持续 FUEL_BURST_DURATION(3)s，期间无敌穿透，结束前 FUEL_BURST_WARN_TIME(1)s 预警。
 // v1.3.0：触发瞬间不再复查燃料门槛（蓄力开始即锁定资格），但仍要求状态有效。
 function tryFuelBurst() {
   if (fuelBurstChargeBroken()) return;
   STATE.fuel = Math.max(0, STATE.fuel - CONFIG.FUEL_BURST_COST);
   STATE.fuelFlash = 0.6;       // HUD 燃料条短暂变橙：提示"正在大量耗油"
-  STATE.fuelBurstPrevSpeed = STATE.speed;
+  STATE.fuelBurstPrevSpeed = currentCruiseSpeed();
   STATE.fuelBurstT = CONFIG.FUEL_BURST_DURATION;
   STATE.fuelBurstWarnStage = 0;
   STATE.fuelBurstGraceT = 0;      // 新爆发覆盖上一轮的到期保护期
@@ -868,8 +869,9 @@ function newGenState() {
     landingLeft: 0,
     clearStreak: new Array(CONFIG.LANES).fill(0),
     sinceFuel: 0,            // 距上次放置燃料的段数
+    lastTripleIndex: -Infinity, // 各种来源的变身奖励共享间距
     sincePickup: 0,          // 距上次放置道具的段数
-    pickupCycle: 0,          // 道具轮换指针（BOOST→SLOW→TRIPLE→AMMO 循环）
+    pickupCycle: 0,          // 道具轮换指针（BOOST→SLOW→TRIPLE→MAGNET 循环）
   };
 }
 
@@ -882,14 +884,43 @@ function placeFuel(lanes, lane) {
   if (lanes[lane] === LANE_TYPE.ROAD) lanes[lane] = LANE_TYPE.FUEL;
 }
 
+function cruiseOptions() {
+  return { initialSpeed: CONFIG.INITIAL_SPEED, acceleration: CONFIG.ACCEL,
+    cruiseSoftCap: CONFIG.CRUISE_SOFT_CAP, cruiseTailAcceleration: CONFIG.CRUISE_TAIL_ACCEL };
+}
+
+// 高速时加长最小缓冲，而不是用速度上限保护生成器。
+function reactionSegmentsAt(index) {
+  return Math.max(CONFIG.REACTION_SEGS,
+    Math.ceil(nominalSpeed(index, cruiseOptions()) * (CONFIG.LANE_SWITCH_TIME + 0.08)));
+}
+
+// 高程只装饰一次，避免 GPU 恢复时重新生成已拾取或已经过滤的奖励。
+function decorateFlightSegment(segment) {
+  if (!STATE.terrainEnabled || segment.terrainDecorated) return segment;
+  return { ...globalThis.Skyroads.flightTerrain.decorateSegment(segment), terrainDecorated: true };
+}
+
+function spaceSuperPickups(gen, segment) {
+  for (let lane = 0; lane < CONFIG.LANES; lane++) {
+    if (segment.lanes[lane] !== LANE_TYPE.TRIPLE) continue;
+    if (segment.index - gen.lastTripleIndex < CONFIG.TRIPLE_MIN_GAP) {
+      segment.lanes[lane] = LANE_TYPE.ROAD;
+    } else {
+      gen.lastTripleIndex = segment.index;
+    }
+  }
+  return segment;
+}
+
 function wallTypeForApproach(gen, lane, d, tierRoll = Math.random()) {
   const highRatio = 0.15 + 0.45 * d;
   const mediumRatio = 0.25 + 0.25 * d;
-  if (gen.clearStreak[lane] >= RUN_TUNING.highApproachSegments && tierRoll < highRatio) {
+  if (gen.clearStreak[lane] >= Math.max(RUN_TUNING.highApproachSegments, reactionSegmentsAt(gen.generationIndex || 0)) && tierRoll < highRatio) {
     return LANE_TYPE.WALL_HIGH;
   }
   if (
-    gen.clearStreak[lane] >= RUN_TUNING.mediumApproachSegments
+    gen.clearStreak[lane] >= Math.max(RUN_TUNING.mediumApproachSegments, reactionSegmentsAt(gen.generationIndex || 0))
     && tierRoll < highRatio + mediumRatio
   ) {
     return LANE_TYPE.WALL_MEDIUM;
@@ -913,7 +944,7 @@ function fillClusterLanes(lanes, gen, clusterLane, d) {
 }
 
 function finalizeGeneratedSegment(gen, segment) {
-  if (STATE.terrainEnabled) segment = globalThis.Skyroads.flightTerrain.decorateSegment(segment);
+  segment = spaceSuperPickups(gen, decorateFlightSegment(segment));
   const enemyLanes = new Set((segment.enemies || []).map((enemy) => Math.round(enemy.lane)));
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     const type = segment.lanes[lane];
@@ -944,7 +975,7 @@ function emitRunSegment(index, gen) {
   gen.runLeft--;
   if (gen.runLeft === 0) {
     gen.landingLane = gen.runLane;
-    gen.landingLeft = RUN_TUNING.landingSegments;
+    gen.landingLeft = Math.max(RUN_TUNING.landingSegments, reactionSegmentsAt(index));
     gen.runLane = -1;
     gen.runType = null;
     gen.runLength = 0;
@@ -956,6 +987,7 @@ function emitRunSegment(index, gen) {
 
 // 生成单个 segment，依据生成器状态推进状态机
 function generateSegment(index, gen) {
+  gen.generationIndex = index;
   const lanes = new Array(CONFIG.LANES).fill(LANE_TYPE.ROAD);
   const d = difficultyAt(index);
 
@@ -992,7 +1024,7 @@ function generateSegment(index, gen) {
     const reachLo = Math.max(0, gen.safeLane - airReach);
     const reachHi = Math.min(CONFIG.LANES - 1, gen.safeLane + airReach);
     gen.safeLane = reachLo + Math.floor(Math.random() * (reachHi - reachLo + 1));
-    gen.cooldown = CONFIG.REACTION_SEGS;
+    gen.cooldown = reactionSegmentsAt(index);
     lanes[gen.safeLane] = LANE_TYPE.FUEL;
     gen.sinceFuel = 0;
     maybePlacePickup(lanes, gen, index);
@@ -1005,7 +1037,7 @@ function generateSegment(index, gen) {
       if (lane !== gen.bridgeLane) lanes[lane] = LANE_TYPE.GAP;
     }
     gen.bridgeLeft--;
-    if (gen.bridgeLeft === 0) gen.cooldown = CONFIG.REACTION_SEGS;  // 桥后缓冲
+    if (gen.bridgeLeft === 0) gen.cooldown = reactionSegmentsAt(index);  // 桥后缓冲
     maybePlaceFuel(lanes, gen, gen.bridgeLane);
     maybePlacePickup(lanes, gen, index);
     return finalizeGeneratedSegment(gen, { index, lanes });
@@ -1031,7 +1063,7 @@ function generateSegment(index, gen) {
     gen.clusterLeft--;
     if (gen.clusterLeft === 0) {
       gen.safeLane = gen.clusterLane;
-      gen.cooldown = CONFIG.REACTION_SEGS;
+      gen.cooldown = reactionSegmentsAt(index);
     }
     maybePlaceFuel(lanes, gen, gen.clusterLane);
     maybePlacePickup(lanes, gen, index);
@@ -1089,14 +1121,14 @@ function generateSegment(index, gen) {
       if (lane !== gen.bridgeLane) lanes[lane] = LANE_TYPE.GAP;
     }
     gen.bridgeLeft--;
-    if (gen.bridgeLeft === 0) gen.cooldown = CONFIG.REACTION_SEGS;
+    if (gen.bridgeLeft === 0) gen.cooldown = reactionSegmentsAt(index);
     maybePlaceFuel(lanes, gen, gen.bridgeLane);
     maybePlacePickup(lanes, gen, index);
     return finalizeGeneratedSegment(gen, { index, lanes });
   }
   const runCandidates = laneIndices().filter((lane) =>
     lane !== gen.safeLane
-    && gen.clearStreak[lane] >= RUN_TUNING.approachSegments
+    && gen.clearStreak[lane] >= Math.max(RUN_TUNING.approachSegments, reactionSegmentsAt(index))
   );
   const runChance = RUN_TUNING.chanceBase + RUN_TUNING.chanceDifficulty * d;
   if (index >= RUN_TUNING.minIndex && runCandidates.length > 0 && Math.random() < runChance) {
@@ -1105,9 +1137,7 @@ function generateSegment(index, gen) {
     gen.runType = Math.random() < mediumRatio
       ? LANE_TYPE.WALL_MEDIUM
       : LANE_TYPE.WALL_LOW;
-    gen.runLength = selectRunLength(gen.runType, nominalSpeed(index, {
-      initialSpeed: CONFIG.INITIAL_SPEED, acceleration: CONFIG.ACCEL, maxSpeed: CONFIG.MAX_SPEED,
-    }), Math.random());
+    gen.runLength = selectRunLength(gen.runType, nominalSpeed(index, cruiseOptions()), Math.random());
     gen.runLeft = gen.runLength;
     gen.runIndex = 0;
     gen.runId = index;
@@ -1123,7 +1153,7 @@ function generateSegment(index, gen) {
   gen.clusterLeft--;
   if (gen.clusterLeft === 0) {
     gen.safeLane = gen.clusterLane;
-    gen.cooldown = CONFIG.REACTION_SEGS;
+    gen.cooldown = reactionSegmentsAt(index);
   }
   maybePlaceFuel(lanes, gen, gen.clusterLane);
   maybePlacePickup(lanes, gen, index);
@@ -1133,7 +1163,7 @@ function generateSegment(index, gen) {
   return finalizeGeneratedSegment(gen, segN);
 }
 
-// ⑤ 燃料布置：在保证车道上优先；随机补充（第六轮概率 0.10→0.06，燃料不再泛滥）
+// ⑤ 燃料布置：减少随机补给，保留保证车道上的最大间隔保底。
 function maybePlaceFuel(lanes, gen, guaranteedLane) {
   gen.sinceFuel++;
   if (gen.sinceFuel >= CONFIG.FUEL_FORCE_EVERY) {
@@ -1141,7 +1171,7 @@ function maybePlaceFuel(lanes, gen, guaranteedLane) {
     gen.sinceFuel = 0;
     return;
   }
-  if (Math.random() < 0.06) {
+  if (Math.random() < CONFIG.FUEL_RANDOM_CHANCE) {
     const ground = laneIndices().filter(l => lanes[l] === LANE_TYPE.ROAD);
     if (ground.length > 0) {
       lanes[ground[Math.floor(Math.random() * ground.length)]] = LANE_TYPE.FUEL;
@@ -1150,10 +1180,8 @@ function maybePlaceFuel(lanes, gen, guaranteedLane) {
   }
 }
 
-// 道具布置：平均 40~60 段一枚（PICKUP_MIN_GAP=40 到期后每次机会 20% 概率，
-// 期望 ≈ 45~50 段），四种按 BOOST→SLOW→TRIPLE→MAGNET 顺序轮换（轮换保证均匀出现，
-// 每种期望间隔 ≈ 180~200 段）。
-// 只放在纯 ROAD 车道上 —— 道具是"可安全碾压的路面"，不占障碍名额、不影响可解性。
+// 道具按 BOOST→SLOW→TRIPLE→MAGNET 轮换；布置机会间隔拉大后，整体奖励更稀疏。
+// 只放在纯 ROAD 车道；TRIPLE 还会在地形装饰完成后统一过滤过近的重复来源。
 function maybePlacePickup(lanes, gen, index) {
   if (index < CONFIG.WARMUP_SEGMENTS) return;
   gen.sincePickup++;
@@ -1830,7 +1858,7 @@ function renderTrack(ctx) {
       } else if (type === LANE_TYPE.FUEL) {
         renderFuel(ctx, lane, i, zNear, zFar);
       } else if (type === LANE_TYPE.BOOST || type === LANE_TYPE.SLOW || type === LANE_TYPE.TRIPLE || type === LANE_TYPE.MAGNET) {
-        renderPickup(ctx, type, lane, i, zNear, zFar);
+        if (type !== LANE_TYPE.TRIPLE || STATE.tripleT <= 0) renderPickup(ctx, type, lane, i, zNear, zFar);
       }
     }
     // 敌人（独立实体，不占 LANE_TYPE）：与障碍同遍按深度排序渲染
@@ -4446,7 +4474,9 @@ function enableFlightTerrain() {
   if (!terrain) return false;
   STATE.terrainEnabled = true;
   STATE.groundHeight = terrain.heightAt(STATE.position, STATE.movement.lanePosition);
-  STATE.track = STATE.track.map((segment) => terrain.decorateSegment(segment));
+  const spacing = { lastTripleIndex: -Infinity };
+  STATE.track = STATE.track.map((segment) => spaceSuperPickups(spacing, decorateFlightSegment(segment)));
+  if (STATE.gen) STATE.gen.lastTripleIndex = Math.max(STATE.gen.lastTripleIndex, spacing.lastTripleIndex);
   if (!STATE.wormhole) resetWormhole();
   return true;
 }
@@ -4590,6 +4620,19 @@ function heightAboveLane(position, lane) {
     : 0);
 }
 
+// 临时加速共享同一巡航基线，叠加、到期或减速时都不能把加速后的速度误当成基线。
+function currentCruiseSpeed() {
+  return STATE.fuelBurstPrevSpeed > 0 ? STATE.fuelBurstPrevSpeed
+    : (STATE.boostPrevSpeed > 0 ? STATE.boostPrevSpeed : STATE.speed);
+}
+
+function applyCruiseSpeed(speed) {
+  STATE.boostPrevSpeed = STATE.boostT > 0 ? speed : 0;
+  STATE.fuelBurstPrevSpeed = STATE.fuelBurstT > 0 ? speed : 0;
+  STATE.speed = STATE.boostT > 0 ? Math.max(CONFIG.BOOST_SPEED, speed + CONFIG.BOOST_SPEED_BONUS)
+    : (STATE.fuelBurstT > 0 ? Math.max(CONFIG.FUEL_BURST_SPEED, speed + CONFIG.BOOST_SPEED_BONUS) : speed);
+}
+
 function updatePhysics(dt) {
   if (STATE.mode !== 'PLAYING') return;
   if (wormholeActive()) { advanceWormhole(dt); return; }
@@ -4631,34 +4674,15 @@ function updatePhysics(dt) {
       }
     }
   }
-  // 平滑加速：初速 8，ACCEL 0.5 → (25-8)/0.5 = 34 秒到常规满速。
-  // BOOST 超级加速期间：速度锁定 BOOST_SPEED(36)；
-  // 到期后恢复到吃闪电前的速度（boostPrevSpeed），再继续按 ACCEL 正常爬升。
-  // v1.2.0 燃料爆发：同理锁定速度，到期后恢复。
-  if (STATE.boostT > 0) {
-    STATE.speed = CONFIG.BOOST_SPEED;
-  } else if (STATE.fuelBurstT > 0) {
-    STATE.speed = CONFIG.FUEL_BURST_SPEED;
-  } else {
-    if (STATE.boostPrevSpeed > 0) {          // BOOST 刚结束：恢复加速前速度
-      STATE.speed = STATE.boostPrevSpeed;
-      STATE.boostPrevSpeed = 0;
-    }
-    if (STATE.fuelBurstPrevSpeed > 0) {      // 燃料爆发刚结束：恢复加速前速度
-      STATE.speed = STATE.fuelBurstPrevSpeed;
-      STATE.fuelBurstPrevSpeed = 0;
-    }
-    STATE.speed = Math.min(CONFIG.MAX_SPEED, STATE.speed + CONFIG.ACCEL * dt);
-    // 教学模式（练习场）：限速 TUTORIAL_SPEED_CAP，给新手充裕反应时间
-    if (STATE.tutorial && STATE.tutorial.active) {
-      STATE.speed = Math.min(STATE.speed, CONFIG.TUTORIAL_SPEED_CAP);
-    }
-  }
+  // 正常行驶与临时加速期间都积累巡航速度；折跃已在上方返回，暂停此处累积。
+  let cruiseSpeed = advanceCruiseSpeed(currentCruiseSpeed(), dt, cruiseOptions());
+  if (STATE.tutorial && STATE.tutorial.active) cruiseSpeed = Math.min(cruiseSpeed, CONFIG.TUTORIAL_SPEED_CAP);
+  applyCruiseSpeed(cruiseSpeed);
 
   // 扫掠：一帧移动距离按 ≤ 0.5 segment 切分子步，
   // 每个子步推进后做一次碰撞检测 —— 一帧跨越多段时逐段覆盖。
   // 子步数按"玩家位移与弹道位移的最大值"切分：弹速 = 玩家 + BULLET_SPEED(40)，
-  // 最快 36+40 = 76 段/秒，若只按玩家速度切分，低速时子弹一子步可跨 3 段穿判。
+  // 子步按实时航速与弹速自适应增加，避免持续提速后子弹或玩家跨段漏判。
   const maxV = STATE.speed + (STATE.shots.length > 0 ? CONFIG.BULLET_SPEED : 0);
   const steps = Math.max(1, Math.ceil((maxV * dt) / 0.5));
   const sdt = dt / steps;
@@ -5166,7 +5190,7 @@ function collectPickup(seg, lane, type) {
     pickupFuel(seg, lane);
   } else if (type === LANE_TYPE.BOOST) {
     seg.lanes[lane] = LANE_TYPE.ROAD;
-    if (STATE.boostT <= 0) STATE.boostPrevSpeed = STATE.speed;
+    if (STATE.boostT <= 0) STATE.boostPrevSpeed = currentCruiseSpeed();
     STATE.boostT = CONFIG.BOOST_DURATION;
     STATE.boostGraceT = 0;
     STATE.boostWarnStage = 0;
@@ -5174,9 +5198,14 @@ function collectPickup(seg, lane, type) {
     syncPropulsionAudio();
   } else if (type === LANE_TYPE.SLOW) {
     seg.lanes[lane] = LANE_TYPE.ROAD;
-    STATE.speed = Math.max(CONFIG.INITIAL_SPEED, STATE.speed * CONFIG.SLOW_FACTOR);
+    applyCruiseSpeed(Math.max(CONFIG.INITIAL_SPEED, currentCruiseSpeed() * CONFIG.SLOW_FACTOR));
     sfxSlow();
   } else if (type === LANE_TYPE.TRIPLE) {
+    if (STATE.tripleT > 0) {
+      // 已从身边经过的隐藏奖励作废，避免倒计时恰好归零时在同一格立刻再次变身。
+      seg.lanes[lane] = LANE_TYPE.ROAD;
+      return false;
+    }
     seg.lanes[lane] = LANE_TYPE.ROAD;
     STATE.tripleT = CONFIG.TRIPLE_DURATION;
     STATE.tripleWarnStage = 0;

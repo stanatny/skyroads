@@ -153,7 +153,7 @@ test('repeated placement reuses owned geometries and materials', () => {
   }
 });
 
-test('dense real track renders every obstacle without clipping, state changes, or resource growth', () => {
+test('generated track with a dense stress window renders every obstacle without clipping or resource growth', () => {
   const h = createHarness();
   // 从真实生成器选取最密集的视距窗口；调速改变走廊长度后仍保留同等压力门槛。
   vm.runInContext(`{
@@ -173,6 +173,14 @@ test('dense real track renders every obstacle without clipping, state changes, o
       position = end - 117;
     }
   }
+  // 生成密度会随平衡调整变化；在真实窗口补齐 144 个模型，独立验证渲染容量而非绑定掉落/障碍频率。
+  for (let index = position - 2; index < position + 118 && maximumCount < 144; index += 1) {
+    for (let lane = 0; lane < 7 && maximumCount < 144; lane += 1) {
+      if (lane === 3 || wallTypes.includes(track[index].lanes[lane])) continue;
+      track[index].lanes[lane] = wallTypes[maximumCount % wallTypes.length];
+      maximumCount += 1;
+    }
+  }
   const state = {
     mode: 'PLAYING', position, time: 10, elapsedMs: 10000, runId: 'dense-model-test',
     movement: { lanePosition: 3 }, playerY: 0, fuel: 100, reducedMotion: false,
@@ -188,7 +196,7 @@ test('dense real track renders every obstacle without clipping, state changes, o
       h.models.add(type, coordinates.laneX(lane), coordinates.segmentZ(index, position), index);
     }
   }
-  assert.ok(obstacles >= 120, `Dense fixture contains only ${obstacles} obstacles`);
+  assert.ok(obstacles >= 144, `Dense fixture contains only ${obstacles} obstacles`);
 
   let scene;
   const listeners = new Set();

@@ -729,13 +729,13 @@ test('short medium and high buildings require their same-lane clear approaches i
     return JSON.stringify({
       cluster: [
         clusterWall(9, 0.7),
-        clusterWall(10, 0.7),
+        clusterWall(11, 0.7),
         clusterWall(14, 0),
         clusterWall(15, 0),
       ],
       cooldown: [
         cooldownWall(9, 0.7),
-        cooldownWall(10, 0.7),
+        cooldownWall(11, 0.7),
         cooldownWall(14, 0),
         cooldownWall(15, 0),
       ],
