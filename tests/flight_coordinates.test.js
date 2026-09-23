@@ -190,35 +190,36 @@ test('enemy coordinates follow the real rest, warning, movement, and arrival sta
   }
 });
 
-test('both drone render paths and destruction fragments follow altitude without raising the road', () => {
+test('both drone render paths and destruction fragments keep fixed altitude during horizontal patrol', () => {
   for (const detailed of [false, true]) {
-    const h = createRenderHarness(detailed);
-    const enemy = { type: 'drone', lane: 3, fromLane: 3, toLane: 3, state: 'move', moveT: 0,
-      altitude: 0, fromAltitude: 0, toAltitude: h.config.DRONE_PATROL_RISE };
-    const name = detailed ? 'object_drone_interceptor' : 'enemy_arrowhead_fuselage';
-    h.state.track[11].enemies = [enemy];
-    h.renderer.render(h.state);
-    const original = h.position(name);
-    const road = h.position('road_deck');
-    for (const step of [0.1, 0.1, 0.2]) {
-      h.game.updateEnemies(step);
-      assert.ok(enemy.altitude > 0);
+    for (const altitude of [0, 720]) {
+      const h = createRenderHarness(detailed);
+      const enemy = { type: 'drone', lane: 3, fromLane: 3, toLane: 4, state: 'move', moveT: 0, altitude };
+      const name = detailed ? 'object_drone_interceptor' : 'enemy_arrowhead_fuselage';
+      h.state.track[11].enemies = [enemy];
       h.renderer.render(h.state);
-      const placed = h.position(name);
-      close(placed.y - original.y, h.coordinates.heightY(enemy.altitude), 1e-6);
-      close(placed.x, original.x);
-      close(placed.z, original.z);
-      assert.deepEqual(h.position('road_deck'), road, 'Ground and its shadow receiver stay grounded');
+      const original = h.position(name);
+      const road = h.position('road_deck');
+      for (const step of [0.1, 0.1, 0.2]) {
+        h.game.updateEnemies(step);
+        assert.equal(enemy.altitude, altitude);
+        h.renderer.render(h.state);
+        const placed = h.position(name);
+        close(placed.y, original.y, 1e-6);
+        close(placed.x - original.x, h.coordinates.laneX(h.game.enemyLane(enemy)) - h.coordinates.laneX(3), 1e-6);
+        close(placed.z, original.z);
+        assert.deepEqual(h.position('road_deck'), road, 'Ground and its shadow receiver stay grounded');
+      }
+      h.state.track[11].enemies = [];
+      h.renderer.render(h.state);
+      const lights = h.mesh('warning_lights');
+      assert.ok(lights.count >= 10);
+      for (let slot = lights.count - 10; slot < lights.count; slot += 1) {
+        close(h.position('warning_lights', slot).y,
+          h.coordinates.heightY(h.config.DRONE_HEIGHT + altitude), 1e-6);
+      }
+      h.renderer.dispose();
     }
-    h.state.track[11].enemies = [];
-    h.renderer.render(h.state);
-    const lights = h.mesh('warning_lights');
-    assert.ok(lights.count >= 10);
-    for (let slot = lights.count - 10; slot < lights.count; slot += 1) {
-      close(h.position('warning_lights', slot).y,
-        h.coordinates.heightY(h.config.DRONE_HEIGHT + enemy.altitude), 1e-6);
-    }
-    h.renderer.dispose();
   }
 });
 

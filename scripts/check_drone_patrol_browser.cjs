@@ -14,9 +14,9 @@ catch (_) {
 }
 
 const previewUrl = process.argv[2] || process.env.SKYROADS_PREVIEW_URL || 'http://127.0.0.1:7201/';
-const evidenceDirectory = path.resolve(process.argv[3] || '/tmp/skyroads_drone_square');
+const evidenceDirectory = path.resolve(process.argv[3] || '/tmp/skyroads_drone_horizontal');
 const report = { url: previewUrl, checks: [], samples: {}, errors: [], fixture: {
-  description: 'Real Chrome WebGL and keyboard input; deterministic frame clock. Random obstacles are cleared around test subjects. Collision targets rest temporarily; the patrol film holds the player at a fixed position to show a complete real drone cycle.',
+  description: 'Real Chrome WebGL and keyboard input; deterministic frame clock. Random obstacles are cleared around test subjects. Two fixed-altitude fixtures exercise actual horizontal patrols. Jump and projectile targets rest temporarily; the ground collision regression approaches a drone after its real patrol completes a round trip.',
   noProductionState: true,
 } };
 fs.mkdirSync(evidenceDirectory, { recursive: true });
@@ -84,9 +84,9 @@ async function setup(page, { position = 246, speed = 0, lane = 1.5, droneLane = 
     window.__testDrone = {
       type: 'drone', lane: options.droneLane, spawnLane: options.droneLane,
       fromLane: options.droneLane, toLane: options.droneLane, phase: 0,
-      altitude: options.altitude, fromAltitude: options.altitude, toAltitude: options.altitude,
+      altitude: options.altitude,
       state: 'rest', restT: options.moving ? 0.25 : 10, warnT: 0, moveT: 1,
-      patrolLaneA: options.droneLane, patrolLaneB: options.moving ? 2 : options.droneLane, patrolStep: 0,
+      patrolLaneA: options.droneLane, patrolLaneB: options.moving ? 2 : options.droneLane,
     };
     STATE.track[250].enemies = [__testDrone];
     window.__droneBursts = [];
@@ -140,31 +140,42 @@ async function main() {
     close((await sample(page)).speed, 10.6);
     report.checks.push('Real physics accelerates from 8 to 10.6 in four seconds; continuous tail growth, tutorial cap 16 and boost minimum 36 are configured');
 
-    await setup(page);
-    const corners = [];
-    const warnings = [];
-    let previous = (await sample(page)).drone.state;
-    const start = await sample(page);
-    assert.ok(start.mesh, 'Real drone instance matrix must be observed');
-    for (let frame = 0; frame < 312; frame += 1) {
-      await advance(page, 1 / 60);
-      const current = await sample(page);
-      const e = current.drone;
+    report.samples.horizontal = {};
+    for (const altitude of [0, 720]) {
+      await setup(page, { altitude });
+      const endpoints = [];
+      const warnings = [];
+      const phases = new Set();
+      let previous = (await sample(page)).drone.state;
+      const start = await sample(page);
+      assert.ok(start.mesh, 'Real drone instance matrix must be observed');
       const route = await page.evaluate(() => Skyroads.flightTerrain.routeAt(250));
-      assert.ok(!route.safeLanes.some((safe) => Math.abs(e.actualLane - safe) < 0.5));
-      close(current.mesh.y - start.mesh.y, e.altitude / 300);
-      close(current.mesh.x - start.mesh.x, (e.actualLane - start.drone.actualLane) * 3.4);
-      if (previous === 'move' && e.state === 'rest') {
-        corners.push([e.actualLane, e.altitude]);
-        await screenshot(page, `corner_${corners.length}`);
+      for (let frame = 0; frame < 312; frame += 1) {
+        await advance(page, 1 / 60);
+        const current = await sample(page);
+        const e = current.drone;
+        phases.add(e.state);
+        assert.ok(!route.safeLanes.some((safe) => Math.abs(e.actualLane - safe) < 0.5));
+        close(e.altitude, altitude);
+        close(current.mesh.y, start.mesh.y);
+        close(current.mesh.x - start.mesh.x, (e.actualLane - start.drone.actualLane) * 3.4);
+        if (previous === 'move' && e.state === 'rest') {
+          endpoints.push(e.actualLane);
+          if (endpoints.length <= 2) await screenshot(page, `horizontal_${altitude}_${endpoints.length}`);
+        }
+        if (previous !== 'warn' && e.state === 'warn') {
+          assert.notEqual(e.toLane, e.fromLane, 'A patrol warning must describe a lateral move');
+          warnings.push(e.toLane - e.fromLane);
+        }
+        previous = e.state;
       }
-      if (previous !== 'warn' && e.state === 'warn') warnings.push([e.toLane - e.fromLane, e.toAltitude - e.fromAltitude]);
-      previous = e.state;
+      assert.deepEqual(endpoints.slice(0, 4), [2, 1, 2, 1]);
+      assert.deepEqual(warnings.slice(0, 4), [1, -1, 1, -1]);
+      assert.deepEqual([...phases].sort(), ['move', 'rest', 'warn']);
+      report.samples.horizontal[altitude] = { endpoints, warnings, start, end: await sample(page) };
+      report.checks.push(`Real 3D drone at altitude ${altitude} reverses left/right for two round trips; model height stays fixed through rest, warning and movement`);
     }
-    assert.deepEqual(corners.slice(0, 4), [[2, 0], [2, 720], [1, 720], [1, 0]]);
-    assert.deepEqual(warnings.slice(0, 4), [[1, 0], [0, 720], [-1, 0], [0, -720]]);
-    report.samples.square = { corners, warnings, start, end: await sample(page) };
-    report.checks.push('Real 3D instance matrices follow all four physical square edges and warning directions without entering terrain safe lanes');
+    close(report.samples.horizontal[720].start.mesh.y - report.samples.horizontal[0].start.mesh.y, 720 / 300);
 
     await page.keyboard.press('p');
     const paused = await sample(page);
@@ -176,6 +187,33 @@ async function main() {
     assert.equal((await sample(page)).mode, 'PLAYING');
     assert.notDeepEqual((await sample(page)).drone, paused.drone);
     report.checks.push('Real P key pauses every patrol coordinate/timer and resumes the same patrol');
+
+    // 让地面无人机先完成真实往返，再迎面驶入；不能靠自动升高消除地面危险。
+    await setup(page, { position: 248.5 });
+    let arrivals = 0;
+    let previousPhase = (await sample(page)).drone.state;
+    for (let frame = 0; frame < 180 && arrivals < 2; frame += 1) {
+      await advance(page, 1 / 60);
+      const phase = (await sample(page)).drone.state;
+      if (previousPhase === 'move' && phase === 'rest') arrivals += 1;
+      previousPhase = phase;
+    }
+    assert.equal(arrivals, 2);
+    const approach = await sample(page);
+    await page.evaluate(() => {
+      const lane = enemyLane(__testDrone);
+      resetMovement(STATE.movement, lane);
+      STATE.groundHeight = Skyroads.flightTerrain.heightAt(STATE.position, lane);
+      STATE.speed = 8;
+    });
+    await advance(page, 0.3);
+    const groundImpact = await sample(page);
+    assert.equal(groundImpact.mode, 'GAMEOVER');
+    assert.equal(groundImpact.deathReason, 'enemy');
+    close(groundImpact.playerY, 0);
+    close(groundImpact.drone.altitude, 0);
+    report.samples.groundPatrolImpact = { approach, impact: groundImpact };
+    report.checks.push('A ground drone still causes a real ground-level collision after completing a patrol round trip instead of rising out of the flight path');
 
     await setup(page, { position: 248.5, speed: 8, lane: 1, moving: false });
     await page.keyboard.press('Space');
@@ -226,22 +264,25 @@ async function main() {
     report.samples.highShot = shot;
     report.checks.push('Real J input destroys a high drone; the actual explosion origin follows its height');
 
-    await setup(page, { position: 248.5 });
+    await setup(page, { position: 248.5, altitude: 720 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.evaluate(() => { STATE.reducedMotion = true; render(); });
     await advance(page, 1.8);
     const reduced = await sample(page);
     assert.equal(reduced.drone.state, 'warn');
-    assert.equal(reduced.drone.toAltitude, 720);
-    await screenshot(page, 'vertical_warning_reduced');
+    assert.equal(reduced.drone.fromLane, 2);
+    assert.equal(reduced.drone.toLane, 1);
+    assert.equal(reduced.drone.altitude, 720);
+    await screenshot(page, 'horizontal_warning_reduced');
     await advance(page, 0.7);
     assert.equal((await sample(page)).drone.altitude, 720);
+    assert.equal((await sample(page)).drone.actualLane, 1);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => { window.dispatchEvent(new Event('resize')); render(); });
     await screenshot(page, 'mobile_390_reduced');
     assert.equal((await sample(page)).flight.width, 390);
     report.samples.reduced = reduced;
-    report.checks.push('Reduced motion retains functional vertical patrol and persistent direction lights at 390 px');
+    report.checks.push('Reduced motion retains horizontal return flight at fixed altitude and lateral warning lights at 390 px');
 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -264,7 +305,7 @@ async function main() {
       await setup(page, { position: 248.5 });
       await page.evaluate(() => {
         const label = document.createElement('div');
-        label.textContent = '方形巡航演示 · 定点镜头观察真实运动';
+        label.textContent = '水平巡航演示 · 定点镜头观察真实运动';
         label.style.cssText = 'position:fixed;left:50%;top:150px;transform:translateX(-50%);z-index:9999;padding:9px 15px;border:1px solid #64cbd077;border-radius:8px;background:#061723dd;color:#cef5ff;font:16px system-ui;pointer-events:none;white-space:nowrap';
         document.body.appendChild(label);
       });
@@ -276,9 +317,9 @@ async function main() {
       }
       execFileSync(process.env.SKYROADS_FFMPEG_PATH || 'ffmpeg', ['-y', '-loglevel', 'error', '-framerate', '24',
         '-i', path.join(frames, '%04d.png'), '-c:v', 'libx264', '-crf', '20', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
-        path.join(evidenceDirectory, 'drone_square_patrol.mp4')]);
-      fs.copyFileSync(path.join(frames, '0055.png'), path.join(evidenceDirectory, 'drone_square_cover.png'));
-      report.video = { file: 'drone_square_patrol.mp4', duration: 6, fps: 24, camera: 'Fixed-position inspection fixture; actual unmodified patrol state machine and renderer' };
+        path.join(evidenceDirectory, 'drone_horizontal_patrol.mp4')]);
+      fs.copyFileSync(path.join(frames, '0055.png'), path.join(evidenceDirectory, 'drone_horizontal_cover.png'));
+      report.video = { file: 'drone_horizontal_patrol.mp4', duration: 6, fps: 24, camera: 'Fixed-position inspection fixture; actual unmodified patrol state machine and renderer' };
     }
     assert.deepEqual(report.errors, []);
     report.passed = true;

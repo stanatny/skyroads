@@ -1642,7 +1642,7 @@ test('renderEffects paints expiry warning vignettes without throwing (boost / fu
 });
 
 
-test('Canvas drones lift with patrol altitude while their ground shadow stays on the deck', () => {
+test('Canvas low and high drones share deck shadows while keeping their assigned flight height', () => {
   for (const options of [{}, { droneVisual: false, missing: ['droneScout'] }]) {
     const h = createHarness(options);
     const e = { type: 'drone', lane: 2, fromLane: 2, toLane: 2, state: 'rest', phase: 0, visualVariant: 'droneScout' };
@@ -1658,15 +1658,22 @@ test('Canvas drones lift with patrol altitude while their ground shadow stays on
   }
 });
 
-test('Canvas ascent and descent warnings stay visible with reduced motion', () => {
-  for (const [fromAltitude, toAltitude, sign] of [[0, 720, -1], [720, 0, 1]]) {
-    const h = createHarness();
-    const e = { type: 'drone', lane: 2, fromLane: 2, toLane: 2, state: 'warn', phase: 0,
-      fromAltitude, toAltitude, altitude: fromAltitude, visualVariant: 'droneScout' };
-    const events = drawEnemy(h, e, { reduced: true });
-    const cue = events.find((event) => event.type === 'fill' && event.style === '#fff4f7');
-    assert.ok(cue);
-    const points = cue.path.filter((part) => part.length >= 3);
-    assert.equal(Math.sign(points[0][2] - (points[1][2] + points[2][2]) / 2), sign);
+test('Canvas low and high patrol warnings point left or right with reduced motion', () => {
+  for (const options of [{}, { droneVisual: false, missing: ['droneScout'] }]) {
+    for (const altitude of [0, 720]) {
+      for (const direction of [-1, 1]) {
+        const h = createHarness(options);
+        const e = Object.freeze({ type: 'drone', lane: 2, fromLane: 2, toLane: 2 + direction,
+          state: 'warn', phase: 0, altitude, visualVariant: 'droneScout' });
+        const events = drawEnemy(h, e, { time: 1, reduced: true });
+        assert.deepEqual(drawEnemy(h, e, { time: 8, reduced: true }), events);
+        const cue = events.find((event) => event.type === 'fill' && event.style === '#fff4f7');
+        assert.ok(cue);
+        const points = cue.path.filter((part) => part.length >= 3);
+        assert.equal(Math.sign(points[0][1] - (points[1][1] + points[2][1]) / 2), direction);
+        assert.ok(Math.abs(points[0][2] - (points[1][2] + points[2][2]) / 2) < 1e-8,
+          'The arrow points horizontally rather than toward another flight height');
+      }
+    }
   }
 });

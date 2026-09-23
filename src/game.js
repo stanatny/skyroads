@@ -202,10 +202,11 @@ const CONFIG = {
   ENEMY_MIN_INDEX: 80,         // segment ≥ 80 才出现敌人（热身与新手期无战斗压力）
   ENEMY_KILL_SCORE: 20,        // 击毁奖励 +20m（固定值，原连击倍率系统已废弃）
   DRONE_HEIGHT: 500,           // 低位无人机的机顶；巡航时整体叠加 altitude
-  DRONE_PATROL_RISE: 720,      // 方形边长与一条车道同为 720；高位覆盖单跳顶点 879
-  DRONE_CORNER_REST: 0.25,    // 转角短暂停留，随后仍有完整 0.6 秒方向预警
+  DRONE_LOW_AIR_ALTITUDE: 720, // 少量低空无人机固定在此高度，危险区覆盖单跳顶点 879
+  DRONE_LOW_AIR_RATIO: 0.20,   // 其余无人机保持低位，持续阻挡贴地飞行
+  DRONE_PATROL_REST: 0.25,     // 横移到端点后短暂停留，再给出完整 0.6 秒方向预警
   TURRET_HEIGHT: 1900,         // 重炮塔高度：1900 > 二段跳上限 2×879=1758（余量 8%）→ 跳不过，必须变道、击毁或导弹清除
-  // 无人机方形巡逻状态机（rest → warn → move，横向和纵向共用）：
+  // 无人机定高横移状态机（rest → warn → move）：
   DRONE_WARN_TIME: 0.6,        // 换道预警秒数：机体急促闪烁 + 原地抖动 + 向目标侧倾斜，
                                //   车道位置保持不动 —— 推导：满速 25 段/秒下玩家有 ≥0.6s
                                //   反应窗口，≈ 变道耗时 0.18s 的 3.3 倍 ✓ 足以预判规避
@@ -1201,8 +1202,8 @@ function maybePlacePickup(lanes, gen, index) {
 // （簇段避开 clusterLane，缓冲段避开 safeLane）—— "沿保证车道前进"永远安全。
 // 只放在纯 ROAD 车道（不与墙/缺口/道具叠放），每段最多 1 个；
 // segment ≥ ENEMY_MIN_INDEX(80) 才出现，概率 0.06 + 0.10×难度 随难度爬升。
-// drone：沿相邻车道与 720 高差组成的方形巡逻，低位可跳过、高位可从下方穿过；
-//   每条边先预警 0.6s 再平滑移动 0.4s，渲染与碰撞共用连续车道及高度；
+// drone：在相邻合法车道间定高往返，多数低位阻挡贴地飞行，少数低空拦截单跳；
+//   每次先预警 0.6s 再平滑横移 0.4s，渲染与碰撞共用连续车道及固定高度；
 // turret：重型炮塔（暗紫），高度 1900 > 二段跳 1758，跳不过，炮管追踪玩家方向，
 //   只能变道躲避、击毁或用导弹清除 —— 高难度（d>0.3）才混编出现。
 function maybePlaceEnemy(lanes, gen, index, d, guaranteedLane) {
@@ -1220,15 +1221,18 @@ function maybePlaceEnemy(lanes, gen, index, d, guaranteedLane) {
       phase: Math.random() * Math.PI * 2,
     };
   }
+  // 复用外观相位抽样确定空域，不额外消耗随机数，保留后续赛道与奖励分布。
+  const phase = Math.random() * Math.PI * 2;
+  const altitude = phase < Math.PI * 2 * CONFIG.DRONE_LOW_AIR_RATIO ? CONFIG.DRONE_LOW_AIR_ALTITUDE : 0;
   return {
     type: 'drone', lane: lane, spawnLane: lane,
     visualVariant: worldArt && typeof worldArt.variantKey === 'function'
       ? worldArt.variantKey('drone', index, lane) : null,
-    phase: Math.random() * Math.PI * 2,
-    // 方形巡逻每条边共用 rest → warn → move，升降高度由物理推进。
+    phase,
+    // 空域在生成时固定，巡逻与玩家接近都不会改变高度。
     state: 'rest', fromLane: lane, toLane: lane,
     moveT: 1, warnT: 0, restT: 0.25 + Math.random() * 0.75,
-    altitude: 0, fromAltitude: 0, toAltitude: 0,
+    altitude,
   };
 }
 
@@ -2228,9 +2232,8 @@ function drawDroneShadow(ctx, cx, zMid) {
 function drawDroneDirectionCues(ctx, e, cx, zMid, spriteBounds) {
   if (e.state !== 'warn') return;
   const direction = Math.sign(e.toLane - e.fromLane);
-  const vertical = Math.sign((e.toAltitude || 0) - (e.fromAltitude || 0));
-  if (direction === 0 && vertical === 0) return;
-  const landing = project(laneCenterX(e.toLane), e.toAltitude || 0, zMid);
+  if (direction === 0) return;
+  const landing = project(laneCenterX(e.toLane), enemyAltitude(e), zMid);
   if (!landing.visible || !spriteBounds) return;
   const unit = landing.scale * STATE.width / 2;
   const pulse = canvasPulse(0.62, 0.28, 14, e.phase);
@@ -2243,23 +2246,15 @@ function drawDroneDirectionCues(ctx, e, cx, zMid, spriteBounds) {
   ctx.stroke();
 
   const size = Math.max(5, Math.min(18, spriteBounds.width * 0.32));
-  const anchorX = vertical ? spriteBounds.x + spriteBounds.width / 2 : (direction > 0
+  const anchorX = direction > 0
     ? spriteBounds.x + spriteBounds.width + Math.max(size, spriteBounds.width * 0.1)
-    : spriteBounds.x - Math.max(size, spriteBounds.width * 0.1));
-  const anchorY = vertical
-    ? (vertical > 0 ? spriteBounds.y - size : spriteBounds.y + spriteBounds.height + size)
-    : spriteBounds.y + spriteBounds.height * 0.28;
+    : spriteBounds.x - Math.max(size, spriteBounds.width * 0.1);
+  const anchorY = spriteBounds.y + spriteBounds.height * 0.28;
   ctx.fillStyle = sceneStyle().hostile.cue;
   ctx.beginPath();
-  if (vertical) {
-    ctx.moveTo(anchorX, anchorY - vertical * size);
-    ctx.lineTo(anchorX - size * 0.72, anchorY + vertical * size * 0.55);
-    ctx.lineTo(anchorX + size * 0.72, anchorY + vertical * size * 0.55);
-  } else {
-    ctx.moveTo(anchorX + direction * size, anchorY);
-    ctx.lineTo(anchorX - direction * size * 0.55, anchorY - size * 0.72);
-    ctx.lineTo(anchorX - direction * size * 0.55, anchorY + size * 0.72);
-  }
+  ctx.moveTo(anchorX + direction * size, anchorY);
+  ctx.lineTo(anchorX - direction * size * 0.55, anchorY - size * 0.72);
+  ctx.lineTo(anchorX - direction * size * 0.55, anchorY + size * 0.72);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
@@ -4868,40 +4863,33 @@ function droneCanPatrolTo(seg, fromLane, toLane) {
   return globalThis.Skyroads.flightTerrain.dronePatrolLanes(seg, fromLane).includes(toLane);
 }
 
-// 每次先定下两条相邻合法车道，再沿四条边闭环；空间不足时原地升降。
+// 只在相邻合法车道间往返；无路可走时定高悬停，不借升空让出玩家航线。
 function prepareDroneLeg(e, seg) {
-  if (!Number.isFinite(e.patrolLaneA)) {
+  if (!Number.isFinite(e.patrolDirection)) e.patrolDirection = Math.random() < 0.5 ? -1 : 1;
+  let nextLane = e.fromLane === e.patrolLaneA ? e.patrolLaneB : e.patrolLaneA;
+  if (!Number.isFinite(nextLane) || nextLane === e.fromLane || !droneCanPatrolTo(seg, e.fromLane, nextLane)) {
+    // 阻挡解除后可以恢复横移；重试复用初始方向，避免影响后续赛道的随机序列。
     e.patrolLaneA = e.fromLane;
-    let direction = Math.random() < 0.5 ? -1 : 1;
+    let direction = e.patrolDirection;
     if (!droneCanPatrolTo(seg, e.fromLane, e.fromLane + direction)) direction = -direction;
     e.patrolLaneB = droneCanPatrolTo(seg, e.fromLane, e.fromLane + direction)
       ? e.fromLane + direction : e.fromLane;
-    e.patrolStep = 0;
+    nextLane = e.patrolLaneB;
   }
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const step = e.patrolStep;
-    const nextLane = step < 2 ? e.patrolLaneB : e.patrolLaneA;
-    const nextAltitude = step === 1 || step === 2 ? CONFIG.DRONE_PATROL_RISE : 0;
-    if (nextLane !== e.fromLane && !droneCanPatrolTo(seg, e.fromLane, nextLane)) {
-      // 地形或路面被重设后不穿越墙体、安全道或台侧，退化为本车道升降。
-      e.patrolLaneA = e.fromLane;
-      e.patrolLaneB = e.fromLane;
-      continue;
-    }
-    if (nextLane === e.fromLane && nextAltitude === enemyAltitude(e)) {
-      e.patrolStep = (step + 1) % 4;
-      continue;
-    }
-    e.toLane = nextLane;
-    e.fromAltitude = enemyAltitude(e);
-    e.toAltitude = nextAltitude;
-    e.warnT = CONFIG.DRONE_WARN_TIME;
-    e.state = 'warn';
+  e.toLane = nextLane;
+  if (nextLane === e.fromLane) {
+    // 消耗有效等待时间，避免没有合法邻道时卡在零时长的 rest 循环。
+    e.moveT = 1;
+    e.warnT = 0;
+    e.restT = CONFIG.DRONE_PATROL_REST;
+    e.state = 'rest';
     return;
   }
+  e.warnT = CONFIG.DRONE_WARN_TIME;
+  e.state = 'warn';
 }
 
-// 子步余额跨越转角继续推进，避免帧率改变预警时长或方形巡航周期。
+// 子步余额跨越端点继续推进，避免帧率改变预警时长或往返周期。
 function updateEnemies(sdt) {
   const lo = Math.max(0, Math.floor(STATE.position) - 2);
   const hi = Math.floor(STATE.position) + CONFIG.RENDER_DISTANCE;
@@ -4929,14 +4917,10 @@ function updateEnemies(sdt) {
           const used = Math.min(remaining, (1 - Math.min(1, e.moveT)) * CONFIG.DRONE_MOVE_TIME);
           e.moveT = Math.min(1, e.moveT + used / CONFIG.DRONE_MOVE_TIME);
           remaining -= used;
-          const k = e.moveT * e.moveT * (3 - 2 * e.moveT);
-          e.altitude = (e.fromAltitude || 0) + ((e.toAltitude || 0) - (e.fromAltitude || 0)) * k;
           if (e.moveT >= 1 - 1e-10) {
             e.lane = e.fromLane = e.toLane;
-            e.altitude = e.fromAltitude = e.toAltitude || 0;
             e.moveT = 1;
-            e.patrolStep = ((e.patrolStep || 0) + 1) % 4;
-            e.restT = CONFIG.DRONE_CORNER_REST;
+            e.restT = CONFIG.DRONE_PATROL_REST;
             e.state = 'rest';
           } else break;
         } else break;
@@ -5283,7 +5267,7 @@ function checkCollisions(previousLanePosition, currentLanePosition) {
       const bottom = altitude > 0 ? altitude : -Infinity;
       const top = altitude + (e.type === 'drone' ? CONFIG.DRONE_HEIGHT : CONFIG.TURRET_HEIGHT);
       const playerHeight = heightAboveLane(STATE.position, enemyLane(e));
-      // 升高后下方可穿过，不能把高空无人机判成从地面延伸上去的透明墙。
+      // 固定低空无人机下方可穿过，不能把它判成从地面延伸上去的透明墙。
       if (playerHeight >= bottom && playerHeight <= top) { die('enemy'); return; }
     }
   }

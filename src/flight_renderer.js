@@ -898,13 +898,7 @@
         }
         if (enemy.state === 'warn' || enemy.state === 'move') {
           const side = Math.sign(enemy.toLane - enemy.fromLane);
-          const vertical = Math.sign((enemy.toAltitude || 0) - (enemy.fromAltitude || 0));
-          if (vertical) {
-            for (const sign of [-1, 1]) {
-              amberBatch.add(x + sign * 0.08, y + 0.08, z + 1.65,
-                0.34, 0.06, 0.06, 0, 0, -sign * vertical * 0.75);
-            }
-          } else if (side) {
+          if (side) {
             amberBatch.add(x + side * 1.3, y + 0.10, z, 0.11, 0.15, 0.70);
             amberBatch.add(x + side * 1.48, y + 0.10, z + 0.25, 0.34, 0.15, 0.12, 0, side * 0.65);
           }

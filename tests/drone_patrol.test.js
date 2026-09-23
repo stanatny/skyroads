@@ -35,9 +35,9 @@ function createHarness(seed = 20260921, terrainEnabled = true) {
   return { ...sandbox.game, random, sandbox };
 }
 
-function drone(lane) {
+function drone(lane, altitude = 0) {
   return { type: 'drone', lane, spawnLane: lane, fromLane: lane, toLane: lane,
-    state: 'rest', restT: 0, warnT: 0, moveT: 1 };
+    state: 'rest', restT: 0, warnT: 0, moveT: 1, altitude };
 }
 
 function place(harness, index, lanes, enemies) {
@@ -89,8 +89,8 @@ test('drones patrol open valley lanes with the existing warning and move timing,
   assert.equal(e.fromLane, 2);
   e.restT = 0;
   h.updateEnemies(0.01);
-  assert.equal(e.toLane, 2);
-  assert.equal(e.toAltitude, h.CONFIG.DRONE_PATROL_RISE);
+  assert.equal(e.toLane, 1);
+  assert.equal(h.enemyAltitude(e), 0);
   const visited = new Set();
   for (let step = 0; step < 2400; step += 1) {
     h.updateEnemies(1 / 60);
@@ -101,7 +101,7 @@ test('drones patrol open valley lanes with the existing warning and move timing,
   assert.ok(visited.size > 1);
 });
 
-test('isolated challenge drones rise in place and reverse away from walls or gaps instead of crossing them', () => {
+test('isolated drones hover at fixed altitude and reverse away from walls or gaps without crossing them', () => {
   for (const obstacle of ['WALL_LOW', 'GAP']) {
     const h = createHarness();
     const e = drone(1);
@@ -111,12 +111,20 @@ test('isolated challenge drones rise in place and reverse away from walls or gap
     h.random.random = () => 0.9;
     h.updateEnemies(0.01);
     assert.equal(e.toLane, 0);
-    seg.enemies = [drone(1)];
     lanes[0] = obstacle;
-    for (let step = 0; step < 600; step += 1) h.updateEnemies(1 / 60);
-    assert.equal(h.enemyLane(seg.enemies[0]), 1);
-    assert.ok(h.enemyAltitude(seg.enemies[0]) >= 0);
-    assert.equal(seg.enemies[0].patrolLaneB, 1);
+    for (const altitude of [0, 720]) {
+      seg.enemies = [drone(1, altitude)];
+      let randomCalls = 0;
+      h.random.random = () => { randomCalls += 1; return 0.9; };
+      for (let step = 0; step < 600; step += 1) {
+        h.updateEnemies(1 / 60);
+        assert.equal(h.enemyLane(seg.enemies[0]), 1);
+        assert.equal(h.enemyAltitude(seg.enemies[0]), altitude);
+        assert.equal(seg.enemies[0].state, 'rest');
+      }
+      assert.equal(seg.enemies[0].patrolLaneB, 1);
+      assert.equal(randomCalls, 1, 'Blocked patrol retries reuse their initial direction');
+    }
   }
   const h = createHarness();
   const e = drone(2);
@@ -178,46 +186,93 @@ test('seeded long runs restore challenge encounters without adding enemies to pr
   }
 });
 
-// 方形巡逻不能只升高模型：真实碰撞、定时推进和边界都必须使用同一状态。
-test('a drone completes a closed square through both lanes and single-jump altitude', () => {
-  const h = createHarness();
-  const e = drone(1);
-  place(h, 250, Array(7).fill('ROAD'), [e]);
-  h.random.random = () => 0.9;
-  const corners = [];
-  let last = e.state;
-  for (let frame = 0; frame < 600 && corners.length < 4; frame += 1) {
-    h.updateEnemies(1 / 120);
-    if (last === 'move' && e.state === 'rest') corners.push([h.enemyLane(e), h.enemyAltitude(e)]);
-    last = e.state;
-  }
-  assert.deepEqual(corners, [[2, 0], [2, 720], [1, 720], [1, 0]]);
-  const apex = h.CONFIG.JUMP_VELOCITY ** 2 / (2 * h.CONFIG.GRAVITY);
-  assert.ok(720 <= apex && apex <= 720 + h.CONFIG.DRONE_HEIGHT);
-});
-
-test('patrol altitude is smooth and independent of 20, 60 or 120 Hz update grouping', () => {
-  const samples = [];
-  for (const hz of [20, 60, 120]) {
+// 横移期间高度必须保持不变，不能在玩家靠近时自动升空让出地面。
+test('both drone bands repeatedly reverse horizontally without climbing or descending', () => {
+  for (const altitude of [0, 720]) {
     const h = createHarness();
-    const e = drone(1);
+    const e = drone(1, altitude);
     place(h, 250, Array(7).fill('ROAD'), [e]);
     h.random.random = () => 0.9;
-    let previous = 0;
-    for (let frame = 0; frame < hz * 3; frame += 1) {
-      h.updateEnemies(1 / hz);
-      const height = h.enemyAltitude(e);
-      assert.ok(Math.abs(height - previous) <= h.CONFIG.DRONE_PATROL_RISE * 1.6 / h.CONFIG.DRONE_MOVE_TIME / hz);
-      assert.ok(height >= 0 && height <= h.CONFIG.DRONE_PATROL_RISE);
-      previous = height;
+    const endpoints = [];
+    let last = e.state;
+    for (let frame = 0; frame < 600 && endpoints.length < 4; frame += 1) {
+      h.updateEnemies(1 / 120);
+      assert.equal(h.enemyAltitude(e), altitude);
+      if (last === 'move' && e.state === 'rest') endpoints.push([h.enemyLane(e), h.enemyAltitude(e)]);
+      last = e.state;
     }
-    samples.push([h.enemyLane(e), h.enemyAltitude(e), e.state]);
+    assert.deepEqual(endpoints, [[2, altitude], [1, altitude], [2, altitude], [1, altitude]]);
   }
-  for (const sample of samples.slice(1)) {
-    assert.ok(Math.abs(sample[0] - samples[0][0]) < 1e-8);
-    assert.ok(Math.abs(sample[1] - samples[0][1]) < 1e-8);
-    assert.equal(sample[2], samples[0][2]);
+});
+
+test('horizontal patrol is smooth and consistent at 20, 60 and 120 Hz while altitude stays fixed', () => {
+  for (const altitude of [0, 720]) {
+    const samples = [];
+    for (const hz of [20, 60, 120]) {
+      const h = createHarness();
+      const e = drone(1, altitude);
+      place(h, 250, Array(7).fill('ROAD'), [e]);
+      h.random.random = () => 0.9;
+      let previous = 1;
+      for (let frame = 0; frame < hz * 10; frame += 1) {
+        h.updateEnemies(1 / hz);
+        const lane = h.enemyLane(e);
+        assert.ok(Math.abs(lane - previous) <= 1.6 / h.CONFIG.DRONE_MOVE_TIME / hz);
+        assert.ok(lane >= 1 && lane <= 2);
+        assert.equal(h.enemyAltitude(e), altitude);
+        previous = lane;
+      }
+      samples.push([h.enemyLane(e), e.state, e.warnT, e.restT]);
+    }
+    for (const sample of samples.slice(1)) {
+      assert.ok(Math.abs(sample[0] - samples[0][0]) < 1e-8);
+      assert.equal(sample[1], samples[0][1]);
+      assert.ok(Math.abs(sample[2] - samples[0][2]) < 1e-8);
+      assert.ok(Math.abs(sample[3] - samples[0][3]) < 1e-8);
+    }
   }
+});
+
+test('generated drones mostly block low flight with a minority at fixed single-jump altitude', () => {
+  let low = 0;
+  let airborne = 0;
+  for (const seed of [1, 42, 20260923]) {
+    const h = createHarness(seed);
+    const gen = h.newGenState();
+    for (let index = 0; index < 4000; index += 1) {
+      const segment = h.generateSegment(index, gen);
+      for (const e of segment.enemies || []) {
+        if (e.type !== 'drone') continue;
+        if (e.altitude === 0) low += 1;
+        else {
+          assert.equal(e.altitude, 720);
+          airborne += 1;
+        }
+      }
+    }
+    const apex = h.CONFIG.JUMP_VELOCITY ** 2 / (2 * h.CONFIG.GRAVITY);
+    assert.ok(720 <= apex && apex <= 720 + h.CONFIG.DRONE_HEIGHT);
+  }
+  const ratio = airborne / (low + airborne);
+  assert.ok(ratio > 0.12 && ratio < 0.28, `Airborne fraction: ${ratio}`);
+});
+
+test('a blocked horizontal route can resume when cleared without changing altitude or crossing safety lanes', () => {
+  const h = createHarness();
+  const e = drone(1, 720);
+  const lanes = Array(7).fill('ROAD');
+  lanes[0] = lanes[2] = 'WALL_HIGH';
+  place(h, 250, lanes, [e]);
+  h.random.random = () => 0.9;
+  h.updateEnemies(3);
+  assert.equal(e.state, 'rest');
+  lanes[2] = 'ROAD';
+  h.updateEnemies(0.3);
+  assert.equal(e.state, 'warn');
+  assert.equal(e.toLane, 2);
+  h.updateEnemies(1);
+  assert.equal(h.enemyAltitude(e), 720);
+  assert.equal(h.enemyLane(e), 2);
 });
 
 test('raised drones allow underflight, hit single jumps, and retain boost protection', () => {
@@ -233,6 +288,7 @@ test('raised drones allow underflight, hit single jumps, and retain boost protec
   };
   assert.equal(collide(0), null);
   assert.equal(collide(719.99), null);
+  assert.equal(collide(720), 'enemy');
   assert.equal(collide(879), 'enemy');
   assert.equal(collide(1220), 'enemy');
   assert.equal(collide(1220.01), null);

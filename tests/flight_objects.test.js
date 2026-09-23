@@ -94,32 +94,42 @@ test('drone geometry and all attached lights follow authoritative physical altit
   }
 });
 
-test('vertical patrol signals have static up and down arrowheads in warning and movement', () => {
+test('low and high patrols keep horizontal arrowheads readable at a fixed altitude', () => {
   const h = harness();
-  for (const state of ['warn', 'move']) {
-    for (const direction of [-1, 1]) {
-      clear(h);
-      const altitude = direction > 0 ? 0 : 720;
-      const enemy = Object.freeze({ type: 'drone', state, fromLane: 3, toLane: 3,
-        altitude, fromAltitude: altitude, toAltitude: direction > 0 ? 720 : 0 });
-      h.models.addEnemy(enemy, 0, 0, 0);
-      const emitters = h.batches.find((batch) => batch.name === 'object_hostile_emitters');
-      const arrows = emitters.calls.filter((call) => call[9] === 0xf7a73d);
-      assert.equal(arrows.length, 2, `${state}: both strokes must be visible without animation`);
-      for (const call of arrows) {
-        const transform = new h.THREE.Object3D();
-        transform.position.set(...call.slice(0, 3));
-        transform.scale.set(...call.slice(3, 6));
-        transform.rotation.set(...call.slice(6, 9));
-        transform.updateMatrix();
-        const inner = new h.THREE.Vector3(-Math.sign(call[0]), 0, 0).applyMatrix4(transform.matrix);
-        const outer = new h.THREE.Vector3(Math.sign(call[0]), 0, 0).applyMatrix4(transform.matrix);
-        assert.ok(direction * (inner.y - outer.y) > 0.1, 'Arrow tip must point toward the target height');
+  for (const altitude of [0, 720]) {
+    for (const state of ['warn', 'move']) {
+      for (const direction of [-1, 1]) {
+        clear(h);
+        const enemy = Object.freeze({ type: 'drone', state, fromLane: 3,
+          toLane: 3 + direction, altitude });
+        h.models.addEnemy(enemy, 0, 0, 0);
+        const emitters = h.batches.find((batch) => batch.name === 'object_hostile_emitters');
+        const arrows = emitters.calls.filter((call) => call[9] === 0xf7a73d);
+        assert.equal(arrows.length, 2, `${state}: both strokes remain visible without animation`);
+        const ends = arrows.map((call) => {
+          const transform = new h.THREE.Object3D();
+          transform.position.set(...call.slice(0, 3));
+          transform.scale.set(...call.slice(3, 6));
+          transform.rotation.set(...call.slice(6, 9));
+          transform.updateMatrix();
+          const tip = new h.THREE.Vector3(direction * 0.5, 0, 0).applyMatrix4(transform.matrix);
+          const tail = new h.THREE.Vector3(-direction * 0.5, 0, 0).applyMatrix4(transform.matrix);
+          assert.ok(direction * (tip.x - tail.x) > 0.1);
+          assert.ok(direction * tip.x > 1, 'The cue stays on the wing facing the target lane');
+          return { tip, tail };
+        });
+        assert.ok(Math.abs(ends[0].tip.y - ends[1].tip.y) < Math.abs(ends[0].tail.y - ends[1].tail.y),
+          'Both strokes converge toward the next horizontal lane');
+        const bounds = placedBounds(h);
+        assert.ok(Math.abs(bounds.max.y - (500 + altitude) / 300) < 1e-6);
+        assert.ok(bounds.min.x >= -1.428 && bounds.max.x <= 1.428);
       }
-      const bounds = placedBounds(h);
-      assert.ok(Math.abs(bounds.max.y - (500 + altitude) / 300) < 1e-6);
-      assert.ok(bounds.min.x >= -1.428 && bounds.max.x <= 1.428);
     }
+    clear(h);
+    h.models.addEnemy({ type: 'drone', state: 'warn', fromLane: 3, toLane: 3, altitude }, 0, 0, 0);
+    const emitters = h.batches.find((batch) => batch.name === 'object_hostile_emitters');
+    assert.equal(emitters.calls.filter((call) => call[9] === 0xf7a73d).length, 0,
+      'A stationary patrol does not show a misleading direction cue');
   }
 });
 
@@ -136,12 +146,12 @@ test('swiveling turret keeps one-lane visual clearance and exact jump height', (
   }
 });
 
-test('turret foundation and guns ignore drone-only altitude and patrol endpoints', () => {
+test('turret foundation and guns ignore drone-only altitude', () => {
   const h = harness();
   h.models.addEnemy({ type: 'turret', lane: 3 }, 0, 0, 2);
   const grounded = JSON.stringify(h.batches.map((batch) => batch.calls));
   clear(h);
-  h.models.addEnemy({ type: 'turret', lane: 3, altitude: 720, fromAltitude: 0, toAltitude: 720 }, 0, 0, 2);
+  h.models.addEnemy({ type: 'turret', lane: 3, altitude: 720 }, 0, 0, 2);
   assert.equal(JSON.stringify(h.batches.map((batch) => batch.calls)), grounded);
 });
 

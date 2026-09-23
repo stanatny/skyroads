@@ -12,7 +12,7 @@ Current version: [v1.1.1](https://github.com/stanatny/skyroads/releases/tag/v1.1
 
 ## Highlights
 
-- Drones patrol a vertical square across adjacent lanes: jump over low drones or pass underneath raised drones, with a warning before each move. Cruise speed now rises continuously: quicker initial acceleration, followed by gentler growth beyond 36 segments/s. BOOST always stays faster than cruise.
+- Drones patrol sideways at fixed heights, with a warning before each move. Most block low flight and can be jumped over; a smaller group intercepts single jumps and can be passed underneath. Cruise speed now rises continuously: quicker initial acceleration, followed by gentler growth beyond 36 segments/s. BOOST always stays faster than cruise.
 - Fuel and power-ups are more sparse. Super form lasts 20 seconds, cannot be refreshed while active, and temporarily hides further super-form pickups. Random and elevated super rewards share a minimum 2.4 km separation. See the [balance notes](docs/endless_cruise_balance.md).
 - Rare high-altitude wormholes reward a well-timed double or triple jump from an elevated route with a **6,000 m warp**. The first opportunity is at 11.36 km; after a successful warp, another 8.4–10.8 km of ordinary flight separates the next opportunity. Fuel and all active power-up timers pause during transit, then resume at a protected exit. See the [wormhole design and validation](docs/wormhole_reward_design.md).
 - Responsive held movement crosses multiple lanes smoothly and reverses immediately; `Space` / `Enter` starts or restarts a mission, and `P` pauses or resumes play.

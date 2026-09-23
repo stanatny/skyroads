@@ -172,7 +172,7 @@
           0.15, 0.06, 0.026, 0, turn, 0, PALETTE.red);
         return;
       }
-      // 升降只读取物理子步给出的高度；刚性机顶、灯和风扇一起移动，不另做插值。
+      // 直接读取固定飞行高度；刚性机顶、灯和风扇保持同一高度，不另做升降动画。
       const altitude = Number.isFinite(enemy.altitude) ? Math.max(0, enemy.altitude) : 0;
       const y = droneTop - 0.49 + altitude * world.heightScale;
       drone.add(x, y, z);
@@ -186,14 +186,7 @@
       }
       if (enemy.state === 'warn' || enemy.state === 'move') {
         const direction = Math.sign(enemy.toLane - enemy.fromLane);
-        const vertical = Math.sign((enemy.toAltitude || 0) - (enemy.fromAltitude || 0));
-        if (vertical) {
-          // 鼻部两段常亮灯构成上下箭头，静止或减少动态时也能预判垂直巡航。
-          for (let side = -1; side <= 1; side += 2) {
-            emitter.add(x + side * 0.08, y + 0.08, z + 1.32,
-              0.17, 0.030, 0.035, 0, 0, -side * vertical * 0.75, PALETTE.amber);
-          }
-        } else if (direction) {
+        if (direction) {
           // 两段翼尖灯构成真实方向箭头；即使不依赖闪烁也能读出下一次横移。
           emitter.add(x + direction * 1.17, y + 0.22, z + 0.16,
             0.20, 0.035, 0.045, 0, 0, -direction * 0.55, PALETTE.amber);
