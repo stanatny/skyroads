@@ -165,6 +165,21 @@ test('entry plane is optional and compact: a neighboring lane, single-jump heigh
   }
 });
 
+test('near-edge swept entries activate once and retain the full safe warp reward', () => {
+  for (const options of [{ laneOffset: 0.39 }, { laneOffset: -0.39 }, { heightOffset: 275 }, { heightOffset: -275 }]) {
+    const h = createHarness();
+    const gate = approach(h, options);
+    assert.equal(h.state.wormhole.active, true, JSON.stringify(options));
+    const fuel = h.state.fuel;
+    finish(h);
+    assert.equal(h.state.position, gate.segment + 600);
+    assert.equal(h.state.distanceMeters, gate.segment * 10 + 6000);
+    assert.equal(h.state.wormhole.completedCount, 1);
+    assert.equal(h.state.wormhole.graceT, 2);
+    assert.equal(h.state.fuel, fuel);
+  }
+});
+
 test('all gameplay input is inert in warp, while pause and blur freeze the warp clock', () => {
   const h = createHarness();
   approach(h);

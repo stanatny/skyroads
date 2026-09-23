@@ -12,6 +12,8 @@
     entryHeight: 1550,
     halfWidth: 0.34,
     halfHeight: 240,
+    captureLanePadding: 0.08,
+    captureHeightPadding: 60,
     runwaySegments: 16,
     safeExitMeters: 600,
     captureEnd: 0.25,
@@ -58,7 +60,7 @@
     };
   }
 
-  /** intersectsGate 对前后 {position, lane, height} 扫掠，返回是否正向穿过有效椭圆孔。 */
+  /** intersectsGate 对前后 {position, lane, height} 扫掠，返回是否正向穿过带擦边容错的入口椭圆。 */
   function intersectsGate(gate, from, to) {
     if (!gate || !pointIsFinite(from) || !pointIsFinite(to)
       || ![gate.segment, gate.lane, gate.height, gate.halfWidth, gate.halfHeight].every(Number.isFinite)
@@ -69,9 +71,10 @@
     const t = (gate.segment - from.position) / (to.position - from.position);
     const lane = from.lane + (to.lane - from.lane) * t;
     const height = from.height + (to.height - from.height) * t;
-    const x = (lane - gate.lane) / gate.halfWidth;
-    const y = (height - gate.height) / gate.halfHeight;
-    // 只补偿边界浮点误差，不能扩大实际挑战窗口。
+    // 门体保持原尺寸，仅扩大飞船支点的捕获椭圆，让翼尖擦过发光边缘时也可进入。
+    const x = (lane - gate.lane) / (gate.halfWidth + TUNING.captureLanePadding);
+    const y = (height - gate.height) / (gate.halfHeight + TUNING.captureHeightPadding);
+    // 容错仍受椭圆边界限制，不放宽到邻道、矩形角点或已经飞过的入口。
     return x * x + y * y <= 1 + 1e-12;
   }
 

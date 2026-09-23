@@ -220,6 +220,12 @@ async function main() {
 
     const firstGate = await setupApproach(page, { leadSeconds: 1 });
     assert.ok(firstGate.segment * 10 >= 10000, 'The first opportunity must require at least 10 km of flight');
+    close(firstGate.halfWidth, 0.34);
+    close(firstGate.halfHeight, 240);
+    const aperture = (await sample(page)).flight.wormhole.aperture;
+    assert.deepEqual(aperture, { rx: 2.65, ry: 1.65, centerOffsetY: 0.76 });
+    report.samples.aperture = aperture;
+    report.checks.push('Entry tolerance leaves both the gate definition and rendered aperture unchanged');
     report.samples.firstGate = firstGate;
     await localizedHud(page, 'zh-CN', 'approach');
     await screenshot(page, 'entry_zh');
@@ -242,6 +248,30 @@ async function main() {
     assert.equal(snapshot.wormhole.completedT, 0);
     assert.equal(snapshot.mode, 'PLAYING');
     report.checks.push('A correctly timed double jump on the neighboring lane cannot trigger the reward');
+
+    // 同一近顶点二段跳分别擦过入口边缘内外；只设初始航道，不替代跳跃或穿洞判定。
+    await setupApproach(page, { laneOffset: 0.38, leadSeconds: 0.4 });
+    await doubleJump(page);
+    const grazingEntry = await sample(page);
+    assert.equal(grazingEntry.wormhole.active, true);
+    assert.equal(grazingEntry.mode, 'PLAYING');
+    assert.equal(grazingEntry.jumpsUsed, 2);
+    assert.ok(Math.abs(grazingEntry.lane - firstGate.lane) > firstGate.halfWidth,
+      'The near-edge entry must lie outside the former 0.34-lane capture width');
+    report.samples.grazingEntry = grazingEntry;
+    await screenshot(page, 'grazing_entry');
+    report.checks.push('Real Space then K input at a 0.38-lane offset enters through the added edge tolerance');
+
+    await setupApproach(page, { laneOffset: 0.46, leadSeconds: 0.4 });
+    await doubleJump(page);
+    const outsideEntry = await sample(page);
+    assert.equal(outsideEntry.wormhole.active, false);
+    assert.equal(outsideEntry.wormhole.completedT, 0);
+    assert.equal(outsideEntry.mode, 'PLAYING');
+    assert.equal(outsideEntry.jumpsUsed, 2);
+    assert.ok(outsideEntry.position > firstGate.segment);
+    report.samples.outsideEntry = outsideEntry;
+    report.checks.push('The same real double jump at a 0.46-lane offset still misses beyond the enlarged capture boundary');
 
     await setupApproach(page);
     await page.keyboard.press('Space');

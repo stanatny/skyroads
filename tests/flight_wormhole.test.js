@@ -128,7 +128,7 @@ test('hundreds of entry and exit cycles reuse the same geometry and buffers; dis
 });
 
 
-test('both real airframes fit the visible aperture at every effective entry edge, including bank and jump pitch', () => {
+test('both real airframes fit the unchanged visible aperture at every original entry edge, including bank and jump pitch', () => {
   const h = harness();
   const dimensions = h.sandbox.Skyroads.flightDimensions;
   const ship = h.sandbox.Skyroads.flightShip.create({ THREE: h.THREE,
@@ -136,7 +136,7 @@ test('both real airframes fit the visible aperture at every effective entry edge
   const aperture = h.fx.getDiagnostics().aperture;
   const point = new h.THREE.Vector3();
   let maximum = 0;
-  // 支点椭圆加上实机刚性轮廓，不能用只校验船心的方法掩盖背鳍或机翼穿环。
+  // 原入口椭圆完整容纳刚性机身；额外捕获容错允许翼尖擦过光环，不因此放大门体。
   for (const superForm of [0, 1]) {
     for (const bank of [-0.21, 0, 0.21]) {
       for (const playerVY of [-5000, 0, 7500]) {

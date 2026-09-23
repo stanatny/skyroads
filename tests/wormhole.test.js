@@ -77,17 +77,18 @@ test('entry requires a forward plane crossing and interpolates all coordinates',
     at(gate, plane - 1, gate.lane + 1), at(gate, plane + 3)), false);
 });
 
-test('compact elliptical entry rejects edge corners, neighboring lanes and invalid values', () => {
+test('entry tolerates near misses without enlarging the gate or accepting neighboring lanes', () => {
   const gate = wormhole.nextGate(0, terrain);
   const plane = gate.segment;
   const cross = (lane, height) => wormhole.intersectsGate(gate,
     at(gate, plane - 1, lane, height), at(gate, plane + 1, lane, height));
-  assert.equal(cross(gate.lane, gate.height + gate.halfHeight), true);
-  assert.equal(cross(gate.lane, gate.height - gate.halfHeight), true);
-  assert.equal(cross(gate.lane, gate.height + gate.halfHeight + 0.001), false);
-  assert.equal(cross(gate.lane + gate.halfWidth, gate.height), true);
-  assert.equal(cross(gate.lane + gate.halfWidth + 0.001, gate.height), false);
-  assert.equal(cross(gate.lane + gate.halfWidth * 0.8, gate.height + gate.halfHeight * 0.8), false);
+  // 原入口数据保持原样；只放宽飞船支点的捕获范围，不改变渲染用的门体。
+  assert.equal(gate.halfWidth, 0.34);
+  assert.equal(gate.halfHeight, 240);
+  for (const sign of [-1, 1]) {
+    assert.equal(cross(gate.lane + sign * 0.40, gate.height), true);
+    assert.equal(cross(gate.lane, gate.height + sign * 280), true);
+  }
   assert.equal(cross(gate.lane + 1, gate.height), false);
   assert.equal(cross(gate.lane, gate.groundHeight), false);
   for (const field of ['position', 'lane', 'height']) {
@@ -98,6 +99,22 @@ test('compact elliptical entry rejects edge corners, neighboring lanes and inval
   }
   assert.equal(wormhole.intersectsGate(null, at(gate, plane - 1), at(gate, plane + 1)), false);
   assert.equal(wormhole.intersectsGate({ ...gate, halfHeight: 0 }, at(gate, plane - 1), at(gate, plane + 1)), false);
+});
+
+test('expanded capture remains an ellipse with finite boundaries rather than a rectangular catch-all', () => {
+  const gate = wormhole.nextGate(0, terrain);
+  const cross = (lane, height) => wormhole.intersectsGate(gate,
+    at(gate, gate.segment - 3, lane, height), at(gate, gate.segment + 3, lane, height));
+  for (const sign of [-1, 1]) {
+    assert.equal(cross(gate.lane + sign * 0.42, gate.height), true);
+    assert.equal(cross(gate.lane + sign * 0.421, gate.height), false);
+    assert.equal(cross(gate.lane, gate.height + sign * 300), true);
+    assert.equal(cross(gate.lane, gate.height + sign * 300.001), false);
+  }
+  assert.equal(cross(gate.lane + 0.42 * 0.8, gate.height + 300 * 0.8), false);
+  // 只在纵向入口平面插值；飞过后再对准也不会被吸回去。
+  assert.equal(wormhole.intersectsGate(gate,
+    at(gate, gate.segment + 0.001), at(gate, gate.segment + 1)), false);
 });
 
 test('warp stages have bounded progress and an explicit completion boundary', () => {
@@ -120,7 +137,7 @@ test('warp stages have bounded progress and an explicit completion boundary', ()
 });
 
 // 使用真实游戏物理与二跳消耗验证入口可达性；不加载控制器以避免自动进入演出。
-function createFlightHarness(speed, gate, approachSeconds) {
+function createFlightHarness(speed, gate, approachSeconds, { keepGaps = false, boost } = {}) {
   const root = path.resolve(__dirname, '..');
   const sandbox = {
     console, navigator: { languages: ['en-US'], language: 'en-US' },
@@ -140,16 +157,19 @@ function createFlightHarness(speed, gate, approachSeconds) {
     CONFIG.ACCEL = 0;
   `, sandbox);
   const { STATE: state, CONFIG: config } = sandbox.game;
+  const boostActive = boost ?? speed >= config.BOOST_SPEED;
   Object.assign(state, {
     mode: 'PLAYING', position: gate.segment - speed * approachSeconds,
     speed, playerY: 0, playerVY: 0, jumpsUsed: 0, fuel: config.FUEL_MAX,
-    boostT: speed >= config.BOOST_SPEED ? 10 : 0,
-    boostPrevSpeed: speed >= config.BOOST_SPEED ? speed - config.BOOST_SPEED_BONUS : 0, tutorial: null,
+    boostT: boostActive ? 10 : 0,
+    boostPrevSpeed: boostActive ? speed - config.BOOST_SPEED_BONUS : 0, tutorial: null,
     movement: sandbox.Skyroads.input.createMovementState(gate.lane),
     track: Array.from({ length: gate.segment + 300 }, (_, index) => ({ index, lanes: Array(7).fill('ROAD'), enemies: [] })),
   });
   sandbox.game.enableFlightTerrain();
-  state.track.forEach((segment) => segment.lanes.fill('ROAD'));
+  state.track.forEach((segment) => {
+    segment.lanes = segment.lanes.map((type) => keepGaps && type === 'GAP' ? type : 'ROAD');
+  });
   return { state, game: sandbox.game };
 }
 
@@ -179,5 +199,47 @@ test('real 20/60/120 Hz physics rewards near-apex double jumps and rejects singl
     }
   }
   const maxTripleFromFlat = 3 * 7500 ** 2 / (2 * 32000);
-  assert.ok(maxTripleFromFlat < gate.height - gate.halfHeight);
+  assert.ok(maxTripleFromFlat < gate.height - gate.halfHeight - wormhole.TUNING.captureHeightPadding);
+});
+
+test('late cruise and boost enter with timed double jumps across real approach gaps at 20/60/120 Hz', () => {
+  const gate = wormhole.nextGate(0, terrain);
+  for (const { speed, boost } of [{ speed: 45, boost: false }, { speed: 53, boost: true }]) {
+    for (const fps of [20, 60, 120]) {
+      for (const secondAt of [null, 14 / 60, 0.05]) {
+        // 高速提前半秒起跳，保留高架 108～110 阶段的真实缺口，不能清空路面来证明可达。
+        const { state, game } = createFlightHarness(speed, gate, 0.50, { keepGaps: true, boost });
+        const context = `speed=${speed}, boost=${boost}, fps=${fps}, secondAt=${secondAt}`;
+        assert.equal(state.boostT > 0, boost, context);
+        assert.ok(state.track.slice(Math.floor(state.position), gate.segment + 1)
+          .some((segment) => segment.lanes[gate.lane] === 'GAP'), context);
+        const dt = 1 / fps;
+        let hit = false;
+        let jumpedAgain = false;
+        let crossedGap = false;
+        game.tryJump();
+        for (let frame = 0; frame < fps && state.position <= gate.segment; frame += 1) {
+          if (secondAt !== null && !jumpedAgain && frame * dt >= secondAt - 1e-9) {
+            game.tryJump();
+            jumpedAgain = true;
+          }
+          const before = at(gate, state.position, state.movement.lanePosition, state.groundHeight + state.playerY);
+          game.updatePhysics(dt);
+          assert.equal(state.mode, 'PLAYING', context);
+          const after = at(gate, state.position, state.movement.lanePosition, state.groundHeight + state.playerY);
+          hit ||= wormhole.intersectsGate(gate, before, after);
+          for (let index = Math.floor(before.position); index <= Math.floor(after.position); index += 1) {
+            if (state.track[index].lanes[gate.lane] !== 'GAP') continue;
+            crossedGap = true;
+            // 低帧率可在一帧越过整个缺口；检查扫掠两端，BOOST 也不能靠无敌掩盖起跳过晚。
+            const beforeHeight = before.height - terrain.heightAt(before.position, gate.lane);
+            assert.ok(Math.min(beforeHeight, state.playerY) >= game.CONFIG.GAP_SAFE_HEIGHT, context);
+          }
+        }
+        assert.equal(crossedGap, true, context);
+        assert.equal(hit, secondAt === 14 / 60, context);
+        assert.equal(state.speed, speed, context);
+      }
+    }
+  }
 });
