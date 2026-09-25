@@ -56,6 +56,8 @@ async function sample(page) {
     mode: STATE.mode, position: STATE.position, speed: STATE.speed, playerY: STATE.playerY,
     deathReason: STATE.deathReason, kills: STATE.enemyKills, jumpCount: STATE.jumpsUsed,
     drone: window.__testDrone ? { ...__testDrone, actualLane: enemyLane(__testDrone) } : null,
+    droneGroundHeight: window.__testDrone ? Skyroads.flightRenderer.coordinates.tileSurfaceY(
+      Skyroads.flightTerrain.sampleTile(__droneSegment, enemyLane(__testDrone))) * 300 : null,
     mesh: window.__droneMatrix, bursts: window.__droneBursts,
     flight: Skyroads.diagnostics.snapshot().flight,
   }));
@@ -66,7 +68,9 @@ async function setup(page, { position = 246, speed = 0, lane = 1.5, droneLane = 
     startGame();
     STATE.tutorial = null;
     CONFIG.ACCEL = 0;
-    STATE.position = options.position;
+    // 每局起坡位置不同，巡航夹具始终放在只保留中央安全道的同一谷地阶段。
+    window.__droneSegment = Skyroads.flightTerrain.TUNING.start + 202;
+    STATE.position = __droneSegment + options.position - 250;
     STATE.distanceMeters = STATE.position * CONFIG.DISTANCE_PER_SEGMENT;
     STATE.speed = options.speed;
     STATE.fuel = 100;
@@ -88,7 +92,7 @@ async function setup(page, { position = 246, speed = 0, lane = 1.5, droneLane = 
       state: 'rest', restT: options.moving ? 0.25 : 10, warnT: 0, moveT: 1,
       patrolLaneA: options.droneLane, patrolLaneB: options.moving ? 2 : options.droneLane,
     };
-    STATE.track[250].enemies = [__testDrone];
+    STATE.track[__droneSegment].enemies = [__testDrone];
     window.__droneBursts = [];
     focusPrimarySurface();
     render();
@@ -149,7 +153,7 @@ async function main() {
       let previous = (await sample(page)).drone.state;
       const start = await sample(page);
       assert.ok(start.mesh, 'Real drone instance matrix must be observed');
-      const route = await page.evaluate(() => Skyroads.flightTerrain.routeAt(250));
+      const route = await page.evaluate(() => Skyroads.flightTerrain.routeAt(__droneSegment));
       for (let frame = 0; frame < 312; frame += 1) {
         await advance(page, 1 / 60);
         const current = await sample(page);
@@ -175,7 +179,10 @@ async function main() {
       report.samples.horizontal[altitude] = { endpoints, warnings, start, end: await sample(page) };
       report.checks.push(`Real 3D drone at altitude ${altitude} reverses left/right for two round trips; model height stays fixed through rest, warning and movement`);
     }
-    close(report.samples.horizontal[720].start.mesh.y - report.samples.horizontal[0].start.mesh.y, 720 / 300);
+    const groundStart = report.samples.horizontal[0].start;
+    const highStart = report.samples.horizontal[720].start;
+    close(highStart.mesh.y - groundStart.mesh.y,
+      (720 + highStart.droneGroundHeight - groundStart.droneGroundHeight) / 300);
 
     await page.keyboard.press('p');
     const paused = await sample(page);
@@ -221,7 +228,7 @@ async function main() {
     const lowJump = await sample(page);
     assert.equal(lowJump.mode, 'PLAYING');
     assert.equal(lowJump.jumpCount, 1);
-    assert.ok(lowJump.position >= 251 && lowJump.playerY > 500);
+    assert.ok(lowJump.position >= await page.evaluate(() => __droneSegment + 1) && lowJump.playerY > 500);
     report.samples.lowJump = lowJump;
     report.checks.push('A real single Space jump clears the low drone collision volume');
 
@@ -229,7 +236,7 @@ async function main() {
     await advance(page, 0.33);
     const underflight = await sample(page);
     assert.equal(underflight.mode, 'PLAYING');
-    assert.ok(underflight.position >= 251);
+    assert.ok(underflight.position >= await page.evaluate(() => __droneSegment + 1));
     close(underflight.playerY, 0);
     report.samples.underflight = underflight;
     report.checks.push('Ground flight crosses safely underneath a raised drone');
@@ -257,7 +264,7 @@ async function main() {
     await advance(page, 0.15);
     const shot = await sample(page);
     assert.equal(shot.kills, 1);
-    assert.equal(await page.evaluate(() => STATE.track[250].enemies.length), 0);
+    assert.equal(await page.evaluate(() => STATE.track[__droneSegment].enemies.length), 0);
     assert.equal(shot.bursts.length, 1);
     close(shot.bursts[0][2], 1040);
     await screenshot(page, 'high_drone_destroyed');

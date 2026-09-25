@@ -756,8 +756,9 @@
             frameEntities.set(`wall:${index}:${lane}`, {
               index, x, y: surfaceHeight + heightY(config[`${type}_HEIGHT`] || 600) / 2,
             });
-          } else if (type !== 'ROAD' && !(type === 'TRIPLE' && state.tripleT > 0)) {
-            // 已变身时不可续时，实体及其光柱、地面标记一起隐藏。
+          } else if (type !== 'ROAD' && !(type === 'TRIPLE' && state.tripleT > 0)
+            && !(type === 'BOOST' && state.boostT > 0)) {
+            // 同类增益存续时不可续时，实体及其光柱、地面标记一起隐藏。
             renderPickup(type, x, z, time, index);
           }
         }

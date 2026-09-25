@@ -25,7 +25,7 @@ function harness() {
   shipGroup.position.set(3.4, 2.5, -0.8);
   scene.add(shipGroup);
   const state = { mode: 'PLAYING', runId: 1, boostT: 0, boostGraceT: 0, fuelBurstT: 0, fuelBurstGraceT: 0, reducedMotion: false };
-  const config = { BOOST_DURATION: 5, BOOST_GRACE: 2, FUEL_BURST_DURATION: 3, FUEL_BURST_GRACE: 2 };
+  const config = { BOOST_DURATION: 5, BOOST_GRACE: 1.5, FUEL_BURST_DURATION: 3, FUEL_BURST_GRACE: 2 };
   return { sandbox, THREE, own, resources, effect, scene, shipGroup, state, config,
     update(dt = 1 / 60) { effect.update(state, config, { dt, shipGroup }); },
     protection() { return sandbox.Skyroads.flightStatusFx.protection(state, config); },
@@ -102,15 +102,15 @@ test('BOOST shield starts immediately and remains legible until its exact expiry
     h.state.boostT = remaining;
     h.update();
     assert.equal(h.protection().active, true);
-    assert.equal(h.protection().duration, 7);
-    close(h.diagnostics().shield.remaining, remaining + 2);
+    assert.equal(h.protection().duration, 6.5);
+    close(h.diagnostics().shield.remaining, remaining + 1.5);
     assert.equal(h.diagnostics().shield.active, true);
     assert.ok(h.diagnostics().shield.opacity >= 0.38);
   }
   h.state.boostT = 0;
-  h.state.boostGraceT = 2;
+  h.state.boostGraceT = 1.5;
   h.update();
-  close(h.diagnostics().shield.remaining, 2);
+  close(h.diagnostics().shield.remaining, 1.5);
   assert.equal(h.diagnostics().shield.active, true);
   h.state.boostGraceT = 0;
   h.update();
@@ -157,11 +157,11 @@ test('overlapping protection sources keep the shield until the last source expir
   const h = harness();
   // 先让 BOOST 覆盖燃料爆发，再让更长的爆发保护接管；倒计时只呈现仍然有效的保护。
   for (const [boostT, fuelBurstT, fuelBurstGraceT, remaining, duration] of [
-    [5, 3, 0, 7, 7],
+    [5, 3, 0, 6.5, 6.5],
     [0.7, 1, 0, 3, 5],
     [0, 0, 1, 1, 5],
-    [0.8, 0, 0.2, 2.8, 7],
-    [0.1, 0, 0, 2.1, 7],
+    [0.8, 0, 0.2, 2.3, 6.5],
+    [0.1, 0, 0, 1.6, 6.5],
   ]) {
     Object.assign(h.state, { boostT, fuelBurstT, fuelBurstGraceT });
     h.update();
@@ -364,14 +364,14 @@ test('warp and exit grace share a continuous protection signal with preserved bo
   close(h.protection().remaining, 2.1);
   assert.equal(h.diagnostics().shield.active, true);
   h.state.boostT = 3;
-  close(h.protection().remaining, 5.1);
+  close(h.protection().remaining, 4.6);
   h.state.boostT = 0;
   h.state.wormhole = { active: false, elapsed: 2.4, graceT: 2 };
   close(h.protection().remaining, 2);
   h.update();
   assert.equal(h.protection().active, true);
   h.state.boostT = 3;
-  close(h.protection().remaining, 5);
+  close(h.protection().remaining, 4.5);
   h.state.boostT = 0; h.state.wormhole.graceT = 0.001;
   h.update();
   assert.equal(h.diagnostics().shield.active, true);

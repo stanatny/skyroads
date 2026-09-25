@@ -19,7 +19,8 @@ function harness() {
   const resources = new Set();
   const environment = sandbox.Skyroads.flightEnvironment.create({ THREE, parent,
     own(resource) { resources.add(resource); return resource; } });
-  return { THREE, parent, scene, resources, environment, terrain: sandbox.Skyroads.flightTerrain };
+  return { THREE, parent, scene, resources, environment, terrain: sandbox.Skyroads.flightTerrain,
+    setTerrain(terrain) { sandbox.Skyroads.flightTerrain = terrain; } };
 }
 
 function stations(environment) {
@@ -173,4 +174,43 @@ test('existing eight service platforms follow the lowest terrain surface over th
       assert.ok(Math.abs(Math.abs(origin.x) - 27) < 1e-4);
     }
   }
+});
+
+test('service platforms resample a new run terrain at the same paused position', () => {
+  const h = harness();
+  const platform = h.environment.object.children.find((object) => object.name === 'orbital_service_platforms_solid');
+  const matrix = new h.THREE.Matrix4();
+  const origin = new h.THREE.Vector3();
+  const bounds = platform.geometry.boundingBox;
+  const halfDepth = Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z));
+  const position = 90;
+  const resources = h.resources.size;
+  h.parent.position.set(0.612, 2.4, 0.9);
+  h.environment.update(position, true, { mode: 'PAUSED', runId: 1 });
+  const originalMatrices = Array.from(platform.instanceMatrix.array);
+  for (const [seed, runId] of [[42, 2], [1337, 2]]) {
+    // 同位置新开一局和直接恢复新的地形实例，都必须重算支架高度。
+    const world = h.terrain.createForRun(seed);
+    h.setTerrain(world);
+    h.environment.update(position, true, { mode: 'PAUSED', runId });
+    assert.notDeepEqual(Array.from(platform.instanceMatrix.array), originalMatrices);
+    for (let instance = 0; instance < platform.count; instance += 1) {
+      platform.getMatrixAt(instance, matrix);
+      origin.setFromMatrixPosition(matrix).add(h.parent.position);
+      const lane = origin.x < 0 ? 0 : 6;
+      const middle = position - origin.z / 4;
+      const low = middle - halfDepth / 4;
+      const high = middle + halfDepth / 4;
+      let minimum = Math.min(world.heightAt(low, lane), world.heightAt(high, lane));
+      for (let boundary = Math.ceil(low); boundary < high; boundary += 1) {
+        minimum = Math.min(minimum, world.heightAt(boundary, lane));
+      }
+      assert.ok(Math.abs(origin.y - (minimum / 300 - 1.5)) < 0.00001,
+        `seed ${seed}, platform ${instance} must use its current terrain`);
+    }
+    const version = platform.instanceMatrix.version;
+    h.environment.update(position, true, { mode: 'PAUSED', runId });
+    assert.equal(platform.instanceMatrix.version, version);
+  }
+  assert.equal(h.resources.size, resources);
 });

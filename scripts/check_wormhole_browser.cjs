@@ -144,6 +144,9 @@ async function screenshot(page, name) {
 
 async function verifyBoostProtection(page, timerField, graceField, label) {
   await setupApproach(page, { leadSeconds: 1 });
+  const graceDuration = await page.evaluate((timerField) => timerField === 'boostT'
+    ? CONFIG.BOOST_GRACE : CONFIG.FUEL_BURST_GRACE, timerField);
+  assert.equal(graceDuration, timerField === 'boostT' ? 1.5 : 2);
   await page.evaluate(({ timerField }) => {
     STATE.wormhole.gate = null;
     STATE.boostT = 0;
@@ -152,11 +155,11 @@ async function verifyBoostProtection(page, timerField, graceField, label) {
     STATE.fuelBurstGraceT = 0;
     STATE[ timerField ] = 0.25;
   }, { timerField });
-  // 多走 1ms，避免浮点采样恰好落在到期边界之前；接续保护应恰好剩 1.999s。
+  // 多走 1ms，避免浮点采样落在到期之前；按各自配置验证接续保护剩余时间。
   await advance(page, 0.251);
   const naturalExpiry = await sample(page);
   close(naturalExpiry.timers[timerField], 0);
-  close(naturalExpiry.timers[graceField], 1.999);
+  close(naturalExpiry.timers[graceField], graceDuration - 0.001);
   await page.evaluate(() => {
     STATE.speed = 0;
     STATE.boostPrevSpeed = 0;
@@ -183,8 +186,8 @@ async function verifyBoostProtection(page, timerField, graceField, label) {
   assert.equal(expired.deathReason, 'wall');
   assert.equal(expired.timers[graceField], 0);
   assert.equal(expired.flight.statusFx.shield.active, false);
-  report.samples[`${label}_boundary`] = { naturalExpiry, before: stillProtected, after: expired };
-  report.checks.push(`${label} naturally hands off to a visible full two-second shield; a real wall is blocked at 1.999 s and lethal after expiry`);
+  report.samples[`${label}_boundary`] = { graceDuration, naturalExpiry, before: stillProtected, after: expired };
+  report.checks.push(`${label} naturally hands off to a visible full ${graceDuration}-second shield; a real wall is blocked at ${(graceDuration - 0.001).toFixed(3)} s and lethal after expiry`);
 }
 
 function watchErrors(page, label, errors = report.errors) {
@@ -250,26 +253,26 @@ async function main() {
     report.checks.push('A correctly timed double jump on the neighboring lane cannot trigger the reward');
 
     // 同一近顶点二段跳分别擦过入口边缘内外；只设初始航道，不替代跳跃或穿洞判定。
-    await setupApproach(page, { laneOffset: 0.38, leadSeconds: 0.4 });
+    const grazingGate = await setupApproach(page, { laneOffset: 0.38, leadSeconds: 0.4 });
     await doubleJump(page);
     const grazingEntry = await sample(page);
     assert.equal(grazingEntry.wormhole.active, true);
     assert.equal(grazingEntry.mode, 'PLAYING');
     assert.equal(grazingEntry.jumpsUsed, 2);
-    assert.ok(Math.abs(grazingEntry.lane - firstGate.lane) > firstGate.halfWidth,
+    assert.ok(Math.abs(grazingEntry.lane - grazingGate.lane) > grazingGate.halfWidth,
       'The near-edge entry must lie outside the former 0.34-lane capture width');
     report.samples.grazingEntry = grazingEntry;
     await screenshot(page, 'grazing_entry');
     report.checks.push('Real Space then K input at a 0.38-lane offset enters through the added edge tolerance');
 
-    await setupApproach(page, { laneOffset: 0.46, leadSeconds: 0.4 });
+    const outsideGate = await setupApproach(page, { laneOffset: 0.46, leadSeconds: 0.4 });
     await doubleJump(page);
     const outsideEntry = await sample(page);
     assert.equal(outsideEntry.wormhole.active, false);
     assert.equal(outsideEntry.wormhole.completedT, 0);
     assert.equal(outsideEntry.mode, 'PLAYING');
     assert.equal(outsideEntry.jumpsUsed, 2);
-    assert.ok(outsideEntry.position > firstGate.segment);
+    assert.ok(outsideEntry.position > outsideGate.segment);
     report.samples.outsideEntry = outsideEntry;
     report.checks.push('The same real double jump at a 0.46-lane offset still misses beyond the enlarged capture boundary');
 

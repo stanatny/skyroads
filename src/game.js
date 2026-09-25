@@ -128,8 +128,9 @@ const CONFIG = {
   BRIDGE_MIN_INDEX: 100,       // 窄桥在 segment 100 之后才出现（玩家已有变道熟练度）
 
   // ---- 奖励道具（需求 6；第四轮：无敌护盾 → 闪电超级加速）----
-  BOOST_DURATION: 5,           // 超级加速秒数：期间无敌穿透（撞墙/过缺口不伤）+ 临时提速
-  BOOST_GRACE: 2,              // 超级加速结束后继续无敌两秒，恢复航速时保持护罩
+  BOOST_DURATION: 5,           // 超级加速秒数：期间无敌穿透 + 临时提速，同类奖励隐藏且不续时
+  BOOST_GRACE: 1.5,            // 超级加速结束后继续无敌 1.5 秒，恢复航速时保持护罩
+  BOOST_PICKUP_MIN_SECONDS: 7, // 同类奖励最低预计间隔，缩短退出保护不增加奖励密度
   BOOST_SPEED: 36,             // 超级加速最低速度；高速局使用巡航基线 + BOOST_SPEED_BONUS
                                //   穿段校验：36 段/秒 × 最长帧 0.05s = 1.8 段/帧，
                                //   子步扫掠（≤0.5 段/子步，见第 7 节）逐段覆盖 ✓ 不漏判
@@ -147,7 +148,7 @@ const CONFIG = {
   // 到期前 TRIPLE_WARN_TIME(3) 秒进入预警：HUD 条急促闪烁 + 3 声渐高 beep
   // （3/2/1s 三档阈值）+ 船体金色光环同步闪烁。
   TRIPLE_DURATION: 20,         // 超级形态持续秒数；期间不显示或拾取同类奖励
-  TRIPLE_MIN_GAP: 240,         // 所有随机、高架、浮岛来源共用至少 2400 米间距
+  TRIPLE_MIN_GAP: 240,         // 变身间距的距离下限；实际还要满足随航速扩大的 20 秒间隔
   TRIPLE_GLIDE_FACTOR: 0.045,  // 奖励期滑翔重力系数（基准 0.08 → 滞空 ≈0.7s 提升到 ≈1.0s）
   TRIPLE_WARN_TIME: 3,         // 超级形态到期预警窗口（秒，3/2/1s 三档 beep）
   SUPER_MISSILE_RADIUS: 1,     // 超级形态导弹范围清除半径（段）：命中段 ±1 × 全车道
@@ -231,6 +232,7 @@ const STATE = {
   position: 0,                 // 所在位置（segment 为单位，浮点）
   speed: 0,
   movement: createMovementState(midLane()), // 唯一横向真值：连续车道位置 + 按住/分段状态
+  routeSeed: null,            // 每次新局选择；暂停、折跃和渲染器恢复沿用同一地图
   terrainEnabled: false,       // 仅三维场景启用真实高程；兼容画面回到平面物理
   groundHeight: 0,             // 当前支撑路面绝对高程（原世界单位）
   wormhole: null,              // 高空入口、折跃演出与出口保护；与普通加速独立
@@ -851,8 +853,20 @@ function laneIndices() {
   return a;
 }
 
-function newGenState() {
+// 路线拥有独立随机流，粒子、音效和帧率不再改变尚未生成的障碍与奖励。
+function createRouteRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value = (value + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(value ^ (value >>> 15), value | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function newGenState(seed = null) {
   return {
+    random: Number.isInteger(seed) ? createRouteRandom(seed) : () => Math.random(),
     safeLane: midLane(),     // 当前保证车道（必然可通行）
     cooldown: 0,             // 距下一挑战还剩多少缓冲段
     clusterLeft: 0,          // 当前障碍簇还剩几段
@@ -870,9 +884,10 @@ function newGenState() {
     landingLeft: 0,
     clearStreak: new Array(CONFIG.LANES).fill(0),
     sinceFuel: 0,            // 距上次放置燃料的段数
+    lastBoostIndex: -Infinity,  // 同类奖励按预计飞行时间保持间距
     lastTripleIndex: -Infinity, // 各种来源的变身奖励共享间距
     sincePickup: 0,          // 距上次放置道具的段数
-    pickupCycle: 0,          // 道具轮换指针（BOOST→SLOW→TRIPLE→MAGNET 循环）
+    pickupBag: [],           // 每四次机会包含四种奖励各一次，顺序重新洗牌
   };
 }
 
@@ -903,18 +918,29 @@ function decorateFlightSegment(segment) {
 }
 
 function spaceSuperPickups(gen, segment) {
+  let spacingSpeed;
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
-    if (segment.lanes[lane] !== LANE_TYPE.TRIPLE) continue;
-    if (segment.index - gen.lastTripleIndex < CONFIG.TRIPLE_MIN_GAP) {
+    const type = segment.lanes[lane];
+    if (type !== LANE_TYPE.BOOST && type !== LANE_TYPE.TRIPLE) continue;
+    // 用后一个奖励位置的预计最高航速预留时间，覆盖持续提速、加速和燃料爆发。
+    // 额外留一段，允许前一枚在路块末尾才拾取；折跃冻结则由拾取时的 active 判断兜底。
+    spacingSpeed ??= Math.max(CONFIG.BOOST_SPEED, CONFIG.FUEL_BURST_SPEED,
+      nominalSpeed(segment.index, cruiseOptions()) + CONFIG.BOOST_SPEED_BONUS);
+    const boost = type === LANE_TYPE.BOOST;
+    const seconds = boost ? Math.max(CONFIG.BOOST_PICKUP_MIN_SECONDS,
+      CONFIG.BOOST_DURATION + CONFIG.BOOST_GRACE) : CONFIG.TRIPLE_DURATION;
+    const minimum = Math.max(boost ? 0 : CONFIG.TRIPLE_MIN_GAP, Math.ceil(spacingSpeed * seconds) + 1);
+    const field = boost ? 'lastBoostIndex' : 'lastTripleIndex';
+    if (segment.index - gen[field] < minimum) {
       segment.lanes[lane] = LANE_TYPE.ROAD;
     } else {
-      gen.lastTripleIndex = segment.index;
+      gen[field] = segment.index;
     }
   }
   return segment;
 }
 
-function wallTypeForApproach(gen, lane, d, tierRoll = Math.random()) {
+function wallTypeForApproach(gen, lane, d, tierRoll = gen.random()) {
   const highRatio = 0.15 + 0.45 * d;
   const mediumRatio = 0.25 + 0.25 * d;
   if (gen.clearStreak[lane] >= Math.max(RUN_TUNING.highApproachSegments, reactionSegmentsAt(gen.generationIndex || 0)) && tierRoll < highRatio) {
@@ -934,7 +960,7 @@ function wallTypeForApproach(gen, lane, d, tierRoll = Math.random()) {
 function fillClusterLanes(lanes, gen, clusterLane, d) {
   for (let lane = 0; lane < CONFIG.LANES; lane++) {
     if (lane === clusterLane) continue;
-    const r = Math.random();
+    const r = gen.random();
     if (r < 0.30 + 0.35 * d) {                  // 墙的总概率
       lanes[lane] = wallTypeForApproach(gen, lane, d);
     } else if (r < 0.45 + 0.45 * d) {           // GAP 概率 = 0.15 + 0.10d
@@ -994,8 +1020,8 @@ function generateSegment(index, gen) {
 
   // ① 热身区
   if (index < CONFIG.WARMUP_SEGMENTS) {
-    if (index > 5 && Math.random() < 0.15) {
-      lanes[Math.floor(Math.random() * CONFIG.LANES)] = LANE_TYPE.FUEL;
+    if (index > 5 && gen.random() < 0.15) {
+      lanes[Math.floor(gen.random() * CONFIG.LANES)] = LANE_TYPE.FUEL;
       gen.sinceFuel = 0;
     }
     return finalizeGeneratedSegment(gen, { index, lanes });
@@ -1003,7 +1029,7 @@ function generateSegment(index, gen) {
 
   // ④a 全缺口挑战进行中：继续或着陆
   if (gen.gapRun > 0) {
-    if (gen.gapRun < CONFIG.MAX_GAP_RUN && Math.random() < 0.5) {
+    if (gen.gapRun < CONFIG.MAX_GAP_RUN && gen.random() < 0.5) {
       gen.gapRun++;
       return finalizeGeneratedSegment(gen, {
         index,
@@ -1024,7 +1050,7 @@ function generateSegment(index, gen) {
     const airReach = Math.floor((2 * CONFIG.JUMP_VELOCITY / CONFIG.GRAVITY) / CONFIG.LANE_SWITCH_TIME); // = 2
     const reachLo = Math.max(0, gen.safeLane - airReach);
     const reachHi = Math.min(CONFIG.LANES - 1, gen.safeLane + airReach);
-    gen.safeLane = reachLo + Math.floor(Math.random() * (reachHi - reachLo + 1));
+    gen.safeLane = reachLo + Math.floor(gen.random() * (reachHi - reachLo + 1));
     gen.cooldown = reactionSegmentsAt(index);
     lanes[gen.safeLane] = LANE_TYPE.FUEL;
     gen.sinceFuel = 0;
@@ -1077,10 +1103,10 @@ function generateSegment(index, gen) {
   // ③ 缓冲段：全路面，偶有可规避的单车道缺口/墙（不堵保证车道）
   if (gen.cooldown > 0) {
     gen.cooldown--;
-    if (Math.random() < 0.10 + 0.10 * d) {
+    if (gen.random() < 0.10 + 0.10 * d) {
       const others = laneIndices().filter(l => l !== gen.safeLane);
-      const lane = others[Math.floor(Math.random() * others.length)];
-      if (Math.random() < 0.5) {
+      const lane = others[Math.floor(gen.random() * others.length)];
+      if (gen.random() < 0.5) {
         lanes[lane] = LANE_TYPE.GAP;
       } else {
         lanes[lane] = wallTypeForApproach(gen, lane, d);
@@ -1095,7 +1121,7 @@ function generateSegment(index, gen) {
   }
 
   // ③→② 缓冲结束，开启新挑战
-  if (index >= CONFIG.FULL_GAP_MIN_INDEX && d > 0.15 && Math.random() < 0.10 + 0.12 * d) {
+  if (index >= CONFIG.FULL_GAP_MIN_INDEX && d > 0.15 && gen.random() < 0.10 + 0.12 * d) {
     // ④b 全缺口跳跃挑战（前一段是缓冲路面，玩家有起跳反应窗口）
     gen.gapRun = 1;
     return finalizeGeneratedSegment(gen, {
@@ -1107,17 +1133,17 @@ function generateSegment(index, gen) {
   //   红线：桥车道与当前 safeLane 差 ≤ 1（可达链）；桥只会在缓冲结束后出现，
   //   故桥前有完整 REACTION_SEGS 缓冲，桥后由 ⑥a 收尾时强制缓冲。
   //   高难度时偏向边缘车道（还原"跳上最边上的格子"的体验）。
-  if (index >= CONFIG.BRIDGE_MIN_INDEX && d > 0.25 && Math.random() < 0.08 + 0.08 * d) {
+  if (index >= CONFIG.BRIDGE_MIN_INDEX && d > 0.25 && gen.random() < 0.08 + 0.08 * d) {
     let opts = [gen.safeLane - 1, gen.safeLane, gen.safeLane + 1]
       .filter(l => l >= 0 && l < CONFIG.LANES);
-    if (d > 0.45 && Math.random() < 0.6) {
+    if (d > 0.45 && gen.random() < 0.6) {
       const edgeDir = gen.safeLane >= midLane() ? 1 : -1;
       const toward = opts.filter(l => (l - gen.safeLane) === edgeDir || l === gen.safeLane);
       if (toward.length > 0) opts = toward;
     }
-    gen.bridgeLane = opts[Math.floor(Math.random() * opts.length)];
+    gen.bridgeLane = opts[Math.floor(gen.random() * opts.length)];
     gen.safeLane = gen.bridgeLane;              // 桥车道即新保证车道（差 ≤ 1 ✓）
-    gen.bridgeLeft = 2 + Math.floor(Math.random() * 4);   // 2~5 段
+    gen.bridgeLeft = 2 + Math.floor(gen.random() * 4);   // 2~5 段
     for (let lane = 0; lane < CONFIG.LANES; lane++) {
       if (lane !== gen.bridgeLane) lanes[lane] = LANE_TYPE.GAP;
     }
@@ -1132,13 +1158,13 @@ function generateSegment(index, gen) {
     && gen.clearStreak[lane] >= Math.max(RUN_TUNING.approachSegments, reactionSegmentsAt(index))
   );
   const runChance = RUN_TUNING.chanceBase + RUN_TUNING.chanceDifficulty * d;
-  if (index >= RUN_TUNING.minIndex && runCandidates.length > 0 && Math.random() < runChance) {
-    gen.runLane = runCandidates[Math.floor(Math.random() * runCandidates.length)];
+  if (index >= RUN_TUNING.minIndex && runCandidates.length > 0 && gen.random() < runChance) {
+    gen.runLane = runCandidates[Math.floor(gen.random() * runCandidates.length)];
     const mediumRatio = RUN_TUNING.mediumRatioBase + RUN_TUNING.mediumRatioDifficulty * d;
-    gen.runType = Math.random() < mediumRatio
+    gen.runType = gen.random() < mediumRatio
       ? LANE_TYPE.WALL_MEDIUM
       : LANE_TYPE.WALL_LOW;
-    gen.runLength = selectRunLength(gen.runType, nominalSpeed(index, cruiseOptions()), Math.random());
+    gen.runLength = selectRunLength(gen.runType, nominalSpeed(index, cruiseOptions()), gen.random());
     gen.runLeft = gen.runLength;
     gen.runIndex = 0;
     gen.runId = index;
@@ -1147,9 +1173,9 @@ function generateSegment(index, gen) {
   // 新障碍簇：保证车道与当前车道差 ≤ 1（③可达性）
   const options = [gen.safeLane - 1, gen.safeLane, gen.safeLane + 1]
     .filter(l => l >= 0 && l < CONFIG.LANES);
-  gen.clusterLane = options[Math.floor(Math.random() * options.length)];
-  gen.clusterLeft = 1 + (Math.random() < 0.3 + 0.4 * d ? 1 : 0)
-                      + (d > 0.6 && Math.random() < 0.3 ? 1 : 0); // 1~3 段
+  gen.clusterLane = options[Math.floor(gen.random() * options.length)];
+  gen.clusterLeft = 1 + (gen.random() < 0.3 + 0.4 * d ? 1 : 0)
+                      + (d > 0.6 && gen.random() < 0.3 ? 1 : 0); // 1~3 段
   fillClusterLanes(lanes, gen, gen.clusterLane, d);
   gen.clusterLeft--;
   if (gen.clusterLeft === 0) {
@@ -1172,28 +1198,33 @@ function maybePlaceFuel(lanes, gen, guaranteedLane) {
     gen.sinceFuel = 0;
     return;
   }
-  if (Math.random() < CONFIG.FUEL_RANDOM_CHANCE) {
+  if (gen.random() < CONFIG.FUEL_RANDOM_CHANCE) {
     const ground = laneIndices().filter(l => lanes[l] === LANE_TYPE.ROAD);
     if (ground.length > 0) {
-      lanes[ground[Math.floor(Math.random() * ground.length)]] = LANE_TYPE.FUEL;
+      lanes[ground[Math.floor(gen.random() * ground.length)]] = LANE_TYPE.FUEL;
       gen.sinceFuel = 0;
     }
   }
 }
 
-// 道具按 BOOST→SLOW→TRIPLE→MAGNET 轮换；布置机会间隔拉大后，整体奖励更稀疏。
-// 只放在纯 ROAD 车道；TRIPLE 还会在地形装饰完成后统一过滤过近的重复来源。
+// 道具每四次机会重新洗牌，保留各种奖励的比例与布置间隔，不固定出现顺序。
+// 只放在纯 ROAD 车道；加速、变身还会在地形装饰后按持续时间统一过滤过近的候选。
 function maybePlacePickup(lanes, gen, index) {
   if (index < CONFIG.WARMUP_SEGMENTS) return;
   gen.sincePickup++;
   if (gen.sincePickup < CONFIG.PICKUP_MIN_GAP) return;
-  if (Math.random() >= 0.2) return;
+  if (gen.random() >= 0.2) return;
   const ground = laneIndices().filter(l => lanes[l] === LANE_TYPE.ROAD);
   if (ground.length === 0) return;
-  const kinds = [LANE_TYPE.BOOST, LANE_TYPE.SLOW, LANE_TYPE.TRIPLE, LANE_TYPE.MAGNET];
-  const kind = kinds[gen.pickupCycle % kinds.length];
-  gen.pickupCycle++;
-  lanes[ground[Math.floor(Math.random() * ground.length)]] = kind;
+  if (gen.pickupBag.length === 0) {
+    gen.pickupBag = [LANE_TYPE.BOOST, LANE_TYPE.SLOW, LANE_TYPE.TRIPLE, LANE_TYPE.MAGNET];
+    for (let i = gen.pickupBag.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(gen.random() * (i + 1));
+      [gen.pickupBag[i], gen.pickupBag[j]] = [gen.pickupBag[j], gen.pickupBag[i]];
+    }
+  }
+  const kind = gen.pickupBag.pop();
+  lanes[ground[Math.floor(gen.random() * ground.length)]] = kind;
   gen.sincePickup = 0;
 }
 
@@ -1208,21 +1239,21 @@ function maybePlacePickup(lanes, gen, index) {
 //   只能变道躲避、击毁或用导弹清除 —— 高难度（d>0.3）才混编出现。
 function maybePlaceEnemy(lanes, gen, index, d, guaranteedLane) {
   if (index < CONFIG.ENEMY_MIN_INDEX) return null;
-  if (Math.random() >= 0.06 + 0.10 * d) return null;
+  if (gen.random() >= 0.06 + 0.10 * d) return null;
   const spots = laneIndices().filter(l => l !== guaranteedLane && lanes[l] === LANE_TYPE.ROAD);
   if (spots.length === 0) return null;
-  const lane = spots[Math.floor(Math.random() * spots.length)];
+  const lane = spots[Math.floor(gen.random() * spots.length)];
   const worldArt = globalThis.Skyroads && globalThis.Skyroads.worldArt;
-  if (d > 0.3 && Math.random() < 0.35) {
+  if (d > 0.3 && gen.random() < 0.35) {
     return {
       type: 'turret', lane: lane, spawnLane: lane,
       visualVariant: worldArt && typeof worldArt.variantKey === 'function'
         ? worldArt.variantKey('turret', index, lane) : null,
-      phase: Math.random() * Math.PI * 2,
+      phase: gen.random() * Math.PI * 2,
     };
   }
   // 复用外观相位抽样确定空域，不额外消耗随机数，保留后续赛道与奖励分布。
-  const phase = Math.random() * Math.PI * 2;
+  const phase = gen.random() * Math.PI * 2;
   const altitude = phase < Math.PI * 2 * CONFIG.DRONE_LOW_AIR_RATIO ? CONFIG.DRONE_LOW_AIR_ALTITUDE : 0;
   return {
     type: 'drone', lane: lane, spawnLane: lane,
@@ -1231,13 +1262,13 @@ function maybePlaceEnemy(lanes, gen, index, d, guaranteedLane) {
     phase,
     // 空域在生成时固定，巡逻与玩家接近都不会改变高度。
     state: 'rest', fromLane: lane, toLane: lane,
-    moveT: 1, warnT: 0, restT: 0.25 + Math.random() * 0.75,
+    moveT: 1, warnT: 0, restT: 0.25 + gen.random() * 0.75,
     altitude,
   };
 }
 
 function buildTrack() {
-  STATE.gen = newGenState();
+  STATE.gen = newGenState(STATE.routeSeed);
   const track = [];
   for (let i = 0; i < CONFIG.TRACK_INITIAL_SEGMENTS; i++) {
     track.push(generateSegment(i, STATE.gen));
@@ -1862,7 +1893,10 @@ function renderTrack(ctx) {
       } else if (type === LANE_TYPE.FUEL) {
         renderFuel(ctx, lane, i, zNear, zFar);
       } else if (type === LANE_TYPE.BOOST || type === LANE_TYPE.SLOW || type === LANE_TYPE.TRIPLE || type === LANE_TYPE.MAGNET) {
-        if (type !== LANE_TYPE.TRIPLE || STATE.tripleT <= 0) renderPickup(ctx, type, lane, i, zNear, zFar);
+        if (!((type === LANE_TYPE.TRIPLE && STATE.tripleT > 0)
+          || (type === LANE_TYPE.BOOST && STATE.boostT > 0))) {
+          renderPickup(ctx, type, lane, i, zNear, zFar);
+        }
       }
     }
     // 敌人（独立实体，不占 LANE_TYPE）：与障碍同遍按深度排序渲染
@@ -4469,9 +4503,12 @@ function enableFlightTerrain() {
   if (!terrain) return false;
   STATE.terrainEnabled = true;
   STATE.groundHeight = terrain.heightAt(STATE.position, STATE.movement.lanePosition);
-  const spacing = { lastTripleIndex: -Infinity };
+  const spacing = { lastBoostIndex: -Infinity, lastTripleIndex: -Infinity };
   STATE.track = STATE.track.map((segment) => spaceSuperPickups(spacing, decorateFlightSegment(segment)));
-  if (STATE.gen) STATE.gen.lastTripleIndex = Math.max(STATE.gen.lastTripleIndex, spacing.lastTripleIndex);
+  if (STATE.gen) {
+    STATE.gen.lastBoostIndex = Math.max(STATE.gen.lastBoostIndex, spacing.lastBoostIndex);
+    STATE.gen.lastTripleIndex = Math.max(STATE.gen.lastTripleIndex, spacing.lastTripleIndex);
+  }
   if (!STATE.wormhole) resetWormhole();
   return true;
 }
@@ -5173,8 +5210,13 @@ function collectPickup(seg, lane, type) {
     if (relativeHeight < -0.001 || relativeHeight > CONFIG.FUEL_COLLECT_HEIGHT) return false;
     pickupFuel(seg, lane);
   } else if (type === LANE_TYPE.BOOST) {
+    if (STATE.boostT > 0) {
+      // 隐藏的同类奖励经过后作废，既不续时，也不在同格到期后立即再次激活。
+      seg.lanes[lane] = LANE_TYPE.ROAD;
+      return false;
+    }
     seg.lanes[lane] = LANE_TYPE.ROAD;
-    if (STATE.boostT <= 0) STATE.boostPrevSpeed = currentCruiseSpeed();
+    STATE.boostPrevSpeed = currentCruiseSpeed();
     STATE.boostT = CONFIG.BOOST_DURATION;
     STATE.boostGraceT = 0;
     STATE.boostWarnStage = 0;
@@ -5360,8 +5402,27 @@ function resetThrusterFeedback() {
   STATE.jumpBurstTier = 0;
 }
 
+// 只在开新局时更换种子；即使受限环境没有 crypto 或随机源重复，也避免相邻两局同种子。
+function resetRoute() {
+  let seed;
+  try {
+    const values = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(values);
+    seed = values[0];
+  } catch (_) {
+    seed = Math.floor(Math.random() * 4294967296) >>> 0;
+  }
+  if (seed === 0 || seed === STATE.routeSeed) seed = ((STATE.routeSeed || 0) + 1) >>> 0 || 1;
+  STATE.routeSeed = seed;
+  const terrain = globalThis.Skyroads.flightTerrain;
+  if (terrain && typeof terrain.createForRun === 'function') {
+    globalThis.Skyroads.flightTerrain = terrain.createForRun(seed);
+  }
+}
+
 function resetGame() {
   clearAllInputState();
+  resetRoute();
   STATE.position = 0;
   resetWormhole();
   STATE.speed = CONFIG.INITIAL_SPEED;      // 起步即有速度感

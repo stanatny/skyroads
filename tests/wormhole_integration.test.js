@@ -251,7 +251,11 @@ test('restarting an unfinished warp clears reward, input and every transient wit
   assert.equal(h.state.wormhole.completedCount, 0);
   assert.equal(h.state.position, 0);
   assert.equal(h.state.distanceMeters, 0);
-  assert.equal(h.state.wormhole.gate.segment, 1136);
+  const terrain = h.sandbox.Skyroads.flightTerrain;
+  const nextGate = h.sandbox.Skyroads.wormhole.nextGate(0, terrain);
+  assert.equal(h.state.wormhole.gate.segment, nextGate.segment);
+  assert.equal(h.state.wormhole.gate.lane, terrain.routeAt(nextGate.segment).branchLanes[0]);
+  assert.equal(h.state.wormhole.gate.groundHeight, terrain.heightAt(nextGate.segment, nextGate.lane));
   h.game.updatePhysics(0.01);
   assert.ok(h.state.distanceMeters < 1);
 });
@@ -285,8 +289,8 @@ test('exit protection lasts two full gameplay seconds against buildings, then or
 });
 
 
-test('both acceleration modes hand off to a full two-second shield without losing an expiry substep', () => {
-  for (const [active, grace] of [['boostT', 'boostGraceT'], ['fuelBurstT', 'fuelBurstGraceT']]) {
+test('boost and fuel burst preserve their respective 1.5 and 2 second exit shields through expiry substeps', () => {
+  for (const [active, grace, duration] of [['boostT', 'boostGraceT', 1.5], ['fuelBurstT', 'fuelBurstGraceT', 2]]) {
     const h = createHarness();
     h.state[active] = 0.003;
     h.state[grace] = 0;
@@ -295,18 +299,21 @@ test('both acceleration modes hand off to a full two-second shield without losin
     vm.runInContext("die = reason => { STATE.mode = 'GAMEOVER'; globalThis.deathReason = reason; };", h.sandbox);
     h.game.updatePhysics(0.01);
     assert.equal(h.state[active], 0);
-    assert.ok(Math.abs(h.state[grace] - 1.993) < 1e-8, `${active} must account only for time after expiry`);
+    assert.ok(Math.abs(h.state[grace] - (duration - 0.007)) < 1e-8, `${active} must account only for time after expiry`);
     assert.equal(h.state.mode, 'PLAYING');
     h.game.updatePhysics(0.001);
     assert.equal(h.state.speed, 8);
-    for (let frame = 0; frame < 99; frame += 1) h.game.updatePhysics(0.02);
+    const frames = Math.floor((duration - 0.008) / 0.02);
+    for (let frame = 0; frame < frames; frame += 1) h.game.updatePhysics(0.02);
+    h.game.updatePhysics(duration - 0.009 - frames * 0.02);
+    assert.ok(Math.abs(h.state[grace] - 0.001) < 1e-8);
     assert.equal(h.state.mode, 'PLAYING', `${active} protects after speed restoration`);
     h.game.togglePause();
     const remaining = h.state[grace];
     h.game.updatePhysics(5);
     assert.equal(h.state[grace], remaining);
     h.game.togglePause();
-    h.game.updatePhysics(0.02);
+    h.game.updatePhysics(0.002);
     h.game.checkCollisions(3, 3);
     assert.equal(h.state[grace], 0);
     assert.equal(h.sandbox.deathReason, 'wall');

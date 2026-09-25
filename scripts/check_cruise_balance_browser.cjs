@@ -67,6 +67,7 @@ async function setup(page, { speed = 8, triple = 0, boost = 0 } = {}) {
     STATE.groundHeight = STATE.playerY = STATE.playerVY = STATE.jumpsUsed = 0;
     resetMovement(STATE.movement, 3);
     STATE.lastTime = __balanceClock.now;
+    window.__balanceBoostCues = 0;
     focusPrimarySurface(); render();
   }, { speed, triple, boost });
 }
@@ -75,7 +76,8 @@ async function sample(page) {
   return page.evaluate(() => {
     const flight = Skyroads.diagnostics.snapshot().flight;
     return { mode: STATE.mode, position: STATE.position, speed: STATE.speed, cruiseSpeed: currentCruiseSpeed(),
-      boostT: STATE.boostT, tripleT: STATE.tripleT, fuel: STATE.fuel,
+      boostT: STATE.boostT, boostGraceT: STATE.boostGraceT, tripleT: STATE.tripleT, fuel: STATE.fuel,
+      boostCues: window.__balanceBoostCues, warpActive: STATE.wormhole.active,
       tripleModels: window.__balanceMeshes?.object_triple_body?.count,
       boostModels: window.__balanceMeshes?.object_boost_body?.count,
       flight: { renderer: flight.renderer, error: flight.error, contextLost: flight.contextLost,
@@ -109,10 +111,18 @@ async function main() {
         if (this.name === 'object_triple_body' || this.name === 'object_boost_body') __balanceMeshes[this.name] = this;
         return original.apply(this, args);
       };
+      const boostSound = sfxBoost;
+      sfxBoost = function (...args) {
+        window.__balanceBoostCues = (window.__balanceBoostCues || 0) + 1;
+        return boostSound(...args);
+      };
     });
     report.samples.tuning = await page.evaluate(() => ({ acceleration: CONFIG.ACCEL,
-      threshold: CONFIG.CRUISE_SOFT_CAP, tail: CONFIG.CRUISE_TAIL_ACCEL, superDuration: CONFIG.TRIPLE_DURATION }));
-    assert.deepEqual(report.samples.tuning, { acceleration: 0.65, threshold: 36, tail: 0.1, superDuration: 20 });
+      threshold: CONFIG.CRUISE_SOFT_CAP, tail: CONFIG.CRUISE_TAIL_ACCEL,
+      boostDuration: CONFIG.BOOST_DURATION, boostGrace: CONFIG.BOOST_GRACE,
+      fuelBurstGrace: CONFIG.FUEL_BURST_GRACE, superDuration: CONFIG.TRIPLE_DURATION }));
+    assert.deepEqual(report.samples.tuning, { acceleration: 0.65, threshold: 36, tail: 0.1,
+      boostDuration: 5, boostGrace: 1.5, fuelBurstGrace: 2, superDuration: 20 });
 
     await setup(page);
     assert.equal((await sample(page)).flight.renderer, 'webgl-chase');
@@ -127,6 +137,88 @@ async function main() {
     close(report.samples.aboveThreshold.speed, 36.5);
     assert.equal(report.samples.aboveThreshold.mode, 'PLAYING');
     report.checks.push('Crossing the former speed ceiling does not cap acceleration: 36 becomes 36.5 in five seconds');
+
+    await setup(page);
+    await page.evaluate(() => {
+      STATE.track[21].lanes[3] = 'BOOST';
+      STATE.track[24].lanes[2] = 'BOOST';
+      STATE.track[24].lanes[4] = 'TRIPLE';
+      render();
+      STATE.boostT = CONFIG.BOOST_DURATION;
+      STATE.boostPrevSpeed = STATE.speed;
+      render();
+    });
+    assert.equal((await sample(page)).boostModels, 0);
+    assert.equal((await sample(page)).tripleModels, 1);
+    await advance(page, 0.05);
+    const blockedBoost = await sample(page);
+    close(blockedBoost.boostT, 4.95);
+    assert.equal(blockedBoost.boostCues, 0);
+    assert.equal(await page.evaluate(() => STATE.track[21].lanes[3]), 'ROAD');
+    assert.equal(blockedBoost.boostModels, 0);
+    report.samples.blockedBoost = blockedBoost;
+    await page.screenshot({ path: path.join(evidenceDirectory, 'active_boost_no_duplicate.png') });
+    report.checks.push('Active BOOST hides duplicate 3D pickups; a real collision clears the passed token without refreshing time or replaying its sound');
+
+    await page.keyboard.press('p');
+    await advance(page, 1);
+    const pausedBoost = await sample(page);
+    assert.equal(pausedBoost.mode, 'PAUSED');
+    close(pausedBoost.boostT, blockedBoost.boostT);
+    assert.equal(pausedBoost.boostModels, 0);
+    await page.keyboard.press('p');
+    await advance(page, 0);
+    const boostCanvas = await page.evaluate(() => {
+      const original = renderPickup;
+      const calls = [];
+      renderPickup = function (ctx, type, ...args) { calls.push(type); return original(ctx, type, ...args); };
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.canvas.width = STATE.width; ctx.canvas.height = STATE.height;
+      try {
+        renderTrack(ctx);
+        const active = [...calls]; calls.length = 0;
+        STATE.boostT = 0;
+        STATE.boostGraceT = CONFIG.BOOST_GRACE;
+        STATE.fuelBurstT = 3;
+        renderTrack(ctx);
+        return { active, inactive: [...calls] };
+      } finally { renderPickup = original; render(); }
+    });
+    assert.ok(!boostCanvas.active.includes('BOOST'));
+    assert.ok(boostCanvas.active.includes('TRIPLE'));
+    assert.ok(boostCanvas.inactive.includes('BOOST'));
+    assert.equal((await sample(page)).boostModels, 1);
+    report.samples.boostCanvas = boostCanvas;
+    report.checks.push('Pause preserves BOOST suppression; Canvas and WebGL reveal the remaining token immediately after active expiry despite grace or fuel burst');
+
+    await setup(page, { boost: 0.0001 });
+    await page.evaluate(() => { STATE.track[20].lanes[3] = 'BOOST'; });
+    await advance(page, 0.00005);
+    assert.equal(await page.evaluate(() => STATE.track[20].lanes[3]), 'ROAD');
+    await advance(page, 0.001);
+    assert.equal((await sample(page)).boostT, 0);
+    assert.equal((await sample(page)).boostCues, 0);
+    report.checks.push('A BOOST token touched during the last 0.0001 seconds cannot retrigger on the same road tile after expiry');
+
+    await setup(page);
+    await page.evaluate(() => { STATE.track[21].lanes[3] = 'BOOST'; });
+    await advance(page, 0.2);
+    const pickedBoost = await sample(page);
+    assert.ok(pickedBoost.boostT > 4.8 && pickedBoost.boostT <= 5);
+    assert.equal(pickedBoost.boostCues, 1);
+    await advance(page, pickedBoost.boostT + 0.01);
+    const expiredBoost = await sample(page);
+    assert.equal(expiredBoost.boostT, 0);
+    close(expiredBoost.boostGraceT, 1.49);
+    await page.evaluate(() => {
+      STATE.track[Math.floor(STATE.position) + 1].lanes[3] = 'BOOST';
+    });
+    await advance(page, 0.2);
+    const boostInGrace = await sample(page);
+    assert.ok(boostInGrace.boostT > 4.8);
+    assert.equal(boostInGrace.boostCues, 2);
+    report.samples.boostExpiry = { picked: pickedBoost, expired: expiredBoost, reacquired: boostInGrace };
+    report.checks.push('A real BOOST lasts five seconds; the remaining 1.5-second shield does not block a newly encountered BOOST after expiry');
 
     await setup(page);
     await page.evaluate(() => {
@@ -188,6 +280,45 @@ async function main() {
     assert.equal((await sample(page)).mode, 'PLAYING');
     report.samples.expiredSuper = await sample(page);
     report.checks.push('An ordinary real pickup activates super form for exactly twenty seconds and then expires');
+
+    await setup(page, { speed: 24, boost: 2.5, triple: 8 });
+    await page.evaluate(() => {
+      // 实际二段跳进入当前随机高台的虫洞，只清除已隔离夹具中的危险。
+      STATE.terrainEnabled = true;
+      const gate = Skyroads.wormhole.nextGate(0, Skyroads.flightTerrain);
+      STATE.wormhole.gate = gate;
+      STATE.position = gate.segment - CONFIG.BOOST_SPEED * 0.45;
+      STATE.distanceMeters = STATE.position * CONFIG.DISTANCE_PER_SEGMENT;
+      resetMovement(STATE.movement, gate.lane);
+      STATE.groundHeight = Skyroads.flightTerrain.heightAt(STATE.position, gate.lane);
+      STATE.lastTime = __balanceClock.now;
+      focusPrimarySurface(); render();
+    });
+    await page.keyboard.press('Space');
+    await advance(page, 14 / 60);
+    await page.keyboard.press('k');
+    await advance(page, 0.23);
+    const warpEntry = await sample(page);
+    assert.equal(warpEntry.warpActive, true);
+    await advance(page, 0.7);
+    const tunnel = await sample(page);
+    close(tunnel.boostT, warpEntry.boostT);
+    close(tunnel.tripleT, warpEntry.tripleT);
+    for (let frame = 0; frame < 180 && (await sample(page)).warpActive; frame += 1) await advance(page, 1 / 60);
+    const warpExit = await sample(page);
+    assert.equal(warpExit.warpActive, false);
+    close(warpExit.boostT, warpEntry.boostT);
+    close(warpExit.tripleT, warpEntry.tripleT);
+    await page.evaluate(() => {
+      STATE.track[Math.floor(STATE.position) + 1].lanes[3] = 'BOOST';
+    });
+    await advance(page, 0.05);
+    const afterWarpPickup = await sample(page);
+    close(afterWarpPickup.boostT, warpExit.boostT - 0.05);
+    close(afterWarpPickup.tripleT, warpExit.tripleT - 0.05);
+    assert.equal(afterWarpPickup.boostCues, 0);
+    report.samples.warpTimers = { entry: warpEntry, tunnel, exit: warpExit, afterPickup: afterWarpPickup };
+    report.checks.push('A real double-jump warp freezes BOOST and TRIPLE; both resume afterward and a duplicate BOOST at the exit cannot renew the preserved timer');
 
     await setup(page, { speed: 30, boost: 3 });
     await page.evaluate(() => { STATE.track[21].lanes[3] = 'SLOW'; });

@@ -745,7 +745,7 @@ test('enemy creation assigns a deterministic variant once from segment and spawn
     Math.random = () => 0;
     try {
       const lanes = Array(CONFIG.LANES).fill(LANE_TYPE.ROAD);
-      return maybePlaceEnemy(lanes, {}, 91, 0, 0);
+      return maybePlaceEnemy(lanes, newGenState(), 91, 0, 0);
     } finally {
       Math.random = previousRandom;
     }

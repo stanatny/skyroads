@@ -101,6 +101,7 @@
     const distanceColor = new THREE.Color();
     let previousPosition = null;
     let previousTerrainEnabled = null;
+    let previousTerrain = null;
     const previousBackgroundOffset = new THREE.Vector3(NaN, NaN, NaN);
     let journeyDistance = 0;
     let previousRunId;
@@ -139,10 +140,11 @@
       }
       const terrain = scope.Skyroads.flightTerrain;
       const followsTerrain = Boolean(terrainEnabled && terrain && typeof terrain.heightAt === 'function');
-      if (logicalPosition === previousPosition && followsTerrain === previousTerrainEnabled
+      if (terrain === previousTerrain && logicalPosition === previousPosition && followsTerrain === previousTerrainEnabled
         && previousBackgroundOffset.equals(parent.position)) return;
       previousPosition = logicalPosition;
       previousTerrainEnabled = followsTerrain;
+      previousTerrain = terrain;
       previousBackgroundOffset.copy(parent.position);
       const distance = logicalPosition * 4;
       const phase = ((distance % 90) + 90) % 90;

@@ -11,7 +11,7 @@
     const burst = Math.max(0, state.fuelBurstT || 0);
     const grace = Math.max(0, state.fuelBurstGraceT || 0);
     const graceDuration = Math.max(0, config.FUEL_BURST_GRACE ?? 2);
-    const boostGraceDuration = Math.max(0, config.BOOST_GRACE ?? 2);
+    const boostGraceDuration = Math.max(0, config.BOOST_GRACE ?? 1.5);
     const boostProtection = Math.max(state.boostGraceT || 0, boost > 0 ? boost + boostGraceDuration : 0);
     // 主动爆发到期会自动接续保护；把这段时间纳入同一次倒计时，交接时不闪断或重填进度条。
     const burstProtection = Math.max(grace, burst > 0 ? burst + graceDuration : 0);

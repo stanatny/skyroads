@@ -101,7 +101,9 @@ test('boosts stay faster than cruise and preserve its growing baseline and exit 
       assert.equal(h.state[timer], 0);
       h.step(0.02);
       close(h.state.speed, priorSpeed + (elapsed + 0.02) * (priorSpeed < 36 ? 0.65 : 0.1));
-      assert.ok(h.state[`${kind}GraceT`] > 1.9);
+      const duration = kind === 'boost' ? 1.5 : 2;
+      assert.ok(h.state[`${kind}GraceT`] > duration - 0.1);
+      assert.ok(h.state[`${kind}GraceT`] <= duration);
     }
   }
 });
@@ -140,6 +142,57 @@ test('super pickups cannot extend an active transformation and become collectibl
   later.lanes[3] = 'TRIPLE';
   assert.equal(h.game.collectPickup(later, 3, 'TRIPLE'), true);
   close(h.state.tripleT, 20);
+});
+
+test('repeated boost pickups cannot refresh timers, replay effects or alter the cruise baseline', () => {
+  for (const remaining of [5, 2.5, 0.0001]) {
+    const h = createHarness({ speed: 45 });
+    vm.runInContext('globalThis.boostSounds = 0; sfxBoost = () => { boostSounds++; };', h.sandbox);
+    Object.assign(h.state, { boostT: remaining, boostPrevSpeed: 37, boostWarnStage: 2 });
+    const segment = h.state.track[0];
+    segment.lanes[3] = 'BOOST';
+    assert.equal(h.game.collectPickup(segment, 3, 'BOOST'), false);
+    close(h.state.boostT, remaining);
+    close(h.state.boostPrevSpeed, 37);
+    assert.equal(h.state.boostWarnStage, 2);
+    assert.equal(h.sandbox.boostSounds, 0);
+    assert.equal(segment.lanes[3], 'ROAD');
+  }
+});
+
+test('a passed hidden boost stays consumed across expiry and a new boost can be collected during exit grace', () => {
+  const h = createHarness({ position: 20.2 });
+  Object.assign(h.state, { boostT: 0.0001, boostPrevSpeed: 8 });
+  h.state.track[20].lanes[3] = 'BOOST';
+  h.step(0.00005);
+  assert.equal(h.state.track[20].lanes[3], 'ROAD');
+  close(h.state.boostT, 0.00005);
+  h.step(0.0001);
+  assert.equal(h.state.boostT, 0);
+  assert.ok(h.state.boostGraceT > 1.49 && h.state.boostGraceT <= 1.5);
+  h.step(0.001);
+  assert.equal(h.state.boostT, 0);
+  h.state.track[20].lanes[3] = 'BOOST';
+  h.step(0.001);
+  close(h.state.boostT, h.game.CONFIG.BOOST_DURATION);
+  assert.equal(h.state.boostGraceT, 0);
+});
+
+test('boost and transformation locks do not block different rewards or overlap with fuel burst', () => {
+  const h = createHarness({ speed: 24 });
+  h.game.tryFuelBurst();
+  h.state.tripleT = 15;
+  assert.equal(h.game.collectPickup(h.state.track[0], 3, 'BOOST'), true);
+  close(h.state.boostT, h.game.CONFIG.BOOST_DURATION);
+  close(h.state.tripleT, 15);
+  close(h.state.fuelBurstT, h.game.CONFIG.FUEL_BURST_DURATION);
+  assert.equal(h.game.collectPickup(h.state.track[1], 3, 'MAGNET'), true);
+  close(h.state.magnetT, h.game.CONFIG.MAGNET_DURATION);
+  assert.equal(h.game.collectPickup(h.state.track[2], 3, 'SLOW'), true);
+  close(h.game.currentCruiseSpeed(), 24 * h.game.CONFIG.SLOW_FACTOR);
+  h.state.tripleT = 0;
+  assert.equal(h.game.collectPickup(h.state.track[3], 3, 'TRIPLE'), true);
+  close(h.state.tripleT, h.game.CONFIG.TRIPLE_DURATION);
 });
 
 test('late-game generation reserves real lane-change time as cruising speed rises', () => {
