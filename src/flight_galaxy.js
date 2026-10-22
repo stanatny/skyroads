@@ -7,10 +7,17 @@
     const group = new THREE.Group();
     group.name = 'milky_way_starfield';
     parent.add(group);
+    const blankSky = own(new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1));
+    blankSky.needsUpdate = true;
+    // v7 美术方向：天空穹顶可被 Hugging Face 生成的 equirect 全景接管；
+    // skyMap 未就绪时 skyMix 为 0，画面与旧版逐像素一致。
     const material = own(new THREE.ShaderMaterial({
-      vertexShader: `varying vec3 direction;
-        void main() { direction = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `varying vec3 direction;
+      uniforms: { skyMap: { value: blankSky }, skyMix: { value: 0 } },
+      vertexShader: `varying vec3 direction; varying vec2 vSkyUv;
+        void main() { direction = position; vSkyUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `uniform sampler2D skyMap; uniform float skyMix;
+        varying vec3 direction; varying vec2 vSkyUv;
         float hash(vec3 p) { p=fract(p*0.3183099+vec3(0.13,0.27,0.39)); p*=17.0;
           return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
         float noise(vec3 p) { vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
@@ -36,6 +43,11 @@
           color+=vec3(0.140,0.111,0.092)*bulge*halo*clouds;
           color+=vec3(0.028,0.014,0.041)*halo*smoothstep(0.50,0.72,broadCloud);
           color*=1.0-dust*0.82;
+          vec3 art=texture2D(skyMap,vSkyUv).rgb;
+          // v9：全景图在 hf-redraw/build_art_v9.py 已配光到平均亮度 0.10 左右，
+          // 着色器不再二次压暗；v8 的 *0.52 把星云压成一层灰雾，结构反而看不见。
+          art=mix(vec3(dot(art,vec3(0.299,0.587,0.114))),art,0.90);
+          color=mix(color,art+color*0.30,skyMix);
           gl_FragColor=vec4(color,1.0);
         }`,
       side: THREE.BackSide, depthWrite: false, fog: false,
@@ -94,7 +106,16 @@
     group.add(stars);
     return { group,
       setPixelRatio: ratio => { starsMaterial.uniforms.pixelRatio.value = Math.max(1, Math.min(2, Number(ratio) || 1)); },
-      getDiagnostics: () => ({ name: group.name, stars: 3400, drawCalls: 2, animated: false, externalAssets: false }),
+      /** 接入外部 equirect 全景图；mix 为 0 时完全走程序化星云。 */
+      setSkyTexture: (texture, mix = 0.82) => {
+        if (!texture) return false;
+        material.uniforms.skyMap.value = texture;
+        material.uniforms.skyMix.value = Math.max(0, Math.min(1, Number(mix) || 0));
+        material.needsUpdate = true;
+        return true;
+      },
+      getDiagnostics: () => ({ name: group.name, stars: 3400, drawCalls: 2, animated: false,
+        externalAssets: material.uniforms.skyMix.value > 0 }),
     };
   }
   scope.Skyroads = scope.Skyroads || {};

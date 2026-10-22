@@ -2,10 +2,11 @@
 
 // 所有实体在初始化时合并建模；逐帧仅更新实例，不分配几何、材质或临时向量。
 (function attachFlightObjects(scope) {
+  // v10 "Neon Void" 调色：敌机走冷灰 + 洋红，奖励色保持高饱和以便一眼分辨。
   const PALETTE = Object.freeze({
-    titanium: 0xb9cbd2, ivory: 0xe4e5d7, graphite: 0x172635, recess: 0x080f1a,
-    cobalt: 0x244b77, crimson: 0xc83b4b, red: 0xff654e, emerald: 0x24c68a,
-    mint: 0x95ffd3, amber: 0xf7a73d, gold: 0xffd373, violet: 0xa77aef, cyan: 0x50d9ed,
+    titanium: 0xb9c0d8, ivory: 0xe8e4f2, graphite: 0x121422, recess: 0x06070e,
+    cobalt: 0x3d2a72, crimson: 0x8e1f52, red: 0xff2f6d, emerald: 0x21d29a,
+    mint: 0x8dffe0, amber: 0xff4fa8, gold: 0xffd373, violet: 0xc06bff, cyan: 0x35f0ff,
   });
   const PICKUP_COLORS = Object.freeze({
     FUEL: PALETTE.emerald, BOOST: PALETTE.amber, SLOW: PALETTE.violet,
@@ -22,9 +23,34 @@
       color: 0xffffff, vertexColors: true, metalness: 0.48, roughness: 0.35,
       emissive: 0x09131c, emissiveIntensity: 0.16,
     }));
+    // v8：敌机/炮台独立一份材质，让 HF 生成的绯红涂装不污染语义化的奖励配色。
+    const hostileMetal = own(new THREE.MeshStandardMaterial({
+      color: 0xffffff, vertexColors: true, metalness: 0.55, roughness: 0.30,
+      emissive: 0x1a0a0c, emissiveIntensity: 0.22,
+    }));
     const signal = own(new THREE.MeshBasicMaterial({
       color: 0xffffff, vertexColors: true, toneMapped: false,
     }));
+    // v10：奖励机体只借贴图的磨损/分缝亮度，颜色仍由 PICKUP_COLORS 决定（可读性优先）。
+    // 敌机则由无人机涂装贴图接管固有色：枪灰装甲 + 洋红传感器 + 青色技术标记。
+    const skins = scope.Skyroads && scope.Skyroads.artSkins;
+    if (skins && typeof skins.paint === 'function') {
+      skins.paint(metal, THREE, {
+        key: 'pickup-shell',
+        detail: { url: './assets/art/station-hull.webp', scale: 0.9, strength: 0.34, contrast: 2.3 },
+      });
+      // v11：无人机重新生成了一份"枪灰装甲 + 洋红单眼 + 密集紧固件"的涂装，固有色接管提到 0.90，
+      // 贴图频率提到 0.75（原来 0.52，机身只有一小块区域，等于没细节），并给机体加了洋红边缘光——
+      // 它必须一眼从满屏青色里分出来，否则玩家分不清"能撞的"和"能捡的"。
+      skins.paint(hostileMetal, THREE, {
+        key: 'drone-shell',
+        albedo: { url: './assets/art/drone-shell.webp', scale: 0.75, mix: 0.90, luma: 0.64, gain: 0.68 },
+        emissive: { url: './assets/art/wall-emissive.webp', scale: 0.62, color: 0xff3ea5, gain: 0.95 },
+        bump: 0.7,
+        rim: { color: 0xff5cc0, gain: 0.30, power: 2.4 },
+        rough: 0.35,
+      });
+    }
     // 实体晶面保留环境反射及明暗面，内部亮面从分离的晶棱中透出。
     const crystal = own(new THREE.MeshPhysicalMaterial({
       color: 0xffffff, vertexColors: true, metalness: 0.03, roughness: 0.055,
@@ -54,7 +80,7 @@
     function batch(name, builder, material, maximum = capacity, role = 'solid') {
       const geometry = own(builder.finish());
       const result = makeBatch(name, geometry, material, maximum);
-      if (result.mesh) result.mesh.castShadow = material === metal;
+      if (result.mesh) result.mesh.castShadow = material === metal || material === hostileMetal;
       const box = geometry.boundingBox;
       diagnostics[name] = {
         triangles: (geometry.index ? geometry.index.count : geometry.getAttribute('position').count) / 3,
@@ -87,13 +113,13 @@
     const crystalBatch = batch('object_fuel_facets', crystalShell, crystal, capacity + 96);
     const droneBody = builder(THREE);
     buildDrone(droneBody);
-    const drone = batch('object_drone_interceptor', droneBody, metal);
+    const drone = batch('object_drone_interceptor', droneBody, hostileMetal);
     const turretBaseBody = builder(THREE);
     const turretHeadBody = builder(THREE);
     const turretHeight = (config.TURRET_HEIGHT || 1900) * world.heightScale;
     buildTurret(turretBaseBody, turretHeadBody, turretHeight);
-    const turretBase = batch('object_turret_foundation', turretBaseBody, metal);
-    const turretHead = batch('object_turret_azimuth_head', turretHeadBody, metal);
+    const turretBase = batch('object_turret_foundation', turretBaseBody, hostileMetal);
+    const turretHead = batch('object_turret_azimuth_head', turretHeadBody, hostileMetal);
     const emitterBuilder = builder(THREE);
     emitterBuilder.gem(0, 0, 0, 1, 2, 0xffffff, 8);
     const emitter = batch('object_hostile_emitters', emitterBuilder, signal, capacity * 6);
@@ -554,5 +580,7 @@
   }
 
   scope.Skyroads = scope.Skyroads || {};
-  scope.Skyroads.flightObjects = Object.freeze({ create });
+  // palette 一并导出：测试要断言"警示箭头用的就是警示色"，不该把某个十六进制值写死在测试里
+  // （v8、v10 两次改色都因此把测试改成了假失败）。
+  scope.Skyroads.flightObjects = Object.freeze({ create, palette: PALETTE });
 })(globalThis);

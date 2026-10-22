@@ -96,6 +96,8 @@ test('drone geometry and all attached lights follow authoritative physical altit
 
 test('low and high patrols keep horizontal arrowheads readable at a fixed altitude', () => {
   const h = harness();
+  // 警示箭头颜色取自模块导出的调色板：改美术方向不该让这条断言假失败。
+  const cueColor = h.Skyroads.flightObjects.palette.amber;
   for (const altitude of [0, 720]) {
     for (const state of ['warn', 'move']) {
       for (const direction of [-1, 1]) {
@@ -104,7 +106,7 @@ test('low and high patrols keep horizontal arrowheads readable at a fixed altitu
           toLane: 3 + direction, altitude });
         h.models.addEnemy(enemy, 0, 0, 0);
         const emitters = h.batches.find((batch) => batch.name === 'object_hostile_emitters');
-        const arrows = emitters.calls.filter((call) => call[9] === 0xf7a73d);
+        const arrows = emitters.calls.filter((call) => call[9] === cueColor);
         assert.equal(arrows.length, 2, `${state}: both strokes remain visible without animation`);
         const ends = arrows.map((call) => {
           const transform = new h.THREE.Object3D();
@@ -128,7 +130,7 @@ test('low and high patrols keep horizontal arrowheads readable at a fixed altitu
     clear(h);
     h.models.addEnemy({ type: 'drone', state: 'warn', fromLane: 3, toLane: 3, altitude }, 0, 0, 0);
     const emitters = h.batches.find((batch) => batch.name === 'object_hostile_emitters');
-    assert.equal(emitters.calls.filter((call) => call[9] === 0xf7a73d).length, 0,
+    assert.equal(emitters.calls.filter((call) => call[9] === cueColor).length, 0,
       'A stationary patrol does not show a misleading direction cue');
   }
 });
