@@ -42,12 +42,15 @@
     }));
     // v11：障碍贴图换成"密集微刻线 + 铆钉阵列"版本，固有色混入提到 0.88，并加入用贴图亮度
     // 当高度场的假凹凸——板缝会被光照勾出立体感，远看不再是一块平涂的深色板。
+    // v12：光电平从 0.90 压到 0.45。视觉复核把"整面墙自发光"判成光污染：墙的青色和车道
+    // 引导线的青色亮度接近，玩家在怼脸帧里分不清"能走的"和"会撞的"。压暗自发光后，
+    // 墙面读作深色实体，洋红警示带（COLORS.hazard）和车道电青才重新拉出层次。
     const skins = scope.Skyroads && scope.Skyroads.artSkins;
     if (skins && typeof skins.paint === 'function') {
       skins.paint(solidMaterial, THREE, {
         key: 'wall',
         albedo: { url: './assets/art/wall-armor.webp', scale: 0.23, mix: 0.88, luma: 0.58, gain: 0.80 },
-        emissive: { url: './assets/art/wall-emissive.webp', scale: 0.27, color: 0x7df3ff, gain: 0.90 },
+        emissive: { url: './assets/art/wall-emissive.webp', scale: 0.27, color: 0x7df3ff, gain: 0.45 },
         bump: 0.9,
         rim: { color: 0x2ec9ff, gain: 0.16, power: 3.2 },
         rough: 0.45,

@@ -298,7 +298,9 @@
     glow('violet', 0xb96bff);
     glow('green', 0x62ffd0);
     // v10：车道边缘是最强的水平引导线，换成高亮电青。
-    glow('lane', 0x35f0ff, 0.92);
+    // v12：0.92→0.72。全屏霓虹的视觉复核结论是"可走区域也在发光"，引导线不再是最亮的东西
+    // 之后，墙的剪影和洋红警示带才重新拥有对比度。
+    glow('lane', 0x35f0ff, 0.72);
 
     // 所有跑道和障碍按材质合批；长赛道不会按块创建对象或累积资源。
     function makeBatch(name, geometry, material, capacity = 2200) {
