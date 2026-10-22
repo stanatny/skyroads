@@ -19,7 +19,9 @@ function harness() {
     THREE: sandbox.THREE,
     own(resource) { resources.add(resource); return resource; },
     makeBatch(name, geometry, material, capacity) {
-      const batch = { name, geometry, material, capacity, calls: [], add(...args) { this.calls.push(args); } };
+      // count 与真实批次一致：真实 makeBatch 在 add() 时累加实例数并清零，诊断据此读数。
+      const batch = { name, geometry, material, capacity, calls: [], count: 0,
+        add(...args) { this.calls.push(args); this.count += 1; } };
       batches.push(batch);
       return batch;
     },
@@ -224,7 +226,8 @@ test('reduced-motion time produces static instances and does not mutate enemy st
 
 test('all resources are owned and the fixed batch budget survives repeated placement', () => {
   const h = harness();
-  assert.equal(h.models.getDiagnostics().batchCount, 18);
+  // v14 新增一个锁定框批次（object_hostile_lock_cue），固定批次预算从 18 提到 19。
+  assert.equal(h.models.getDiagnostics().batchCount, 19);
   const initialResources = [...h.resources];
   const initialGeometries = h.batches.map((batch) => batch.geometry);
   for (let index = 0; index < 400; index += 1) {
@@ -238,6 +241,31 @@ test('all resources are owned and the fixed batch budget survives repeated place
     assert.ok(h.resources.has(batch.material), `${batch.name} material`);
     assert.ok(batch.calls.length < batch.capacity, `${batch.name} capacity`);
   }
+});
+
+test('lock cue draws one bracket frame from eight short bars and stays inside its own effect batch', () => {
+  const h = harness();
+  const batch = h.batches.find((item) => item.name === 'object_hostile_lock_cue');
+  assert.ok(batch, 'lock cue batch exists');
+  assert.equal(h.models.getDiagnostics().models[batch.name].role, 'effect');
+  assert.equal(batch.material.depthWrite, false, 'cue never writes depth');
+  assert.equal(batch.material.depthTest, false, 'cue is not clipped by wall geometry');
+  assert.equal(h.models.getDiagnostics().lockCueInstances, 0);
+  h.models.addLockCue(1, 2, -4, 2, 1);
+  assert.equal(h.models.getDiagnostics().lockCueInstances, 1);
+  // 四角的八段短棒烘在几何里，所以一个实例就是一整个框（不是八个实例）。
+  assert.equal(batch.calls.length, 1, 'one instance draws the whole bracket frame');
+  // 单位框的半边长是 0.53，实例按 size 缩放，所以两点五单位宽的框铺开到 ±0.53*size。
+  const bounds = placedBounds(h, 'effect');
+  const half = 0.53 * 2;
+  assert.ok(bounds.max.x <= 1 + half + 1e-6 && bounds.min.x >= 1 - half - 1e-6);
+  assert.ok(bounds.max.y <= 2 + half + 1e-6 && bounds.min.y >= 2 - half - 1e-6);
+  // 亮度系数只缩放橙色，不去色：满强度 = 0xffa24a，零强度仍保持同一色相。
+  assert.equal(batch.calls[0][9], (255 << 16) | (162 << 8) | 74);
+  clear(h);
+  h.models.addLockCue(0, 0, -4, 2, 0);
+  const dim = batch.calls[0][9];
+  assert.equal(dim, (140 << 16) | (89 << 8) | 41);
 });
 
 test('a full visible fuel window and in-flight magnet pool fit the shared crystal batches', () => {

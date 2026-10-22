@@ -81,6 +81,13 @@
       opacity: 0.78, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending, toneMapped: false,
     }));
+    // v14：锁定框材质。加色混合 + 不写深度，保证高速穿过窄桥时框线不会被前方的
+    // 墙体几何切掉；亮度由实例色控制，不额外做逐帧材质更新。
+    const lockMaterial = own(new THREE.MeshBasicMaterial({
+      color: 0xffffff, vertexColors: true, transparent: true, opacity: 0.85,
+      depthWrite: false, depthTest: false, toneMapped: false,
+      blending: THREE.AdditiveBlending,
+    }));
     const capacity = (config.RENDER_DISTANCE || 120) * (config.LANES || 7);
     const diagnostics = {};
     const pickups = {};
@@ -138,6 +145,25 @@
       capacity * 3, 'effect');
     const sparks = batch('object_pickup_energy_sparks', planeBuilder(THREE), particleMaterial,
       capacity * 8, 'effect');
+    // v14：锁定框。一个单位正方形跨 −0.5…0.5，四角各两段短棒拼成 L 形刻线；
+    // 中心留空，所以它读起来是"框住目标"而不是又一团发光粒子。
+    const lockBuilder = builder(THREE);
+    {
+      const arm = 0.34;
+      const thick = 0.06;
+      const inner = 0.5 - arm / 2;
+      for (const sideX of [-1, 1]) {
+        for (const sideY of [-1, 1]) {
+          lockBuilder.box(sideX * 0.5, sideY * inner, 0, thick, arm, thick);
+          lockBuilder.box(sideX * inner, sideY * 0.5, 0, arm, thick, thick);
+        }
+      }
+    }
+    const lockCue = batch('object_hostile_lock_cue', lockBuilder, lockMaterial, 8, 'effect');
+    if (lockCue.mesh) {
+      lockCue.mesh.renderOrder = 950;
+      lockCue.mesh.castShadow = false;
+    }
     const pickupHeight = (config.FUEL_BLOCK_HEIGHT || 450) * world.heightScale;
     const droneTop = (config.DRONE_HEIGHT || 500) * world.heightScale;
 
@@ -238,10 +264,27 @@
       }
     }
 
-    function getDiagnostics() {
-      return { batchCount, capacity, droneTop, turretHeight, pickups: Object.keys(pickups), models: diagnostics };
+    /**
+     * 提交一个面向相机的锁定框。size 是世界单位边长，strength 是 0…1 的亮度系数；
+     * 只标一个目标，调用方负责挑"最近的那个威胁"。
+     */
+    function addLockCue(x, y, z, size = 2, strength = 1) {
+      const scale = Math.max(0, Math.min(1, strength));
+      const red = Math.round(255 * (0.55 + 0.45 * scale));
+      const green = Math.round(162 * (0.55 + 0.45 * scale));
+      const blue = Math.round(74 * (0.55 + 0.45 * scale));
+      lockCue.add(x, y, z, size, size, size, 0, 0, 0, (red << 16) | (green << 8) | blue);
     }
-    return { addPickup, addFuel, addEnemy, getDiagnostics };
+
+    function getDiagnostics() {
+      return {
+        batchCount, capacity, droneTop, turretHeight, pickups: Object.keys(pickups),
+        // v14：本帧实际提交的锁定框数量（0 表示没有目标被锁上）。
+        lockCueInstances: lockCue.count,
+        models: diagnostics,
+      };
+    }
+    return { addPickup, addFuel, addEnemy, addLockCue, getDiagnostics };
   }
 
   function buildEnergyPrism(body, lights) {

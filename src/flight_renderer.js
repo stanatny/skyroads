@@ -545,6 +545,8 @@
     let currentState = null;
     let lastFrameMs = 0;
     let visibleSegments = 0;
+    // 每帧只保留一个锁定目标：判定在 renderEnemy 里累积，绘制在这帧路面画完之后。
+    let lockTarget = null;
     let clippedInstances = 0;
     let previousEntities = new Map();
     let frameEntities = new Map();
@@ -784,6 +786,7 @@
       const end = Math.min(state.track.length, start + Math.min(120, config.RENDER_DISTANCE || 120));
       const laneWidth = WORLD.laneWidth;
       visibleSegments = end - start;
+      lockTarget = null;
       raisedTileCount = 0;
       highestVisibleSurface = 0;
       for (let index = start; index < end; index += 1) {
@@ -897,7 +900,35 @@
         }
         if (index % 15 === 0) renderServiceMast(index, state, laneCount);
       }
+      renderLockCue(lockTarget, state, time);
       clearSurface();
+    }
+
+    // v14：把锁定框画在"目标所在位置"而不是固定在屏幕中央，玩家能直接读出它在哪条车道、
+    // 离自己多远。尺寸随段数放大（远处小、近处大），减少动态时保持恒定亮度不再心跳。
+    function renderLockCue(target, state, time) {
+      if (!target) return;
+      const size = Math.min(6.4, 1.9 + 0.115 * target.ahead);
+      const pulse = state.reducedMotion ? 0.85 : 0.62 + 0.38 * Math.abs(Math.sin(time * 5.2));
+      if (flightObjects && typeof flightObjects.addLockCue === 'function') {
+        flightObjects.addLockCue(target.x, target.y, target.z, size, pulse);
+        return;
+      }
+      // 简化渲染器没有实体批次时，用同一套短棒尺寸拼出同一个框。
+      const half = size / 2;
+      const arm = size * 0.34;
+      const thick = Math.max(0.03, size * 0.06);
+      const luminance = 0.55 + 0.45 * pulse;
+      const tint = (Math.round(255 * luminance) << 16)
+        | (Math.round(162 * luminance) << 8) | Math.round(74 * luminance);
+      for (const sideX of [-1, 1]) {
+        for (const sideY of [-1, 1]) {
+          hostileBatch.add(target.x + sideX * half, target.y + sideY * (half - arm / 2),
+            target.z, thick, arm, thick, 0, 0, 0, tint);
+          hostileBatch.add(target.x + sideX * (half - arm / 2), target.y + sideY * half,
+            target.z, arm, thick, thick, 0, 0, 0, tint);
+        }
+      }
     }
 
     function renderObstacle(type, x, z, index, time = 0) {
@@ -973,6 +1004,24 @@
       const lane = enemyLane(enemy);
       const x = laneX(lane, config.LANES);
       const z = segmentZ(index, state.position);
+      // v14：锁定提示。只标"当前车道前方最近的那一个威胁"——屏幕上同时出现多个锁定框
+      // 等于没有锁定。挡在你所在车道里、已经近到来得及反应（3 段以内太晚，46 段以外看不清）
+      // 才算是被锁定的目标；无人机按其真实插值车道判断，横移到你车道时立刻锁上。
+      const playerLane = state.movement ? state.movement.lanePosition : null;
+      const ahead = index - state.position;
+      if (playerLane !== null && Number.isFinite(playerLane) && ahead >= 3 && ahead <= 46
+        && Math.abs(lane - playerLane) <= 0.85
+        && (!lockTarget || ahead < lockTarget.ahead)) {
+        const altitude = Number.isFinite(enemy.altitude) ? Math.max(0, enemy.altitude) : 0;
+        lockTarget = {
+          ahead,
+          x,
+          z,
+          y: enemy.type === 'turret'
+            ? heightY(config.TURRET_HEIGHT || 1900) * 0.92
+            : heightY((config.DRONE_HEIGHT || 500) + altitude) + 0.62,
+        };
+      }
       useSurface(terrainTile(state, index, lane), z);
       frameEntities.set(enemy, {
         index, x,
@@ -1264,6 +1313,10 @@
           highestVisibleSurface,
         },
         lanePosition: currentState && currentState.movement ? currentState.movement.lanePosition : null,
+        // v14：锁定目标的实时读数，验收脚本和测试据此确认"框到底有没有画出来"。
+        lockedTarget: lockTarget
+          ? { ahead: Number(lockTarget.ahead.toFixed(2)), x: lockTarget.x, y: lockTarget.y, z: lockTarget.z }
+          : null,
         contextLost,
         disposed,
         environmentLighting,

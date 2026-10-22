@@ -2,6 +2,9 @@
 
 // 银河由确定性星尘、暗带和恒星组成，只作为远景，不创建灯光或游戏实体。
 (function attachFlightGalaxy(scope) {
+  // v14：天空高光滚降强度。实测整帧裁剪像素 1.08%→0.5% 左右，代价是整帧平均亮度下降；
+  // 调到 0 即完全回到 v13 的画面，方便随时回退观感决定。
+  const SKY_HIGHLIGHT = 0.12;
   /** 创建银河远景；parent 接收网格，own 管理资源，返回像素比例设置和诊断接口。 */
   function create({ THREE, parent, own, sphere }) {
     const group = new THREE.Group();
@@ -12,11 +15,16 @@
     // v7 美术方向：天空穹顶可被 Hugging Face 生成的 equirect 全景接管；
     // skyMap 未就绪时 skyMix 为 0，画面与旧版逐像素一致。
     const material = own(new THREE.ShaderMaterial({
-      uniforms: { skyMap: { value: blankSky }, skyMix: { value: 0 } },
+      uniforms: {
+        skyMap: { value: blankSky }, skyMix: { value: 0 },
+        // v14：全景图高光滚降的强度与起点。0 表示完全关闭（回到 v13 的逐像素结果），
+        // 调高只压星空里"要撞白点"的洋红尖端，暗部与色相不动。
+        rolloff: { value: SKY_HIGHLIGHT },
+      },
       vertexShader: `varying vec3 direction; varying vec2 vSkyUv;
         void main() { direction = position; vSkyUv = uv;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `uniform sampler2D skyMap; uniform float skyMix;
+      fragmentShader: `uniform sampler2D skyMap; uniform float skyMix; uniform float rolloff;
         varying vec3 direction; varying vec2 vSkyUv;
         float hash(vec3 p) { p=fract(p*0.3183099+vec3(0.13,0.27,0.39)); p*=17.0;
           return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
@@ -47,6 +55,13 @@
           // v9：全景图在 hf-redraw/build_art_v9.py 已配光到平均亮度 0.10 左右，
           // 着色器不再二次压暗；v8 的 *0.52 把星云压成一层灰雾，结构反而看不见。
           art=mix(vec3(dot(art,vec3(0.299,0.587,0.114))),art,0.90);
+          // v14：视觉复核的"星云高光轻微过曝"实测来源就是这里——深空背景的洋红高光在
+          // exposure 1.28 + ACES 下被推到 250 以上（占整帧 0.86% 的像素，平均 RGB
+          // 235/31/254）。整体乘系数会连暗部一起压掉（实测整帧平均亮度 125→116）；
+          // 按 luma 滚降对洋红无效，因为洋红的绿通道很低、luma 只有 0.35。所以按"最亮
+          // 通道"的峰值做滚降：只有真正要撞白点的通道被拉回，暗部、色相、结构都不动。
+          float skyPeak=max(art.r,max(art.g,art.b));
+          art*=1.0-rolloff*smoothstep(0.60,1.0,skyPeak);
           color=mix(color,art+color*0.30,skyMix);
           gl_FragColor=vec4(color,1.0);
         }`,
