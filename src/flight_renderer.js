@@ -300,7 +300,11 @@
     // v10：车道边缘是最强的水平引导线，换成高亮电青。
     // v12：0.92→0.72。全屏霓虹的视觉复核结论是"可走区域也在发光"，引导线不再是最亮的东西
     // 之后，墙的剪影和洋红警示带才重新拥有对比度。
-    glow('lane', 0x35f0ff, 0.72);
+    glow('lane', 0x35f0ff, 0.66);
+    // v13：危险物独立出"警示朱橙"。深空背景整片由洋红/紫/电青构成，唯独没有暖橙，
+    // 所以敌机和炮台不再靠"更亮的洋红"（那等于和星云抢亮度），而是靠色相跳出来：
+    // 翼尖灯、推进器、威胁环、炮台警戒带统一换成这个色相，和背景的冷色相区隔。
+    glow('hostile', 0xff713d);
 
     // 所有跑道和障碍按材质合批；长赛道不会按块创建对象或累积资源。
     function makeBatch(name, geometry, material, capacity = 2200) {
@@ -367,6 +371,7 @@
     const dimBatch = makeBatch('guidance_seams', box, materials.cyanDim, 4000);
     const amberBatch = makeBatch('warning_lights', box, materials.amber, 2200);
     const redBatch = makeBatch('hazard_lights', box, materials.red, 2200);
+    const hostileBatch = makeBatch('hostile_warning_lights', box, materials.hostile, 1600);
     const whiteBatch = makeBatch('weapon_tracers', box, materials.white, 160);
     const jewelBatch = makeBatch('energy_crystals', octahedron, materials.white, 500);
     const collarBatch = makeBatch('pickup_collars', torus, materials.white, 800);
@@ -408,7 +413,7 @@
     const droneWingBatch = makeBatch('enemy_swept_wings', horizontalHull([
       [0, 0.94], [0.30, 0.64], [1.26, -0.44], [1.08, -0.96], [0.28, -0.52],
       [0, -0.88], [-0.28, -0.52], [-1.08, -0.96], [-1.26, -0.44], [-0.30, 0.64],
-    ], 0.12, 0.019), materials.armor, 120);
+    ], 0.12, 0.019), materials.enemyArmor, 120);
     // 传感眼独立批次：逐帧实例色闪烁不会污染共享红灯批次的其它实例。
     const droneEyeBatch = makeBatch('drone_sensor_eyes', box, materials.red, 160);
     for (const batch of [enemyHullBatch, droneHullBatch, droneWingBatch, engineBatch]) batch.mesh.castShadow = true;
@@ -988,7 +993,7 @@
           engineBatch.add(x + side * 0.53, height * 0.72, z + 1.68, 0.16, 1.8, 0.16, Math.PI / 2);
           engineBatch.add(x + side * 0.53, height * 0.72, z + 2.12, 0.24, 0.24, 0.24, Math.PI / 2);
           redBatch.add(x + side * 0.53, height * 0.72, z + 2.61, 0.17, 0.17, 0.03);
-          amberBatch.add(x + side * hullWidth * 0.46, height * 0.65, z + 1.99, 0.055, height * 0.35, 0.02);
+          hostileBatch.add(x + side * hullWidth * 0.46, height * 0.65, z + 1.99, 0.055, height * 0.35, 0.02);
           for (let fin = 0; fin < 3; fin += 1) {
             edgeBatch.add(x + side * hullWidth * 0.43, height * (0.55 + fin * 0.075), z + 1.91,
               hullWidth * 0.13, 0.075, 0.16);
@@ -996,7 +1001,7 @@
         }
         // 底部琥珀警戒环标出固定炮台的占地区域，低飞掠过时仍有危险提示。
         collarBatch.add(x, 0.07, z, hullWidth * 0.82, hullWidth * 0.82, hullWidth * 0.82,
-          -Math.PI / 2, 0, 0, 0xffc36b);
+          -Math.PI / 2, 0, 0, 0xff713d);
       } else {
         // 简化模型与精细模型读取同一物理高度，不能只升起外观而把命中点留在地面。
         const altitude = Number.isFinite(enemy.altitude) ? Math.max(0, enemy.altitude) : 0;
@@ -1014,19 +1019,21 @@
         edgeBatch.add(x, y + 0.26, z + 1.03, 0.09, 0.025, 0.41);
         // 琥珀翼尖灯把翼展轮廓从深色星云背景里托出来。
         for (const side of [-1, 1]) {
-          amberBatch.add(x + side * 1.24, y - 0.04, z - 0.50, 0.085, 0.05, 0.17);
+          hostileBatch.add(x + side * 1.24, y - 0.04, z - 0.50, 0.085, 0.05, 0.17);
         }
+        // v13：甲板占位环，和 flight_objects 的敌机提示保持同一语言。
+        collarBatch.add(x, 0.062, z, 1.62, 1.62, 1.62, -Math.PI / 2, 0, 0, 0xff713d);
         for (const side of [-1, 1]) {
           enemyHullBatch.add(x + side * 0.91, y - 0.08, z - 0.47, 0.31, 0.33, 1.22);
           engineBatch.add(x + side * 0.91, y - 0.12, z - 1.13, 0.14, 0.22, 0.14, Math.PI / 2);
-          cyanBatch.add(x + side * 0.91, y - 0.12, z - 1.26, 0.13, 0.13, 0.10);
+          hostileBatch.add(x + side * 0.91, y - 0.12, z - 1.26, 0.13, 0.13, 0.10);
           edgeBatch.add(x + side * 0.75, y - 0.008, z - 0.03, 0.048, 0.04, 0.89, 0, side * 0.72);
         }
         if (enemy.state === 'warn' || enemy.state === 'move') {
           const side = Math.sign(enemy.toLane - enemy.fromLane);
           if (side) {
-            amberBatch.add(x + side * 1.3, y + 0.10, z, 0.11, 0.15, 0.70);
-            amberBatch.add(x + side * 1.48, y + 0.10, z + 0.25, 0.34, 0.15, 0.12, 0, side * 0.65);
+            hostileBatch.add(x + side * 1.3, y + 0.10, z, 0.11, 0.15, 0.70);
+            hostileBatch.add(x + side * 1.48, y + 0.10, z + 0.25, 0.34, 0.15, 0.12, 0, side * 0.65);
           }
         }
       }

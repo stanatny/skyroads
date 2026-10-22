@@ -34,11 +34,14 @@
         // 所以这一版船体贴图重画成"骨白装甲 + 珊瑚红横贯赛道条纹 + 电青边条 + 密集板缝"，
         // 混入提到 0.68，并加上假凹凸与青色边缘光——机身在这个满屏霓虹的世界里要靠
         // 自己的明暗层次"立"出来，而不是被环境光洗平。
+        // v13：追尾相机下船体只有约 90px 高，贴图细节到这个尺寸已经读不出来，所以这轮不
+        // 再加纹理，而是强化"轮廓"：边缘光 0.32→0.44、青色灯带 0.85→0.96，让机身在满屏
+        // 冷色背景前靠一圈亮边维持剪影。
         skin('ceramic', {
           albedo: { url: './assets/art/ship-hull.webp', scale: 0.46, mix: 0.68, luma: 0.52, gain: 0.62 },
-          emissive: { url: './assets/art/ship-emissive.webp', scale: 0.46, color: 0x6ef2ff, gain: 0.85 },
+          emissive: { url: './assets/art/ship-emissive.webp', scale: 0.46, color: 0x6ef2ff, gain: 0.96 },
           bump: 0.55,
-          rim: { color: 0x8ef6ff, gain: 0.32, power: 2.6 },
+          rim: { color: 0x8ef6ff, gain: 0.44, power: 2.6 },
           rough: 0.3,
         });
         skin('ivory', {
