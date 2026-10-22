@@ -97,7 +97,7 @@ test('drone geometry and all attached lights follow authoritative physical altit
 test('low and high patrols keep horizontal arrowheads readable at a fixed altitude', () => {
   const h = harness();
   // 警示箭头颜色取自模块导出的调色板：改美术方向不该让这条断言假失败。
-  const cueColor = h.Skyroads.flightObjects.palette.amber;
+  const cueColor = h.Skyroads.flightObjects.palette.cue;
   for (const altitude of [0, 720]) {
     for (const state of ['warn', 'move']) {
       for (const direction of [-1, 1]) {
