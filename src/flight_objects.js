@@ -2,17 +2,10 @@
 
 // 所有实体在初始化时合并建模；逐帧仅更新实例，不分配几何、材质或临时向量。
 (function attachFlightObjects(scope) {
-  // v10 "Neon Void" 调色：敌机走冷灰 + 洋红，奖励色保持高饱和以便一眼分辨。
-  // v13：敌机从"洋红"改到"警示朱橙"。背景整片是洋红/紫/电青，洋红涂装在高速下和星云
-  // 糊成一片（视觉复核：颜色冲突、剪影不突出）；暖橙在深空背景里是唯一没被占用的色相，
-  // 所以机体装甲、灯带、威胁环统一换到这一族，奖励色（翠绿/粉/紫/金/青）不受影响。
   const PALETTE = Object.freeze({
-    titanium: 0xb9c0d8, ivory: 0xe8e4f2, graphite: 0x121422, recess: 0x06070e,
-    cobalt: 0x3d2a72, crimson: 0x8e1f52, red: 0xff2f6d, emerald: 0x21d29a,
-    mint: 0x8dffe0, amber: 0xff4fa8, gold: 0xffd373, violet: 0xc06bff, cyan: 0x35f0ff,
-    hostile: 0xff713d, hostileGlow: 0xffa24a, rust: 0x6d2f16, gunmetal: 0x1d2129,
-    // 语义色：转向箭头/威胁提示用它。测试按名字取色，美术换色相不会造成假失败。
-    cue: 0xffa24a,
+    titanium: 0xb9cbd2, ivory: 0xe4e5d7, graphite: 0x172635, recess: 0x080f1a,
+    cobalt: 0x244b77, crimson: 0xc83b4b, red: 0xff654e, emerald: 0x24c68a,
+    mint: 0x95ffd3, amber: 0xf7a73d, gold: 0xffd373, violet: 0xa77aef, cyan: 0x50d9ed,
   });
   const PICKUP_COLORS = Object.freeze({
     FUEL: PALETTE.emerald, BOOST: PALETTE.amber, SLOW: PALETTE.violet,
@@ -29,37 +22,9 @@
       color: 0xffffff, vertexColors: true, metalness: 0.48, roughness: 0.35,
       emissive: 0x09131c, emissiveIntensity: 0.16,
     }));
-    // v8：敌机/炮台独立一份材质，让 HF 生成的绯红涂装不污染语义化的奖励配色。
-    const hostileMetal = own(new THREE.MeshStandardMaterial({
-      color: 0xffffff, vertexColors: true, metalness: 0.55, roughness: 0.30,
-      emissive: 0x1a0a0c, emissiveIntensity: 0.22,
-    }));
     const signal = own(new THREE.MeshBasicMaterial({
       color: 0xffffff, vertexColors: true, toneMapped: false,
     }));
-    // v10：奖励机体只借贴图的磨损/分缝亮度，颜色仍由 PICKUP_COLORS 决定（可读性优先）。
-    // 敌机则由无人机涂装贴图接管固有色：枪灰装甲 + 洋红传感器 + 青色技术标记。
-    const skins = scope.Skyroads && scope.Skyroads.artSkins;
-    if (skins && typeof skins.paint === 'function') {
-      skins.paint(metal, THREE, {
-        key: 'pickup-shell',
-        detail: { url: './assets/art/station-hull.webp', scale: 0.9, strength: 0.34, contrast: 2.3 },
-      });
-      // v11：无人机重新生成了一份"枪灰装甲 + 洋红单眼 + 密集紧固件"的涂装，固有色接管提到 0.90，
-      // 贴图频率提到 0.75（原来 0.52，机身只有一小块区域，等于没细节），并给机体加了洋红边缘光——
-      // 它必须一眼从满屏青色里分出来，否则玩家分不清"能撞的"和"能捡的"。
-      // v13：上一版的问题是它分出来的方式是"更亮的洋红"，而背景整片就是洋红。这一版
-      // 把贴图色往暖橙染（tint），固有色接管从 0.90 降到 0.72 让机体上的锈红/枪灰顶点色
-      // 重新参与（顶点色是逐部件写的，被 0.90 的接管基本抹平了），自发光也换到警示橙。
-      skins.paint(hostileMetal, THREE, {
-        key: 'drone-shell',
-        albedo: { url: './assets/art/drone-shell.webp', scale: 0.75, mix: 0.66, luma: 0.64, gain: 0.78, tint: 0xff9a5e },
-        emissive: { url: './assets/art/wall-emissive.webp', scale: 0.62, color: 0xff713d, gain: 0.90 },
-        bump: 0.7,
-        rim: { color: 0xff8a4a, gain: 0.34, power: 2.4 },
-        rough: 0.35,
-      });
-    }
     // 实体晶面保留环境反射及明暗面，内部亮面从分离的晶棱中透出。
     const crystal = own(new THREE.MeshPhysicalMaterial({
       color: 0xffffff, vertexColors: true, metalness: 0.03, roughness: 0.055,
@@ -81,13 +46,6 @@
       opacity: 0.78, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending, toneMapped: false,
     }));
-    // v14：锁定框材质。加色混合 + 不写深度，保证高速穿过窄桥时框线不会被前方的
-    // 墙体几何切掉；亮度由实例色控制，不额外做逐帧材质更新。
-    const lockMaterial = own(new THREE.MeshBasicMaterial({
-      color: 0xffffff, vertexColors: true, transparent: true, opacity: 0.85,
-      depthWrite: false, depthTest: false, toneMapped: false,
-      blending: THREE.AdditiveBlending,
-    }));
     const capacity = (config.RENDER_DISTANCE || 120) * (config.LANES || 7);
     const diagnostics = {};
     const pickups = {};
@@ -96,7 +54,7 @@
     function batch(name, builder, material, maximum = capacity, role = 'solid') {
       const geometry = own(builder.finish());
       const result = makeBatch(name, geometry, material, maximum);
-      if (result.mesh) result.mesh.castShadow = material === metal || material === hostileMetal;
+      if (result.mesh) result.mesh.castShadow = material === metal;
       const box = geometry.boundingBox;
       diagnostics[name] = {
         triangles: (geometry.index ? geometry.index.count : geometry.getAttribute('position').count) / 3,
@@ -129,13 +87,13 @@
     const crystalBatch = batch('object_fuel_facets', crystalShell, crystal, capacity + 96);
     const droneBody = builder(THREE);
     buildDrone(droneBody);
-    const drone = batch('object_drone_interceptor', droneBody, hostileMetal);
+    const drone = batch('object_drone_interceptor', droneBody, metal);
     const turretBaseBody = builder(THREE);
     const turretHeadBody = builder(THREE);
     const turretHeight = (config.TURRET_HEIGHT || 1900) * world.heightScale;
     buildTurret(turretBaseBody, turretHeadBody, turretHeight);
-    const turretBase = batch('object_turret_foundation', turretBaseBody, hostileMetal);
-    const turretHead = batch('object_turret_azimuth_head', turretHeadBody, hostileMetal);
+    const turretBase = batch('object_turret_foundation', turretBaseBody, metal);
+    const turretHead = batch('object_turret_azimuth_head', turretHeadBody, metal);
     const emitterBuilder = builder(THREE);
     emitterBuilder.gem(0, 0, 0, 1, 2, 0xffffff, 8);
     const emitter = batch('object_hostile_emitters', emitterBuilder, signal, capacity * 6);
@@ -145,25 +103,6 @@
       capacity * 3, 'effect');
     const sparks = batch('object_pickup_energy_sparks', planeBuilder(THREE), particleMaterial,
       capacity * 8, 'effect');
-    // v14：锁定框。一个单位正方形跨 −0.5…0.5，四角各两段短棒拼成 L 形刻线；
-    // 中心留空，所以它读起来是"框住目标"而不是又一团发光粒子。
-    const lockBuilder = builder(THREE);
-    {
-      const arm = 0.34;
-      const thick = 0.06;
-      const inner = 0.5 - arm / 2;
-      for (const sideX of [-1, 1]) {
-        for (const sideY of [-1, 1]) {
-          lockBuilder.box(sideX * 0.5, sideY * inner, 0, thick, arm, thick);
-          lockBuilder.box(sideX * inner, sideY * 0.5, 0, arm, thick, thick);
-        }
-      }
-    }
-    const lockCue = batch('object_hostile_lock_cue', lockBuilder, lockMaterial, 8, 'effect');
-    if (lockCue.mesh) {
-      lockCue.mesh.renderOrder = 950;
-      lockCue.mesh.castShadow = false;
-    }
     const pickupHeight = (config.FUEL_BLOCK_HEIGHT || 450) * world.heightScale;
     const droneTop = (config.DRONE_HEIGHT || 500) * world.heightScale;
 
@@ -230,10 +169,7 @@
             z + 1.67 * cosine - localX * sine, 0.095, 0.095, 0.028, Math.PI / 2, turn, 0, PALETTE.red);
         }
         emitter.add(x + 1.005 * sine, turretHeight * 0.89, z + 1.005 * cosine,
-          0.15, 0.06, 0.026, 0, turn, 0, PALETTE.hostile);
-        // v13：机身正下方贴一块暖橙"占位环"。远距离时敌机只有几十像素高，看不清机体朝向，
-        // 但甲板上这一圈光能立刻说明"这个车道有东西"，而且它跟着真正的碰撞车道走。
-        ground.add(x, 0.058, z, 2.05, 2.05, 1, -Math.PI / 2, 0, 0, PALETTE.hostile);
+          0.15, 0.06, 0.026, 0, turn, 0, PALETTE.red);
         return;
       }
       // 直接读取固定飞行高度；刚性机顶、灯和风扇保持同一高度，不另做升降动画。
@@ -244,47 +180,26 @@
       const red = Math.round(255 * intensity);
       const tint = (red << 16) | (Math.round(101 * intensity) << 8) | Math.round(78 * intensity);
       emitter.add(x, y + 0.18, z + 1.19, 0.15, 0.066, 0.032, 0, 0, 0, tint);
-      ground.add(x, y - 0.30, z, 1.55, 1.55, 1, -Math.PI / 2, 0, 0, PALETTE.hostile);
       for (let side = -1; side <= 1; side += 2) {
         emitter.add(x + side * 0.96, y - 0.04, z - 0.49, 0.095, 0.095, 0.045,
-          Math.PI / 2, 0, 0, PALETTE.hostile);
+          Math.PI / 2, 0, 0, PALETTE.red);
       }
-      // v13：机体下方的暖橙威胁环。它必须跟随机体一起升到真实盘旋高度——敌人视觉
-      // 一旦留在甲板上，玩家就会照着错误的高度判断能不能钻过去（tests/flight_objects
-      // 的"所有附着灯跟随权威物理高度"就是保这条）。
       if (enemy.state === 'warn' || enemy.state === 'move') {
         const direction = Math.sign(enemy.toLane - enemy.fromLane);
         if (direction) {
           // 两段翼尖灯构成真实方向箭头；即使不依赖闪烁也能读出下一次横移。
           emitter.add(x + direction * 1.17, y + 0.22, z + 0.16,
-            0.20, 0.035, 0.045, 0, 0, -direction * 0.55, PALETTE.cue);
+            0.20, 0.035, 0.045, 0, 0, -direction * 0.55, PALETTE.amber);
           emitter.add(x + direction * 1.17, y + 0.06, z + 0.16,
-            0.20, 0.035, 0.045, 0, 0, direction * 0.55, PALETTE.cue);
+            0.20, 0.035, 0.045, 0, 0, direction * 0.55, PALETTE.amber);
         }
       }
     }
 
-    /**
-     * 提交一个面向相机的锁定框。size 是世界单位边长，strength 是 0…1 的亮度系数；
-     * 只标一个目标，调用方负责挑"最近的那个威胁"。
-     */
-    function addLockCue(x, y, z, size = 2, strength = 1) {
-      const scale = Math.max(0, Math.min(1, strength));
-      const red = Math.round(255 * (0.55 + 0.45 * scale));
-      const green = Math.round(162 * (0.55 + 0.45 * scale));
-      const blue = Math.round(74 * (0.55 + 0.45 * scale));
-      lockCue.add(x, y, z, size, size, size, 0, 0, 0, (red << 16) | (green << 8) | blue);
-    }
-
     function getDiagnostics() {
-      return {
-        batchCount, capacity, droneTop, turretHeight, pickups: Object.keys(pickups),
-        // v14：本帧实际提交的锁定框数量（0 表示没有目标被锁上）。
-        lockCueInstances: lockCue.count,
-        models: diagnostics,
-      };
+      return { batchCount, capacity, droneTop, turretHeight, pickups: Object.keys(pickups), models: diagnostics };
     }
-    return { addPickup, addFuel, addEnemy, addLockCue, getDiagnostics };
+    return { addPickup, addFuel, addEnemy, getDiagnostics };
   }
 
   function buildEnergyPrism(body, lights) {
@@ -388,27 +303,25 @@
 
   function buildDrone(b) {
     // 机身前端为红色盾形传感罩，后端分离双风道，避免一个扁平三角形代替整机。
-    // v13：装甲从紫/洋红换成"枪灰 + 锈红"，机翼前缘用警示橙描边——机体不再和星云同色，
-    // 而且远距离时那两条橙色前缘就是剪影本身。
     b.hull([[-0.24, -0.97], [0.24, -0.97], [0.43, 0.28], [0.28, 0.85],
       [0, 1.30], [-0.28, 0.85], [-0.43, 0.28]], 0.30, 0.00, PALETTE.graphite);
     b.hull([[-0.19, -0.76], [0.19, -0.76], [0.29, 0.41], [0, 1.14], [-0.29, 0.41]],
-      0.21, 0.22, PALETTE.rust);
+      0.21, 0.22, PALETTE.crimson);
     b.hull([[-0.12, -0.49], [0.12, -0.49], [0.15, 0.28], [0, 0.67], [-0.15, 0.28]],
-      0.15, 0.415, PALETTE.gunmetal);
+      0.15, 0.415, PALETTE.cobalt);
     b.box(0, 0.185, 1.175, 0.36, 0.14, 0.045, PALETTE.recess);
     for (let side = -1; side <= 1; side += 2) {
       const mirror = (profile) => profile.map(([x, z]) => [side * x, z]);
       b.hull(mirror([[0.27, 0.45], [0.62, 0.57], [1.39, -0.45], [1.31, -0.94],
-        [0.70, -0.69], [0.29, -0.50]]), 0.15, -0.06, PALETTE.gunmetal);
+        [0.70, -0.69], [0.29, -0.50]]), 0.15, -0.06, PALETTE.cobalt);
       b.hull(mirror([[0.54, 0.41], [0.67, 0.48], [1.29, -0.41], [1.22, -0.66],
-        [0.84, -0.47]]), 0.09, 0.065, PALETTE.rust);
+        [0.84, -0.47]]), 0.09, 0.065, PALETTE.crimson);
       b.hull(mirror([[0.54, 0.44], [0.60, 0.57], [1.38, -0.44], [1.33, -0.54]]),
-        0.055, 0.10, PALETTE.hostileGlow);
+        0.055, 0.10, PALETTE.ivory);
       b.box(side * 0.58, 0.11, -0.27, 0.10, 0.08, 0.52, PALETTE.titanium, 0, side * 0.20);
       b.ring(side * 0.96, -0.04, -0.49, 0.27, 0.070, PALETTE.titanium);
       b.ring(side * 0.96, -0.04, -0.67, 0.29, 0.063, PALETTE.graphite);
-      b.cylinder(side * 0.96, -0.04, -0.79, 0.265, 0.18, PALETTE.rust, Math.PI / 2, 12);
+      b.cylinder(side * 0.96, -0.04, -0.79, 0.265, 0.18, PALETTE.cobalt, Math.PI / 2, 12);
       b.cylinder(side * 0.96, -0.04, -0.495, 0.075, 0.14, PALETTE.recess, Math.PI / 2, 10);
       for (let vane = 0; vane < 5; vane += 1) {
         const angle = vane * Math.PI * 2 / 5;
@@ -416,7 +329,7 @@
           -0.51, 0.22, 0.035, 0.075, PALETTE.graphite, 0.15, 0, angle + 0.25);
       }
       b.hull(mirror([[0.35, -0.66], [0.49, -1.14], [0.55, -1.09], [0.49, -0.66]]),
-        0.28, 0.13, PALETTE.rust);
+        0.28, 0.13, PALETTE.crimson);
       for (let vent = 0; vent < 3; vent += 1) {
         b.box(side * 0.21, 0.355, -0.38 + vent * 0.12, 0.075, 0.02, 0.045, PALETTE.titanium);
       }
@@ -424,16 +337,14 @@
   }
 
   function buildTurret(base, head, height) {
-    // v13：炮台和无人机共用一套敌意语言（枪灰结构 + 锈红装甲 + 暖橙描边），
-    // 玩家不需要分别学习"这个是墙、那个是炮"。
     base.cylinder(0, height * 0.045, 0, 1.18, height * 0.09, PALETTE.graphite, 0, 8);
     base.cylinder(0, height * 0.13, 0, 0.88, height * 0.13, PALETTE.titanium, 0, 8);
-    base.box(0, height * 0.33, 0, 1.35, height * 0.37, 1.64, PALETTE.gunmetal);
+    base.box(0, height * 0.33, 0, 1.35, height * 0.37, 1.64, PALETTE.cobalt);
     base.cylinder(0, height * 0.53, 0, 0.88, height * 0.095, PALETTE.graphite, 0, 16);
     base.cylinder(0, height * 0.58, 0, 0.76, height * 0.045, PALETTE.titanium, 0, 16);
     for (let side = -1; side <= 1; side += 2) {
       base.box(side * 0.83, height * 0.20, 0, 0.29, height * 0.32, 1.76, PALETTE.graphite);
-      base.box(side * 0.80, height * 0.12, 0.70, 0.39, height * 0.14, 0.36, PALETTE.rust);
+      base.box(side * 0.80, height * 0.12, 0.70, 0.39, height * 0.14, 0.36, PALETTE.crimson);
       base.box(side * 0.48, height * 0.34, 0.84, 0.16, height * 0.28, 0.10, PALETTE.titanium);
       for (let slot = 0; slot < 4; slot += 1) {
         base.box(side * 0.39, height * (0.24 + slot * 0.047), 0.90, 0.23, 0.07, 0.06, PALETTE.recess);
@@ -441,15 +352,15 @@
     }
     // 炮塔上体以转轴为原点，炮管和观察镜整体随方位角转动。
     head.box(0, height * 0.13, -0.11, 1.83, height * 0.33, 1.93, PALETTE.graphite);
-    head.box(0, height * 0.31, -0.13, 1.39, height * 0.12, 1.55, PALETTE.gunmetal);
-    head.box(0, height * 0.245, 0.88, 0.63, height * 0.10, 0.15, PALETTE.rust);
+    head.box(0, height * 0.31, -0.13, 1.39, height * 0.12, 1.55, PALETTE.cobalt);
+    head.box(0, height * 0.245, 0.88, 0.63, height * 0.10, 0.15, PALETTE.crimson);
     head.box(0, height * 0.26, 0.967, 0.34, 0.16, 0.03, PALETTE.recess);
     for (let side = -1; side <= 1; side += 2) {
-      head.box(side * 0.97, height * 0.11, -0.10, 0.31, height * 0.33, 1.92, PALETTE.rust);
-      head.box(side * 1.00, height * 0.17, 0.89, 0.13, height * 0.22, 0.09, PALETTE.hostileGlow);
+      head.box(side * 0.97, height * 0.11, -0.10, 0.31, height * 0.33, 1.92, PALETTE.crimson);
+      head.box(side * 1.00, height * 0.17, 0.89, 0.13, height * 0.22, 0.09, PALETTE.ivory);
       head.cylinder(side * 0.46, height * 0.07, 1.04, 0.21, 0.94, PALETTE.titanium, Math.PI / 2, 10);
       head.cylinder(side * 0.46, height * 0.07, 1.55, 0.25, 0.27, PALETTE.graphite, Math.PI / 2, 8);
-      head.ring(side * 0.46, height * 0.07, 1.69, 0.18, 0.028, PALETTE.rust);
+      head.ring(side * 0.46, height * 0.07, 1.69, 0.18, 0.028, PALETTE.crimson);
       head.cylinder(side * 0.46, height * 0.07, 1.675, 0.135, 0.016, PALETTE.recess, Math.PI / 2, 10);
       for (let fin = 0; fin < 5; fin += 1) {
         head.box(side * 1.135, height * (0.012 + fin * 0.038), -0.21,
@@ -643,7 +554,5 @@
   }
 
   scope.Skyroads = scope.Skyroads || {};
-  // palette 一并导出：测试要断言"警示箭头用的就是警示色"，不该把某个十六进制值写死在测试里
-  // （v8、v10 两次改色都因此把测试改成了假失败）。
-  scope.Skyroads.flightObjects = Object.freeze({ create, palette: PALETTE });
+  scope.Skyroads.flightObjects = Object.freeze({ create });
 })(globalThis);

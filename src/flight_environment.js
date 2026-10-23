@@ -64,7 +64,7 @@
     }
 
     function createMaterials() {
-      const shell = {
+      return {
         solid: own(new THREE.MeshStandardMaterial({
           color: 0xffffff, vertexColors: true, roughness: 0.59, metalness: 0.48,
           emissive: 0x07121b, emissiveIntensity: 0.22, fog: false,
@@ -77,21 +77,6 @@
           color: 0xffffff, vertexColors: true, toneMapped: false, fog: false,
         })),
       };
-      // v11：空间站外板重画成"石墨钢板 + 电青接缝 + 洋红灯窗 + 密集紧固件"，
-      // 频率从 0.10 提到 0.14（原来一块贴图铺满几十米，等于纯色），并加假凹凸。
-      // v12：灯光强度 0.78→0.55，远景平台不该和赛道抢亮度。
-      const skins = scope.Skyroads && scope.Skyroads.artSkins;
-      if (skins && typeof skins.paint === 'function') {
-        skins.paint(shell.solid, THREE, {
-          key: 'station',
-          albedo: { url: './assets/art/station-hull.webp', scale: 0.14, mix: 0.84, luma: 0.62, gain: 0.78 },
-          emissive: { url: './assets/art/wall-emissive.webp', scale: 0.13, color: 0xff5fc0, gain: 0.55 },
-          bump: 0.8,
-          rim: { color: 0xff5fc0, gain: 0.12, power: 3.4 },
-          rough: 0.4,
-        });
-      }
-      return shell;
     }
 
     // 航道外的服务平台提供近景视差；位置来自真实行程，暂停时自然冻结。

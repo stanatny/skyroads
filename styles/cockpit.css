@@ -20,16 +20,6 @@ html[data-renderer="cockpit"] {
 html[data-renderer="cockpit"] #flight-scene { position: fixed; inset: 0; z-index: 0; display: block; width: 100%; height: 100%; }
 html[data-renderer="cockpit"] #flight-scene[hidden] { display: none; }
 html[data-renderer="cockpit"] #game { position: relative; z-index: 1; background: transparent; }
-/* v10 "Neon Void"：画面四周压暗的暗角。这是零成本、零 GPU 通道的"摄影化"手段——
-   把视觉焦点从高亮星云强行拉回赛道中心，同时让霓虹发光边缘在暗背景上更锐利。
-   放在两层画布之上、HUD 之下，且不吃指针事件。 */
-html[data-renderer="cockpit"] #scene-vignette {
-  position: fixed; inset: 0; z-index: 2; display: none; pointer-events: none;
-  background:
-    radial-gradient(ellipse 82% 68% at 50% 56%, rgba(0, 0, 0, 0) 40%,
-      rgba(4, 1, 12, 0.46) 76%, rgba(2, 0, 8, 0.78) 100%);
-}
-html[data-renderer="cockpit"] #scene-vignette { display: block; }
 html[data-renderer="cockpit"] #command-frame { display: none; }
 #renderer-notice { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: max-content; max-width: 90vw; padding: 9px 14px; border: 1px solid #827052; background: #162029; color: #edcf9c; font-size: 12px; line-height: 1.5; text-align: center; }
 html[data-renderer="cockpit"] #cockpit-interface { position: fixed; inset: 0; z-index: 5; display: block; pointer-events: none; color: var(--cyan-soft); font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-variant-numeric: tabular-nums; }
