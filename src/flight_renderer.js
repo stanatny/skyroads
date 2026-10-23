@@ -52,9 +52,8 @@
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    // v10 "Neon Void"：曝光提回一档，底色换成深靛紫——v9 的"整体压暗"被玩家读成"没变化"。
-    renderer.toneMappingExposure = 1.28;
-    renderer.setClearColor(0x08030f);
+    renderer.toneMappingExposure = 1.20;
+    renderer.setClearColor(0x030710);
     const shadowsEnabled = Boolean(renderer.shadowMap);
     if (shadowsEnabled) {
       renderer.shadowMap.enabled = true;
@@ -62,14 +61,13 @@
     }
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x1a0b33, 150, 470);
+    scene.fog = new THREE.Fog(0x08121e, 150, 445);
     const camera = new THREE.PerspectiveCamera(64, 16 / 9, 0.035, 1400);
     const cameraTarget = new THREE.Vector3();
     camera.rotation.order = 'YXZ';
     scene.add(camera);
-    // 冷紫顶光 + 洋红地面反射：把整个场景的固有色统一压到"霓虹深空"的色相里。
-    scene.add(new THREE.HemisphereLight(0x9b7bff, 0x2a0f2e, 0.90));
-    const sunlight = new THREE.DirectionalLight(0xffd6f2, 2.85);
+    scene.add(new THREE.HemisphereLight(0xb5cee8, 0x111321, 1.0));
+    const sunlight = new THREE.DirectionalLight(0xdeecff, 2.45);
     sunlight.position.set(-30, 45, -104);
     sunlight.target.position.set(0, 0, -24);
     sunlight.castShadow = shadowsEnabled;
@@ -85,7 +83,7 @@
     sunlight.shadow.autoUpdate = false;
     scene.add(sunlight);
     scene.add(sunlight.target);
-    const fillLight = new THREE.DirectionalLight(0x69f0ff, 1.35);
+    const fillLight = new THREE.DirectionalLight(0xb9d9ff, 1.10);
     fillLight.position.set(-14, 12, 25);
     scene.add(fillLight);
 
@@ -106,52 +104,6 @@
     let highestVisibleSurface = 0;
     const materials = {};
     const own = (resource) => { resources.add(resource); return resource; };
-    // v7 美术方向：Hugging Face（FLUX.1-schnell）生成的贴图集中在 assets/art/。
-    // 全部异步加载且失败静默回退到程序化材质，测试环境（无 DOM/TextureLoader）直接跳过。
-    const artState = { loaded: [], failed: [] };
-    // v11：逐元素消融开关（`?noart=sky,planet`），让截图脚本能证明每张贴图都真的在画面上。
-    const artOff = (() => {
-      try {
-        const query = new URLSearchParams(location.search).get('noart');
-        return new Set((query || '').split(',').map((entry) => entry.trim()).filter(Boolean));
-      } catch (_) {
-        return new Set();
-      }
-    })();
-    function loadArt(name, onReady, options = {}) {
-      if (artOff.has(name)) {
-        artState.skipped = artState.skipped || [];
-        artState.skipped.push(name);
-        return false;
-      }
-      try {
-        if (typeof THREE.TextureLoader !== 'function') return false;
-        const loader = new THREE.TextureLoader();
-        loader.load(`./assets/art/${name}.webp`, (texture) => {
-          try {
-            texture.colorSpace = options.srgb === false ? THREE.NoColorSpace : THREE.SRGBColorSpace;
-            if (options.repeat) {
-              texture.wrapS = THREE.RepeatWrapping;
-              texture.wrapT = THREE.RepeatWrapping;
-              texture.repeat.set(options.repeat, options.repeat);
-            }
-            const maxAnisotropy = renderer.capabilities ? renderer.capabilities.getMaxAnisotropy() : 1;
-            texture.anisotropy = Math.min(options.anisotropy || 8, maxAnisotropy);
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            texture.generateMipmaps = true;
-            texture.needsUpdate = true;
-            own(texture);
-            onReady(texture);
-            artState.loaded.push(name);
-          } catch (_) {
-            artState.failed.push(name);
-          }
-        }, undefined, () => { artState.failed.push(name); });
-        return true;
-      } catch (_) {
-        return false;
-      }
-    }
     own(sunlight.shadow);
     const box = own(new THREE.BoxGeometry(1, 1, 1));
     const octahedron = own(new THREE.OctahedronGeometry(1));
@@ -209,9 +161,8 @@
       return materials[name];
     }
 
-    // v10：路面回到"黑曜石 + 电青车道"，琥珀让位给洋红，整条赛道的引导色由暖转冷。
-    metal('road', 0x0b0a14, 0.86, 0.20);
-    metal('roadInset', 0x191a26, 0.90, 0.30);
+    metal('road', 0x0c1722, 0.85, 0.18);
+    metal('roadInset', 0x253746, 0.94, 0.28);
     // 切角装甲板用颜色、微高度和粗糙度表达；远处由 mipmap 平滑退去，不加道路几何。
     const deckSize = 256;
     const deckPixels = new Uint8Array(deckSize * deckSize * 4);
@@ -270,57 +221,33 @@
     materials.roadInset.map = deckTexture(deckPixels, THREE.SRGBColorSpace);
     materials.roadInset.bumpMap = materials.roadInset.roughnessMap = deckTexture(deckSurface, THREE.NoColorSpace);
     materials.roadInset.bumpScale = 0.014;
-    // 甲板上表面换成 HF 生成的黑曜石/铬合金板贴图，微高度/粗糙度仍用程序化数据对齐光照。
-    // v10：贴图不再被冷钢色压暗，路面靠贴图本身的深黑 + 电青车道条拉开层次。
-    loadArt('road-deck', (texture) => {
-      materials.roadInset.map = texture;
-      materials.roadInset.color.set(0x7d86ad);
-      materials.roadInset.needsUpdate = true;
-    });
-    metal('structure', 0x171827, 0.48, 0.72);
-    metal('retainingWall', 0x3b3358, 0.72, 0.30);
-    materials.retainingWall.emissive.setHex(0x1b0f38);
-    materials.retainingWall.emissiveIntensity = 0.38;
-    metal('edge', 0x8e93c4, 0.34, 0.84);
-    metal('armor', 0x3a3552, 0.56, 0.64);
-    metal('obstacle', 0x50204a, 0.62, 0.48);
-    metal('cockpit', 0x0a0a16, 0.78, 0.24);
-    metal('cockpitInset', 0x02030a, 0.90, 0.14);
-    metal('brass', 0x8d5fb8, 0.36, 0.80);
-    metal('enemyArmor', 0x3c2f4e, 0.40, 0.62);
-    // v10：霓虹色板——电青是引导色，洋红是警示色，紫是环境色。
-    glow('cyan', 0x3ef2ff);
-    glow('cyanDim', 0x1b2a44);
-    glow('amber', 0xff4fa8);
-    glow('goldstar', 0xd9f4ff);
-    glow('red', 0xff2f6d);
-    glow('white', 0xdff6ff);
-    glow('violet', 0xb96bff);
-    glow('green', 0x62ffd0);
-    // v10：车道边缘是最强的水平引导线，换成高亮电青。
-    // v12：0.92→0.72。全屏霓虹的视觉复核结论是"可走区域也在发光"，引导线不再是最亮的东西
-    // 之后，墙的剪影和洋红警示带才重新拥有对比度。
-    glow('lane', 0x35f0ff, 0.66);
-    // v13：危险物独立出"警示朱橙"。深空背景整片由洋红/紫/电青构成，唯独没有暖橙，
-    // 所以敌机和炮台不再靠"更亮的洋红"（那等于和星云抢亮度），而是靠色相跳出来：
-    // 翼尖灯、推进器、威胁环、炮台警戒带统一换成这个色相，和背景的冷色相区隔。
-    glow('hostile', 0xff713d);
+    metal('structure', 0x1b2530, 0.52, 0.74);
+    metal('retainingWall', 0x405563, 0.76, 0.24);
+    materials.retainingWall.emissive.setHex(0x162631);
+    materials.retainingWall.emissiveIntensity = 0.26;
+    metal('edge', 0x71818a, 0.4, 0.8);
+    metal('armor', 0x47484b, 0.6, 0.65);
+    metal('obstacle', 0x78413d, 0.66, 0.45);
+    metal('cockpit', 0x0d131b, 0.8, 0.22);
+    metal('cockpitInset', 0x03070b, 0.92, 0.12);
+    metal('brass', 0x89714f, 0.4, 0.75);
+    metal('enemyArmor', 0x505f6b, 0.44, 0.62);
+    glow('cyan', 0x71e4f2);
+    glow('cyanDim', 0x233a48);
+    glow('amber', 0xffbd5e);
+    glow('goldstar', 0xffe1a1);
+    glow('red', 0xff5b49);
+    glow('white', 0xd9f5f6);
+    glow('violet', 0xbfa5ff);
+    glow('green', 0x82f2b0);
 
     // 所有跑道和障碍按材质合批；长赛道不会按块创建对象或累积资源。
     function makeBatch(name, geometry, material, capacity = 2200) {
       if (material.isMeshStandardMaterial && !material.userData.terrainShearNormals) {
-        // 与美术贴图注入共存：先跑已有的 onBeforeCompile（art-skins 的三轴投影），
-        // 再替换法线 chunk，否则后挂的一方会把另一方顶掉。
-        const previousCompile = material.onBeforeCompile;
-        const previousKey = material.customProgramCacheKey;
-        material.onBeforeCompile = function chainedCompile(shader, renderer) {
-          if (typeof previousCompile === 'function') previousCompile.call(this, shader, renderer);
+        material.onBeforeCompile = (shader) => {
           shader.vertexShader = shader.vertexShader.replace('#include <defaultnormal_vertex>', terrainNormalChunk);
         };
-        material.customProgramCacheKey = function chainedCacheKey() {
-          const inherited = typeof previousKey === 'function' ? previousKey.call(this) : '';
-          return `${inherited}|terrain_shear_v1`;
-        };
+        material.customProgramCacheKey = () => 'skyroads_terrain_shear_normals_v1';
         material.userData.terrainShearNormals = true;
       }
       const mesh = new THREE.InstancedMesh(geometry, material, capacity);
@@ -367,11 +294,9 @@
     const edgeBatch = makeBatch('metal_edges', box, materials.edge, 3500);
     const obstacleBatch = makeBatch('obstacle_hulls', box, materials.obstacle);
     const cyanBatch = makeBatch('guidance_lights', box, materials.cyan, 4000);
-    const laneBatch = makeBatch('lane_edge_lights', box, materials.lane, 4600);
     const dimBatch = makeBatch('guidance_seams', box, materials.cyanDim, 4000);
     const amberBatch = makeBatch('warning_lights', box, materials.amber, 2200);
     const redBatch = makeBatch('hazard_lights', box, materials.red, 2200);
-    const hostileBatch = makeBatch('hostile_warning_lights', box, materials.hostile, 1600);
     const whiteBatch = makeBatch('weapon_tracers', box, materials.white, 160);
     const jewelBatch = makeBatch('energy_crystals', octahedron, materials.white, 500);
     const collarBatch = makeBatch('pickup_collars', torus, materials.white, 800);
@@ -413,7 +338,7 @@
     const droneWingBatch = makeBatch('enemy_swept_wings', horizontalHull([
       [0, 0.94], [0.30, 0.64], [1.26, -0.44], [1.08, -0.96], [0.28, -0.52],
       [0, -0.88], [-0.28, -0.52], [-1.08, -0.96], [-1.26, -0.44], [-0.30, 0.64],
-    ], 0.12, 0.019), materials.enemyArmor, 120);
+    ], 0.12, 0.019), materials.armor, 120);
     // 传感眼独立批次：逐帧实例色闪烁不会污染共享红灯批次的其它实例。
     const droneEyeBatch = makeBatch('drone_sensor_eyes', box, materials.red, 160);
     for (const batch of [enemyHullBatch, droneHullBatch, droneWingBatch, engineBatch]) batch.mesh.castShadow = true;
@@ -545,8 +470,6 @@
     let currentState = null;
     let lastFrameMs = 0;
     let visibleSegments = 0;
-    // 每帧只保留一个锁定目标：判定在 renderEnemy 里累积，绘制在这帧路面画完之后。
-    let lockTarget = null;
     let clippedInstances = 0;
     let previousEntities = new Map();
     let frameEntities = new Map();
@@ -617,39 +540,6 @@
         sky.add(stars);
       }
 
-      // 天空穹顶：HF 生成的 equirect 深空全景接管星云，程序化 fbm 作为薄雾垫底。
-      // v10：全景完全接管（mix 1.0）——v9 的 0.82 混入让 HF 星云只剩一层灰雾。
-      if (galaxy && typeof galaxy.setSkyTexture === 'function') {
-        loadArt('sky', (texture) => { galaxy.setSkyTexture(texture, 1.0); });
-      }
-
-      // v10：星云 billboard 从"地平线上一丝暗示"改成两侧真正的巨型星云墙：洋红 + 电青，
-      // 加法混合提到 0.16/0.12，落在赛道两侧上方，让背景有可读的结构而不是一片黑。
-      const nebulaPlane = own(new THREE.PlaneGeometry(1, 1));
-      const nebulaLayers = [
-        { position: [-470, 148, -880], size: [960, 560], color: 0x9a35e0, opacity: 0.10 },
-        { position: [500, 118, -900], size: [1040, 600], color: 0x2ec4ff, opacity: 0.075 },
-      ].map((layer) => {
-        const nebulaMaterial = own(new THREE.MeshBasicMaterial({
-          color: layer.color, transparent: true, opacity: layer.opacity,
-          blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
-          side: THREE.DoubleSide, fog: false, toneMapped: false,
-        }));
-        const plane = new THREE.Mesh(nebulaPlane, nebulaMaterial);
-        plane.position.set(...layer.position);
-        plane.scale.set(layer.size[0], layer.size[1], 1);
-        plane.name = 'nebula_billboard';
-        plane.renderOrder = -9;
-        sky.add(plane);
-        return nebulaMaterial;
-      });
-      loadArt('nebula-veil', (texture) => {
-        for (const nebulaMaterial of nebulaLayers) {
-          nebulaMaterial.map = texture;
-          nebulaMaterial.needsUpdate = true;
-        }
-      });
-
       // 程序化行星材质保留可编辑参数，不请求外部贴图。
       const planetMaterial = own(new THREE.ShaderMaterial({
         uniforms: { sunDirection: { value: new THREE.Vector3(-0.7, 0.35, 0.7).normalize() } },
@@ -676,21 +566,9 @@
           }`,
         fog: false,
       }));
-      const planetPosition = [132, 112, -450];
-      // v10：行星从 74 放大到 96 并抬高，光环改成青色——背景里要有"大物体"才读得出换了世界。
-      const planetScale = 96;
-      const planet = mesh(sphere, planetMaterial, sky, planetPosition,
-        [planetScale, planetScale, planetScale], [0, 0, -0.28]);
+      const planetPosition = [120, 103, -450];
+      const planet = mesh(sphere, planetMaterial, sky, planetPosition, [74, 74, 74], [0, 0, -0.28]);
       planet.name = 'aurelia_gas_giant';
-      // 气态巨行星表面换成 HF 生成的行星贴图；未加载时保持程序化云带。
-      // v11：v10 的 emissive 0.55 是一层平涂的紫光，等于把贴图的云带对比度压低——
-      // 视觉复核读到的"糊成一团"有一半来自这里，而不是贴图本身。
-      loadArt('planet', (texture) => {
-        planet.material = own(new THREE.MeshStandardMaterial({
-          map: texture, roughness: 0.95, metalness: 0.02,
-          emissive: 0x1a0626, emissiveIntensity: 0.16, fog: false,
-        }));
-      });
       const ringGeometry = own(new THREE.RingGeometry(91, 121, 160));
       const ringMaterial = own(new THREE.ShaderMaterial({
         vertexShader: `varying vec2 ringPosition; void main() { ringPosition = position.xy;
@@ -700,30 +578,20 @@
             float bands = sin(r * 3.4) * 0.3 + sin(r * 11.0) * 0.15 + 0.55;
             float edge = smoothstep(91.0, 93.0, r) * (1.0 - smoothstep(117.0, 121.0, r));
             float gap = 1.0 - smoothstep(102.0, 103.0, r) * (1.0 - smoothstep(106.0, 107.0, r));
-            gl_FragColor = vec4(vec3(0.52, 0.94, 1.00), bands * edge * gap * 0.62);
+            gl_FragColor = vec4(vec3(0.40, 0.55, 0.63), bands * edge * gap * 0.46);
           }`,
         transparent: true, side: THREE.DoubleSide, fog: false, depthWrite: false,
       }));
       const ringRotation = [1.45, 0.15, -0.30];
-      mesh(ringGeometry, ringMaterial, sky, planetPosition,
-        [planetScale / 74, planetScale / 74, 1], ringRotation);
-      const iceMaterial = own(new THREE.MeshBasicMaterial({ color: 0x7fe8ff, opacity: 0.30,
+      mesh(ringGeometry, ringMaterial, sky, planetPosition, [1, 1, 1], ringRotation);
+      const iceMaterial = own(new THREE.MeshBasicMaterial({ color: 0x97b9ca, opacity: 0.27,
         transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false }));
       for (const radius of [88, 93, 100, 109, 116, 123]) {
         const thinRing = own(new THREE.RingGeometry(radius, radius + 0.32, 160));
-        mesh(thinRing, iceMaterial, sky, planetPosition,
-          [planetScale / 74, planetScale / 74, 1], ringRotation);
+        mesh(thinRing, iceMaterial, sky, planetPosition, [1, 1, 1], ringRotation);
       }
-      const moonMaterial = own(new THREE.MeshStandardMaterial({ color: 0x9a8ad0, roughness: 1, fog: false }));
-      const moonMesh = mesh(sphere, moonMaterial, sky, [-181, 87, -650], [24, 24, 24]);
-      loadArt('moon', (texture) => {
-        moonMaterial.map = texture;
-        moonMaterial.color.set(0xffffff);
-        moonMaterial.emissive = new THREE.Color(0x140b28);
-        moonMaterial.emissiveIntensity = 0.20;
-        moonMaterial.needsUpdate = true;
-        moonMesh.name = 'aurelia_ice_moon';
-      });
+      const moonMaterial = own(new THREE.MeshStandardMaterial({ color: 0x6a7e8a, roughness: 1, fog: false }));
+      mesh(sphere, moonMaterial, sky, [-181, 87, -650], [24, 24, 24]);
 
       if (scope.Skyroads.flightEnvironment) {
         orbitalEnvironment = scope.Skyroads.flightEnvironment.create({ THREE, parent: sky, materials, own });
@@ -786,7 +654,6 @@
       const end = Math.min(state.track.length, start + Math.min(120, config.RENDER_DISTANCE || 120));
       const laneWidth = WORLD.laneWidth;
       visibleSegments = end - start;
-      lockTarget = null;
       raisedTileCount = 0;
       highestVisibleSurface = 0;
       for (let index = start; index < end; index += 1) {
@@ -828,7 +695,7 @@
             if (!exposed) continue;
             const edgeX = x + side * (laneWidth / 2 - 0.055);
             edgeBatch.add(edgeX, -0.42, z, 0.09, 0.90, WORLD.segmentDepth - 0.05);
-            laneBatch.add(edgeX, 0.047, z, 0.085, 0.034, WORLD.segmentDepth - 0.2);
+            cyanBatch.add(edgeX, 0.047, z, 0.07, 0.032, WORLD.segmentDepth - 0.2);
             if (heightDifference > 0.04 && !floatingIsland) {
               const wallDepth = heightDifference + 0.80;
               // 立壁分为内缩背板、装甲面及外露竖肋；最外侧仍收在真实车道边界内。
@@ -900,35 +767,7 @@
         }
         if (index % 15 === 0) renderServiceMast(index, state, laneCount);
       }
-      renderLockCue(lockTarget, state, time);
       clearSurface();
-    }
-
-    // v14：把锁定框画在"目标所在位置"而不是固定在屏幕中央，玩家能直接读出它在哪条车道、
-    // 离自己多远。尺寸随段数放大（远处小、近处大），减少动态时保持恒定亮度不再心跳。
-    function renderLockCue(target, state, time) {
-      if (!target) return;
-      const size = Math.min(6.4, 1.9 + 0.115 * target.ahead);
-      const pulse = state.reducedMotion ? 0.85 : 0.62 + 0.38 * Math.abs(Math.sin(time * 5.2));
-      if (flightObjects && typeof flightObjects.addLockCue === 'function') {
-        flightObjects.addLockCue(target.x, target.y, target.z, size, pulse);
-        return;
-      }
-      // 简化渲染器没有实体批次时，用同一套短棒尺寸拼出同一个框。
-      const half = size / 2;
-      const arm = size * 0.34;
-      const thick = Math.max(0.03, size * 0.06);
-      const luminance = 0.55 + 0.45 * pulse;
-      const tint = (Math.round(255 * luminance) << 16)
-        | (Math.round(162 * luminance) << 8) | Math.round(74 * luminance);
-      for (const sideX of [-1, 1]) {
-        for (const sideY of [-1, 1]) {
-          hostileBatch.add(target.x + sideX * half, target.y + sideY * (half - arm / 2),
-            target.z, thick, arm, thick, 0, 0, 0, tint);
-          hostileBatch.add(target.x + sideX * (half - arm / 2), target.y + sideY * half,
-            target.z, arm, thick, thick, 0, 0, 0, tint);
-        }
-      }
     }
 
     function renderObstacle(type, x, z, index, time = 0) {
@@ -1004,24 +843,6 @@
       const lane = enemyLane(enemy);
       const x = laneX(lane, config.LANES);
       const z = segmentZ(index, state.position);
-      // v14：锁定提示。只标"当前车道前方最近的那一个威胁"——屏幕上同时出现多个锁定框
-      // 等于没有锁定。挡在你所在车道里、已经近到来得及反应（3 段以内太晚，46 段以外看不清）
-      // 才算是被锁定的目标；无人机按其真实插值车道判断，横移到你车道时立刻锁上。
-      const playerLane = state.movement ? state.movement.lanePosition : null;
-      const ahead = index - state.position;
-      if (playerLane !== null && Number.isFinite(playerLane) && ahead >= 3 && ahead <= 46
-        && Math.abs(lane - playerLane) <= 0.85
-        && (!lockTarget || ahead < lockTarget.ahead)) {
-        const altitude = Number.isFinite(enemy.altitude) ? Math.max(0, enemy.altitude) : 0;
-        lockTarget = {
-          ahead,
-          x,
-          z,
-          y: enemy.type === 'turret'
-            ? heightY(config.TURRET_HEIGHT || 1900) * 0.92
-            : heightY((config.DRONE_HEIGHT || 500) + altitude) + 0.62,
-        };
-      }
       useSurface(terrainTile(state, index, lane), z);
       frameEntities.set(enemy, {
         index, x,
@@ -1042,7 +863,7 @@
           engineBatch.add(x + side * 0.53, height * 0.72, z + 1.68, 0.16, 1.8, 0.16, Math.PI / 2);
           engineBatch.add(x + side * 0.53, height * 0.72, z + 2.12, 0.24, 0.24, 0.24, Math.PI / 2);
           redBatch.add(x + side * 0.53, height * 0.72, z + 2.61, 0.17, 0.17, 0.03);
-          hostileBatch.add(x + side * hullWidth * 0.46, height * 0.65, z + 1.99, 0.055, height * 0.35, 0.02);
+          amberBatch.add(x + side * hullWidth * 0.46, height * 0.65, z + 1.99, 0.055, height * 0.35, 0.02);
           for (let fin = 0; fin < 3; fin += 1) {
             edgeBatch.add(x + side * hullWidth * 0.43, height * (0.55 + fin * 0.075), z + 1.91,
               hullWidth * 0.13, 0.075, 0.16);
@@ -1050,7 +871,7 @@
         }
         // 底部琥珀警戒环标出固定炮台的占地区域，低飞掠过时仍有危险提示。
         collarBatch.add(x, 0.07, z, hullWidth * 0.82, hullWidth * 0.82, hullWidth * 0.82,
-          -Math.PI / 2, 0, 0, 0xff713d);
+          -Math.PI / 2, 0, 0, 0xffc36b);
       } else {
         // 简化模型与精细模型读取同一物理高度，不能只升起外观而把命中点留在地面。
         const altitude = Number.isFinite(enemy.altitude) ? Math.max(0, enemy.altitude) : 0;
@@ -1068,21 +889,19 @@
         edgeBatch.add(x, y + 0.26, z + 1.03, 0.09, 0.025, 0.41);
         // 琥珀翼尖灯把翼展轮廓从深色星云背景里托出来。
         for (const side of [-1, 1]) {
-          hostileBatch.add(x + side * 1.24, y - 0.04, z - 0.50, 0.085, 0.05, 0.17);
+          amberBatch.add(x + side * 1.24, y - 0.04, z - 0.50, 0.085, 0.05, 0.17);
         }
-        // v13：甲板占位环，和 flight_objects 的敌机提示保持同一语言。
-        collarBatch.add(x, 0.062, z, 1.62, 1.62, 1.62, -Math.PI / 2, 0, 0, 0xff713d);
         for (const side of [-1, 1]) {
           enemyHullBatch.add(x + side * 0.91, y - 0.08, z - 0.47, 0.31, 0.33, 1.22);
           engineBatch.add(x + side * 0.91, y - 0.12, z - 1.13, 0.14, 0.22, 0.14, Math.PI / 2);
-          hostileBatch.add(x + side * 0.91, y - 0.12, z - 1.26, 0.13, 0.13, 0.10);
+          cyanBatch.add(x + side * 0.91, y - 0.12, z - 1.26, 0.13, 0.13, 0.10);
           edgeBatch.add(x + side * 0.75, y - 0.008, z - 0.03, 0.048, 0.04, 0.89, 0, side * 0.72);
         }
         if (enemy.state === 'warn' || enemy.state === 'move') {
           const side = Math.sign(enemy.toLane - enemy.fromLane);
           if (side) {
-            hostileBatch.add(x + side * 1.3, y + 0.10, z, 0.11, 0.15, 0.70);
-            hostileBatch.add(x + side * 1.48, y + 0.10, z + 0.25, 0.34, 0.15, 0.12, 0, side * 0.65);
+            amberBatch.add(x + side * 1.3, y + 0.10, z, 0.11, 0.15, 0.70);
+            amberBatch.add(x + side * 1.48, y + 0.10, z + 0.25, 0.34, 0.15, 0.12, 0, side * 0.65);
           }
         }
       }
@@ -1290,7 +1109,6 @@
       return {
         renderer: 'webgl-chase',
         revision: THREE.REVISION,
-        art: { loaded: artState.loaded.slice(), failed: artState.failed.slice() },
         width: viewportWidth,
         height: viewportHeight,
         pixelRatio: renderer.getPixelRatio(),
@@ -1313,10 +1131,6 @@
           highestVisibleSurface,
         },
         lanePosition: currentState && currentState.movement ? currentState.movement.lanePosition : null,
-        // v14：锁定目标的实时读数，验收脚本和测试据此确认"框到底有没有画出来"。
-        lockedTarget: lockTarget
-          ? { ahead: Number(lockTarget.ahead.toFixed(2)), x: lockTarget.x, y: lockTarget.y, z: lockTarget.z }
-          : null,
         contextLost,
         disposed,
         environmentLighting,

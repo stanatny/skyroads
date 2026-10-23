@@ -2,21 +2,19 @@
 
 // 障碍模型在初始化时合并几何，运行时只提交实例矩阵。
 (function attachFlightObstacles(scope) {
-  // v10 "Neon Void" 调色：黑曜石板做主体，紫罗兰做凹槽，电青只留给可跳越标识带，
-  // 洋红承担警示（v8/v9 的象牙陶瓷 + 钴蓝 + 琥珀整条暖色路线换掉了）。
   const COLORS = Object.freeze({
-    steel: 0x9aa0c8,
-    armor: 0x2d1c58,
-    ceramic: 0x232637,
-    dark: 0x0c0e16,
-    recess: 0x05060c,
-    graphite: 0x1d2030,
-    copper: 0x8b5aa8,
-    cyan: 0x3cf0ff,
-    core: 0x1f8fc8,
-    amber: 0xff4fa8,
-    hazard: 0xff2f8f,
-    red: 0xff3b6b,
+    steel: 0xa7bdcd,
+    armor: 0x245aab,
+    ceramic: 0xe5e3d4,
+    dark: 0x17242f,
+    recess: 0x09151e,
+    graphite: 0x354553,
+    copper: 0x97754e,
+    cyan: 0x80dce5,
+    core: 0x368bae,
+    amber: 0xf5bd63,
+    hazard: 0xffad4e,
+    red: 0xff574a,
   });
 
   /**
@@ -32,30 +30,14 @@
     const solidMaterial = own(new THREE.MeshStandardMaterial({
       color: 0xffffff,
       vertexColors: true,
-      roughness: 0.40,
-      metalness: 0.42,
-      emissive: 0x120a24,
-      emissiveIntensity: 0.14,
+      roughness: 0.43,
+      metalness: 0.32,
+      emissive: 0x0b1620,
+      emissiveIntensity: 0.08,
     }));
     const lightMaterial = own(new THREE.MeshBasicMaterial({
       color: 0xffffff, vertexColors: true, toneMapped: false,
     }));
-    // v11：障碍贴图换成"密集微刻线 + 铆钉阵列"版本，固有色混入提到 0.88，并加入用贴图亮度
-    // 当高度场的假凹凸——板缝会被光照勾出立体感，远看不再是一块平涂的深色板。
-    // v12：光电平从 0.90 压到 0.45。视觉复核把"整面墙自发光"判成光污染：墙的青色和车道
-    // 引导线的青色亮度接近，玩家在怼脸帧里分不清"能走的"和"会撞的"。压暗自发光后，
-    // 墙面读作深色实体，洋红警示带（COLORS.hazard）和车道电青才重新拉出层次。
-    const skins = scope.Skyroads && scope.Skyroads.artSkins;
-    if (skins && typeof skins.paint === 'function') {
-      skins.paint(solidMaterial, THREE, {
-        key: 'wall',
-        albedo: { url: './assets/art/wall-armor.webp', scale: 0.23, mix: 0.88, luma: 0.58, gain: 0.80 },
-        emissive: { url: './assets/art/wall-emissive.webp', scale: 0.27, color: 0x7df3ff, gain: 0.45 },
-        bump: 0.9,
-        rim: { color: 0x2ec9ff, gain: 0.16, power: 3.2 },
-        rough: 0.45,
-      });
-    }
     const models = {};
     const specifications = {
       WALL_LOW: { height: config.WALL_LOW_HEIGHT || 600, build: buildLow },

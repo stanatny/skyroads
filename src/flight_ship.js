@@ -12,52 +12,17 @@
     model.scale.setScalar(visualScale);
     model.position.y = hoverOffset;
     group.add(model);
-    // v10 调色：珊瑚红陶瓷 + 象牙白 + 紫罗兰结构 + 电青引擎（钴蓝/金色在霓虹场景里会发灰）。
     const materials = {
-      ceramic: own(new THREE.MeshStandardMaterial({ color: 0xff8168, roughness: 0.30, metalness: 0.18 })),
-      titanium: own(new THREE.MeshStandardMaterial({ color: 0x111528, roughness: 0.32, metalness: 0.62 })),
-      edge: own(new THREE.MeshStandardMaterial({ color: 0x3d2a72, roughness: 0.28, metalness: 0.58 })),
-      ivory: own(new THREE.MeshStandardMaterial({ color: 0xfdf7ee, roughness: 0.34, metalness: 0.12 })),
-      gold: own(new THREE.MeshStandardMaterial({ color: 0xc06bff, roughness: 0.24, metalness: 0.74 })),
+      ceramic: own(new THREE.MeshStandardMaterial({ color: 0xed4936, roughness: 0.34, metalness: 0.22 })),
+      titanium: own(new THREE.MeshStandardMaterial({ color: 0x111d33, roughness: 0.34, metalness: 0.58 })),
+      edge: own(new THREE.MeshStandardMaterial({ color: 0x344966, roughness: 0.31, metalness: 0.56 })),
+      ivory: own(new THREE.MeshStandardMaterial({ color: 0xffeed7, roughness: 0.38, metalness: 0.14 })),
+      gold: own(new THREE.MeshStandardMaterial({ color: 0xd0a060, roughness: 0.28, metalness: 0.70 })),
       glass: own(new THREE.MeshPhysicalMaterial({ color: 0x061a30, roughness: 0.08, metalness: 0.24,
         clearcoat: 1, clearcoatRoughness: 0.08 })),
-      cyan: own(new THREE.MeshBasicMaterial({ color: 0x5df6ff, toneMapped: false })),
-      amber: own(new THREE.MeshBasicMaterial({ color: 0xff6bc8, toneMapped: false })),
+      cyan: own(new THREE.MeshBasicMaterial({ color: 0x79e7ff, toneMapped: false })),
+      amber: own(new THREE.MeshBasicMaterial({ color: 0xffcf76, toneMapped: false })),
     };
-    // v8：机体蒙皮由 HF 生成的象牙/珊瑚/钴蓝船体贴图接管固有色，自发光贴图补青色灯带。
-    // 深色结构件只吃一点点贴图色，避免机身失去明暗层次。
-    {
-      const skins = scope.Skyroads && scope.Skyroads.artSkins;
-      if (skins && typeof skins.paint === 'function') {
-        const skin = (key, options) => skins.paint(materials[key], THREE, { key: `ship-${key}`, ...options });
-        // v11：v10 的船体贴图被视觉复核判成"低对比度浅灰 → 远距离糊成一块"（6/10），
-        // 所以这一版船体贴图重画成"骨白装甲 + 珊瑚红横贯赛道条纹 + 电青边条 + 密集板缝"，
-        // 混入提到 0.68，并加上假凹凸与青色边缘光——机身在这个满屏霓虹的世界里要靠
-        // 自己的明暗层次"立"出来，而不是被环境光洗平。
-        // v13：追尾相机下船体只有约 90px 高，贴图细节到这个尺寸已经读不出来，所以这轮不
-        // 再加纹理，而是强化"轮廓"：边缘光 0.32→0.44、青色灯带 0.85→0.96，让机身在满屏
-        // 冷色背景前靠一圈亮边维持剪影。
-        skin('ceramic', {
-          albedo: { url: './assets/art/ship-hull.webp', scale: 0.46, mix: 0.68, luma: 0.52, gain: 0.62 },
-          emissive: { url: './assets/art/ship-emissive.webp', scale: 0.46, color: 0x6ef2ff, gain: 0.96 },
-          bump: 0.55,
-          rim: { color: 0x8ef6ff, gain: 0.44, power: 2.6 },
-          rough: 0.3,
-        });
-        skin('ivory', {
-          albedo: { url: './assets/art/ship-hull.webp', scale: 0.52, mix: 0.66, luma: 0.50, gain: 0.58 },
-          bump: 0.5,
-        });
-        skin('edge', {
-          albedo: { url: './assets/art/ship-hull.webp', scale: 0.56, mix: 0.60, luma: 0.46, gain: 0.52 },
-          bump: 0.45,
-        });
-        skin('titanium', {
-          albedo: { url: './assets/art/ship-hull.webp', scale: 0.56, mix: 0.50, luma: 0.40, gain: 0.46 },
-          bump: 0.4,
-        });
-      }
-    }
     function plasmaMaterial(color) {
       return own(new THREE.ShaderMaterial({
         uniforms: { color: { value: new THREE.Color(color) }, phase: { value: 0 } },
