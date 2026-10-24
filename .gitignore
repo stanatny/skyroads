@@ -23,6 +23,10 @@ app/AppIcon.iconset/
 !.agent/skills/ship-browser-games/
 !.agent/skills/ship-browser-games/**
 
+# game-ui-polish skill：游戏 UI 视觉打磨工作流沉淀
+!.agent/skills/game-ui-polish/
+!.agent/skills/game-ui-polish/**
+
 # Python cache
 __pycache__/
 
